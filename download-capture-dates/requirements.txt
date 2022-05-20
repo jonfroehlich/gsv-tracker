@@ -1,0 +1,15 @@
+# python>=3.10
+# futures # futures is standard in python 3 https://stackoverflow.com/a/54338599/388117
+haversine
+scipy
+requests
+shapely
+pandas
+
+# To get shapely installed on Windows, you must install Shapely yourself
+# using: https://www.lfd.uci.edu/~gohlke/pythonlibs/#shapely
+# Because you'll otherwise get an error:
+#  WindowsError: [Error 126] The specified module could not be found
+# I downloaded Shapely-1.6.4.post2-cp27-cp27m-win_amd64.whl
+# and then typed pip install Shapely-1.6.4.post2-cp27-cp27m-win_amd64.whl
+# shapely==1.7.1
