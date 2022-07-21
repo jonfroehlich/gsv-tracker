@@ -1,5 +1,5 @@
 # gsv-capture-dates
-In this project, we aim to analyze patterns in Google Street View drivethroughs across the world and examine spatio-temporal patterns such as:
+In this project, we aim to analyze patterns in Google Street View data collection and examine spatio-temporal patterns such as:
 - What areas of the world are most frequently updated and why might this be (look at density patterns, socio-economics, etc.)
 - What areas of the world have been most recently updated
 
