@@ -6,9 +6,10 @@ from shapely import wkb
 from shapely.geometry import LineString
 
 # Based on: https://github.com/ProjectSidewalk/SidewalkWebpage/blob/develop/check_streets_for_imagery.py
-# Create CSV from street_edge table with street_edge_id, x1, y1, x2, y2, geom.
-# Name it street_edge_endpoints.csv and put it in the root directory, then run this script.
-# It will output a CSV called gsv_capture_dates.csv, which is a table of capture dates for panos on those streets
+# which creates a .csv from Project Sidewalk's street_edge table with street_edge_id, x1, y1, x2, y2, geom.
+# Name this .csv "street_edge_endpoints.csv" and put it in the root directory, then run this script.
+# This script will output a CSV called gsv_capture_dates.csv, which is a table of capture dates for 
+# panos on those streets
 
 # To run this in VSCode
 #  1. Open Terminal
