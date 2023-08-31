@@ -2,12 +2,17 @@
 Google Street View has become a primary scientific instrument in studying the physical world, from urban forestry to computer vision. However, little work examines *where* Google Street View exists and *how frequently* the GSV pano dataset is updated.
 
 In this project, we aim to analyze patterns in Google Street View data collection and examine spatio-temporal patterns such as:
-- What areas of the world are most **frequently updated** and why might this be (look at density patterns, socio-economics, etc.)
-- What areas of the world have been most **recently updated**
 
-Our goal is to uncover potential biases/issues in GSV data collection that may impact how we use the tool as a scientific instrument.
+- What areas of the world are most **frequently updated** and why might this be (e.g., population density patterns, socio-economics, road types, etc.)
+- What areas of the world have been most **recently updated**
+- Where street view imagery doesn't exist at all
+
+Our goal is to uncover potential biases/issues in GSV data collection that may impact how researchers use the tool as a scientific instrument.
 
 Our work builds on:
+
+- Curtis, J.W., Curtis, A., Mapes, J. et al. [Using google street view for systematic observation of the built environment: analysis of spatio-temporal instability of imagery dates](https://doi.org/10.1186/1476-072X-12-53). Int J Health Geogr 12, 53 (2013). 
+
 - Smith, Kaufman, & Mooney, [Google street view image availability in the Bronx and San Diego, 2007–2020: Understanding potential biases in virtual audits of urban built environments](https://www.sciencedirect.com/science/article/abs/pii/S1353829221001970), Health & Place, 2021
 - Fry, Mooney, Roriguez, Caiaffa, Lovasi, [Assessing Google Street View Image Availability in Latin American Cities](https://link.springer.com/article/10.1007/s11524-019-00408-7), J. or Urban Health, 2020
 
