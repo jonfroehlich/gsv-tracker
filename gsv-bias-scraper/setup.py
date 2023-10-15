@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='gsv_bias_scraper',
+    name='gsv-bias-scraper',
     version='1.0',
     packages=find_packages(),
     install_requires=[
@@ -11,13 +11,13 @@ setup(
         'matplotlib',
         'pandas',
         'geopy',
-        'asyncio',
         'httpx',
         'tenacity',
+        'asyncio'
     ],
     entry_points={
         'console_scripts': [
-            'gsv_bias_scraper = scraper:main'
+            'gsv-bias-scraper = scraper:main'
         ]
     },
 )

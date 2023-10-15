@@ -13,8 +13,9 @@ import nest_asyncio
 import argparse
 
 
-Jingfeng_API_KEY = "AIzaSyAKPZf-Z4LNIOTan3XrTD-WPrdXPNddGnI"
+API_KEY = os.environ.get('API_KEY')
 
+print(API_KEY)
 
 def get_coordinates(city_name):
     """
@@ -62,7 +63,7 @@ async def send_maps_request(async_client, i, combined_df, pbar, sem):
     base_url = 'https://maps.googleapis.com/maps/api/streetview/metadata'
     params = {
         'location': location_coords,
-        'key': Jingfeng_API_KEY,
+        'key': API_KEY,
         'source': 'outdoor'
     }
 
