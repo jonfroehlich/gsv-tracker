@@ -1,0 +1,17 @@
+name: gsv-bias-scraper
+channels:
+  - anaconda
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - numpy
+  - folium
+  - tqdm
+  - matplotlib
+  - pandas
+  - httpx
+  - tenacity
+variables:
+  API_KEY: "AIzaSyAKPZf-Z4LNIOTan3XrTD-WPrdXPNddGnI"
+prefix: /Users/jingfengyang/Desktop/gsv-capture-dates/gsv-bias-scraper
