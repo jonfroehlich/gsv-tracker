@@ -12,6 +12,6 @@ dependencies:
   - pandas
   - httpx
   - tenacity
+  - nest_asyncio
 variables:
   API_KEY: "AIzaSyAKPZf-Z4LNIOTan3XrTD-WPrdXPNddGnI"
-prefix: /Users/jingfengyang/Desktop/gsv-capture-dates/gsv-bias-scraper
