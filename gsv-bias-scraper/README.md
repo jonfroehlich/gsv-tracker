@@ -3,7 +3,7 @@
 
 Google Street View has become a primary scientific instrument in studying the physical world, from urban forestry to computer vision. However, little work examines where Google Street View exists and how frequently the GSV pano dataset is updated.
 
-The `gsv_bias_scraper` command is designed to scrap the availability of Google Street View (GSV) data in a specified city's bounding area by dividing the specified area into a discretized grid and make API request at every intersection in the grid. 
+The `gsv_metadata_scraper` command is designed to scrap the availability of Google Street View (GSV) data in a specified city's bounding area by dividing the specified area into a discretized grid and make API request at every intersection in the grid. 
 
 The `visualize` command is designed to visualize the availability of Google Street View (GSV) data in a specified city's bounding area. It showcases the distribution of GSV data both temporally (over time) and spatially (across the specified region).
 
@@ -46,7 +46,7 @@ done
 
 The command line tool contains one required argument `city_name`,
 
-```gsv_bias_scraper Berkeley```
+```gsv_metadata_scraper Berkeley```
 
 and five optional arguments:
 
