@@ -10,7 +10,7 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 import nest_asyncio
 import argparse
 
-API_KEY = "AIzaSyAKPZf-Z4LNIOTan3XrTD-WPrdXPNddGnI"
+API_KEY = os.environ.get('api_key')
 
 def get_coordinates(city_name):
     """

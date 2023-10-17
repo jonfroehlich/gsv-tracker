@@ -1,0 +1,15 @@
+name: gsv-bias-venv
+channels:
+  - default
+  - conda-forge
+dependencies:
+  - numpy
+  - folium
+  - tqdm
+  - matplotlib
+  - pandas
+  - httpx
+  - tenacity
+  - nest-asyncio
+variables:
+  api_key: "Your Google API key"  # Replace with your actual API key
