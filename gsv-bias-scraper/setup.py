@@ -3,11 +3,20 @@ from setuptools import setup, find_packages
 setup(
     name='gsv-bias',
     version='1.0',
-    packages=find_packages(),
+    install_requires=[
+        'numpy',
+        'folium',
+        'tqdm',
+        'matplotlib',
+        'pandas',
+        'httpx',
+        'tenacity',
+        'nest-asyncio',
+    ],
     entry_points={
         'console_scripts': [
-            'gsv-metadata-scraper = gsv-metadata-scraper:main',
-            'visualize = visualization:main'
+            'scrape = scraper:main',
+            'visualize = visualization:main',
         ]
     },
 )
