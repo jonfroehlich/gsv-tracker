@@ -3,7 +3,7 @@
 
 Google Street View has become a primary scientific instrument in studying the physical world, from urban forestry to computer vision. However, little work examines where Google Street View exists and how frequently the GSV pano dataset is updated.
 
-The `gsv_metadata_scraper` command is designed to scrap the availability of Google Street View (GSV) data in a specified city's bounding area by dividing the specified area into a discretized grid and make API request at every intersection in the grid. 
+The `scrape` command is designed to scrap the availability of Google Street View (GSV) data in a specified city's bounding area by dividing the specified area into a discretized grid and make API request at every intersection in the grid. 
 
 The `visualize` command is designed to visualize the availability of Google Street View (GSV) data in a specified city's bounding area. It showcases the distribution of GSV data both temporally (over time) and spatially (across the specified region).
 
@@ -12,7 +12,7 @@ The `visualize` command is designed to visualize the availability of Google Stre
 
 ## Step 2: Navigate to the repository directory:
 
-## Step 3: Create a virtual environment
+## Step 3: Create a virtual environment by using `anaconda3`
 
 ```conda env create -f environment.yml```
 
@@ -23,7 +23,7 @@ done
 #
 # To activate this environment, use
 #
-#     $ conda activate gsv-date-analysis
+#     $ conda activate gsv-bias-venv
 #
 # To deactivate an active environment, use
 #
@@ -32,28 +32,28 @@ done
 
 ## Step 4: Activate the virtual environment
 
-```conda activate gsv-bias-scraper```
+```conda activate gsv-bias-venv```
 
-## Step 5: Install the Package in Editable Mode:
+## Step 5: Install the command entry points:
 
-```pip3 install -e .``` 
+```pip3 install .``` 
 
-## Step 6: Set the environment variable key as your own Google API key:
+## Step 6: Set the environment variable key in `environment.yml`  as your own Google API key:
 
-```API_KEY: "Your Goole API Key"``` 
+```API_KEY: "Your Goolge API Key"``` 
 
 ## Step 7: Call the command line tools:
 
 The command line tool contains one required argument `city_name`,
 
-```gsv_metadata_scraper Berkeley```
+```scrape Berkeley```
 
-and five optional arguments:
+and four optional arguments:
 
-```gsv_bias_scraper Berkeley --output / --height 1500 --length 1500 --skipped 30```
+```scrape Berkeley --output / --height 1500 --length 1500 --skipped 30```
 
 - `city_name`: Name of the city to get coordinates for.
-- `output`: Relative path to store all gsv data and visualization results, CWD by default.
+- `output`: Relative path to store all GSV data and visualization results, CWD by default.
 - `height`: Half of height of the bounding box to scrap data, by default 1000 meters.
 - `width`: Half of width of the bounding box to scrap data, by default equals to `lat_radius_meter`.
 - `skipped`: Distance between two intersections on the gird, by default 30 meters.
@@ -67,22 +67,19 @@ if you want to make visualization based on scraper data (make sure to scrap the 
 - `years`: Years to consider for visualization, by default from 2007 to now.
 - `height`: Half of height of the bounding box to visualize data, by default 1000 meters.
 - `width`: Half of width of the bounding box to visualize data, by default equals to `lat_radius_meter`.
-- `skipped`: Should be the same as the `skipped` of data CSV the user wants to make visualization on, by default 30 meters.
+- `skipped`: Should be the same as the `skipped` of the scraped data CSV that the user wants to make visualization on, by default 30 meters.
 
 
 ## Dependencies:
 
 1. `NumPy`
 2. `Folium`
-3. `os`
 4. `tqdm`
 5. `Matplotlib`
 6. `Pandas`
-7. `Geopy`
-8. `datetime`
-9. `Asyncio`
 10. `httpx`
 11. `tenacity`
+12. `nest-asyncio`
 
 
 ## Key Functions and Descriptions:
@@ -161,7 +158,7 @@ if you want to make visualization based on scraper data (make sure to scrap the 
       - `height` (`int`): Half of height of the bounding box to scrap data, by default 1000 meters.
       - `width` (`int`): Half of width of the bounding box to scrap data, by default equals to `lat_radius_meter`.
       - `skipped` (`int`): Distance between two intersections on the gird, by default 30 meters.
-   - **Outputs**: A CSV containing all gsv availability data, stored in the directory called `city_name` in `output`, uniquely defined by city name and skipped meters.
+   - **Outputs**: A CSV containing all GSV availability data, stored in the directory called `city_name` in `output`, uniquely defined by city name and skipped meters.
 
 10. **`visualize(city_name, output, years, height, width, skipped)`**
 
@@ -172,5 +169,5 @@ if you want to make visualization based on scraper data (make sure to scrap the 
       - `years` (a set of `int`): Years to consider for visualization, by default from 2007 to now.
       - `height` (`int`): Half of height of the bounding box to visualize data, by default 1000 meters.
       - `width` (`int`): Half of width of the bounding box to visualize data, by default equals to `lat_radius_meter`.
-      - `skipped` (`int`): Should be the same as the `skipped` of data CSV the user wants to make visualization on, by default 30 meters.
+      - `skipped` (`int`): Should be the same as the `skipped` of the scraped data CSV that the user wants to make visualization on, by default 30 meters.
    - **Outputs**: Making a histogram, a colored geo map, and a folium map based on the CSV data the user scrapped.
