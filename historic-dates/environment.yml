@@ -1,0 +1,8 @@
+name: my-selenium-environment
+channels:
+  - conda-forge
+dependencies:
+  - python=3.8  # Choose your desired Python version
+  - selenium
+  - ipykernel
+  - webdriver-manager
