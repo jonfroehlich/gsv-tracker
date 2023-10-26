@@ -13,4 +13,4 @@ dependencies:
   - nest-asyncio=1.5.8 
   - geopy=2.4.0
 variables:
-  api_key: "Your Google API Key"  # Replace with your actual API key
+  api_key: "AIzaSyAKPZf-Z4LNIOTan3XrTD-WPrdXPNddGnI"  # Replace with your actual API key
