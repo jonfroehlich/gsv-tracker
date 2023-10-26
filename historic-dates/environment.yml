@@ -1,8 +1,7 @@
-name: my-selenium-environment
+name: historic-dates-venv
 channels:
   - conda-forge
 dependencies:
   - python=3.8  # Choose your desired Python version
-  - selenium
-  - ipykernel
-  - webdriver-manager
+  - selenium=4.14.0
+  - ipykernel=6.26.0
