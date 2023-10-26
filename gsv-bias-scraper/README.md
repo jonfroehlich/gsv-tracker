@@ -52,7 +52,7 @@ and four optional arguments:
 
 ```scrape Berkeley --output / --height 1500 --length 1500 --skipped 30```
 
-- `city_name`: Name of the city to get coordinates for.
+- `city_name`: Name of the city to get coordinates for; if need to specify states, follow the format "city_name, state_name."
 - `output`: Relative path to store all GSV data and visualization results, CWD by default.
 - `height`: Half of height of the bounding box to scrap data, by default 1000 meters.
 - `width`: Half of width of the bounding box to scrap data, by default equals to `lat_radius_meter`.
@@ -62,7 +62,7 @@ if you want to make visualization based on scraper data (make sure to scrap the 
 
 ```visualize Berkeley --output / --years 2021 --height 1500 --length 1500 --skipped 30```
 
-- `city_name`: Name of the city you want to make visualizations.
+- `city_name`: Name of the city you want to make visualizations; if need to specify states, follow the format "city_name, state_name."
 - `output`: Relative path to store all visualizations, CWD by default, should be the same as the path to `city_name` directory that contains the data CSV.
 - `years`: Years to consider for visualization, by default from 2007 to now.
 - `height`: Half of height of the bounding box to visualize data, by default 1000 meters.
