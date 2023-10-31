@@ -7,12 +7,13 @@ The `scrape` command is designed to scrap the availability of Google Street View
 The `visualize` command is designed to visualize the availability of Google Street View (GSV) data in a specified city's bounding area. It showcases the distribution of GSV data both temporally (over time) and spatially (across the specified region).
 
 ## Setting up the environment
+Below, we cover setting up the environment from your terminal. Note: in Windows, you must start Anaconda's powershell prompt.
 
 **Step 1:** Clone or download this repository to your local machine:
 
-**Step 2:** Navigate to the repository directory:
+**Step 2:** Navigate to the repository directory from the command line:
 
-**Step 3:** Create a virtual environment by using `anaconda3`
+**Step 3:** Create a virtual environment by using `anaconda3` from the command line
 
 ```conda env create -f environment.yml```
 
@@ -41,6 +42,16 @@ done
 **Step 6:** Set the environment variable key in `environment.yml`  as your own Google API key:
 
 ```API_KEY: "Your Google API Key"``` 
+
+## Setting up the environment in VSCode
+
+**Step 1:** Once you've cloned the repo, open `gsv-bias-scraper` in VSCode.
+
+**Step 2:** You need to setup [VSCode to use Conda](https://code.visualstudio.com/docs/python/environments#_using-the-create-environment-command). Type `Ctrl-Shift+P` to bring up the Command Palette. Search for "Python: Create Environment."
+
+**Step 3:** VSCode might show a few different choices like **Venv** and **Conda**. Select **Conda**.
+
+**Step 4:** Select the Python version you want to use for the project. I selected Python 3.11. After selecting the desired Python version, VSCode will read the `environment.yml` file and install all requirements/dependencies automatically. This might take a while. You can view progress by selecting the "Show logs" link in the pop-up notification.
 
 ## Running the tool
 
