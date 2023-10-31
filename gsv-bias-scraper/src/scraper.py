@@ -105,9 +105,9 @@ async def get_dates(combined_df, max_concurrent_requests=500):
     return rows
 
 
-def scrap(lats, lons, output_file_path):
+def scrape(lats, lons, output_file_path):
     """
-    Scrap Google Street View data for a given city within specified coordinates.
+    Scrape Google Street View data for a given city within specified coordinates.
 
     Args:
     - lats, lons (list): Lists containing latitude and longitude coordinates.
@@ -151,8 +151,8 @@ def GSVBias(city, output=os.getcwd(), height=1000, width = -1, skipped=30):
     Parameters:
     - `city_name` (`str`): Name of the city to get coordinates for.
     - `output` (`str`): Relative path to store the data CSV, CWD by default.
-    - `height` (`int`): Half of height of the bounding box to scrap data, by default 1000 meters.
-    - `width` (`int`): Half of width of the bounding box to scrap data, by default equals to `lat_radius_meter`.
+    - `height` (`int`): Half of height of the bounding box to scrape data, by default 1000 meters.
+    - `width` (`int`): Half of width of the bounding box to scrape data, by default equals to `lat_radius_meter`.
     - `skipped` (`int`): Distance between two intersections on the gird, by default 30 meters.
 
     Outputs:
@@ -191,7 +191,7 @@ def GSVBias(city, output=os.getcwd(), height=1000, width = -1, skipped=30):
     if not os.path.exists(cwd_city):
         os.makedirs(cwd_city)
 
-    scrap(lats, lons, cwd_city + f'/{city}_{skipped}_coords.csv')
+    scrape(lats, lons, cwd_city + f'/{city}_{skipped}_coords.csv')
 
 
 def parse_arguments():
