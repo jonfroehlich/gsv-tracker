@@ -41,7 +41,11 @@ done
 
 ## Step 6: Set the environment variable key in as your own Google API key:
 
-```conda env config vars set api_key=your_key``` 
+```conda env config vars set google_api_key=your_key``` 
+
+## Step 7: To make the API key changes take effect, reactive your environment:
+
+```conda activate gsv-bias-venv```
 
 ## Setting up the environment in VSCode
 
