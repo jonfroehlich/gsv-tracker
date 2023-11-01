@@ -40,19 +40,12 @@ def make_hist(df, output_file_path):
 
     df_copy = df.copy()
 
-    none_count = len(df_copy[df_copy['date'] == 'None'])
-    not_none_count = len(df_copy) - none_count
-
     df_copy = df_copy[df_copy['date'].notna() & (df_copy['date'] != 'None')]
     df_copy['date'] = pd.to_datetime(df_copy['date'], format='%Y-%m', errors='coerce')
     df_copy = df_copy[df_copy['date'].notna()]
 
     plt.figure(figsize=(12, 7))
     plt.hist(df_copy['date'], bins=50, edgecolor='black', alpha=0.7)
-
-    plt.text(0.02, 0.95, f'Total: {none_count + not_none_count}', transform=plt.gca().transAxes, verticalalignment='top')
-    plt.text(0.02, 0.90, f'None Count: {none_count}', transform=plt.gca().transAxes, verticalalignment='top')
-    plt.text(0.02, 0.85, f'Not None Count: {not_none_count}', transform=plt.gca().transAxes, verticalalignment='top')
 
     mean_value = df_copy['date'].mean()
     median_value = df_copy['date'].median()
@@ -111,10 +104,10 @@ def make_geo_graph(df, years, height, width, output_file_path):
             if year not in arr:
                 continue
             year_data = df[df['year'] == year]
-            plt.scatter(year_data['lon'], year_data['lat'], color=year_data['color'], label=f'Year {year}', alpha = 0.7, s = 50)
+            plt.scatter(year_data['lon'], year_data['lat'], color=year_data['color'], label=f'Year {year}', alpha = 0.7, s = 100)
 
         none_data = df[df['year'] == 1900]
-        plt.scatter(none_data['lon'], none_data['lat'], color=none_data['color'], label=f'None', alpha = 0.7, s = 50)
+        plt.scatter(none_data['lon'], none_data['lat'], color=none_data['color'], label=f'None', alpha = 0.7, s = 100)
 
         plt.xlabel('Longitude')
         plt.ylabel('Latitude')
@@ -169,7 +162,7 @@ def make_folium_map(df, years, city_center, output_file_path):
 
     m.save(output_file_path)
 
-def visualize(city, output=os.getcwd(), years=np.arange(2007, datetime.datetime.now().year + 2), height=1000, width = -1, skipped=30):
+def visualize(city, output=os.getcwd(), years=np.arange(2007, datetime.datetime.now().year + 2), grid_height=1000, grid_width=-1, cell_size=30):
     """
     Visualize Google Street View (GSV) data availability in a specified city's bounding area.
 
@@ -191,30 +184,30 @@ def visualize(city, output=os.getcwd(), years=np.arange(2007, datetime.datetime.
         print(f"Could not find coordinates for {city}. Please try another city")
         return
 
-    if width == -1:
-        width = height
-    lat_radius = height * 0.00000899
-    lon_radius = width * 0.00001141
+    if grid_width == -1:
+        grid_width = grid_height
+    half_lat_radius = grid_height / 2 * 0.00000899
+    half_lon_radius = grid_width / 2 * 0.00001141
 
     if city_center[0] < 0:
-        lat_radius = -lat_radius
+        half_lat_radius = -half_lat_radius
     if city_center[1] < 0:
-        lon_radius = -lon_radius
+        half_lon_radius = -half_lon_radius
 
-    ymin = city_center[0] - lat_radius
-    ymax = city_center[0] + lat_radius
-    xmin = city_center[1] - lon_radius
-    xmax = city_center[1] + lon_radius
+    ymin = city_center[0] - half_lat_radius
+    ymax = city_center[0] + half_lat_radius
+    xmin = city_center[1] - half_lon_radius
+    xmax = city_center[1] + half_lon_radius
 
     cwd_city = output + f'/{city}'
     if not os.path.exists(cwd_city):
-        print("please put the visualizations in the same directory as scrapped data.")
+        print("please specify output as the directory where the scraped data is stored.")
         return
-    if not os.path.exists(cwd_city + f'/{city}_{skipped}_coords.csv'):
-        print("The city with the specified skipped meter has not been scrapped yet.")
+    if not os.path.exists(cwd_city + f'/{city}_{cell_size}_coords.csv'):
+        print("The city with the specified cell size has not been scrapped yet.")
         return
     
-    df = pd.read_csv(cwd_city + f'/{city}_{skipped}_coords.csv', header=None, names=['lat', 'lon', 'date'])
+    df = pd.read_csv(cwd_city + f'/{city}_{cell_size}_coords.csv', header=None, names=['lat', 'lon', 'date'])
     in_range_data = []
     for index, row in df.iterrows():
         if row['lat'] < min(ymin, ymax) or row['lat'] > max(ymin, ymax) or row['lon'] < min(xmin, xmax) or row['lon'] > max(xmin, xmax):
@@ -224,23 +217,23 @@ def visualize(city, output=os.getcwd(), years=np.arange(2007, datetime.datetime.
         in_range_data.append(row)
     in_range_df = pd.DataFrame(in_range_data)
 
-    make_hist(in_range_df, cwd_city + f'/{city}_hist_{skipped}_{years}_{height}_{width}.png')
-    make_geo_graph(in_range_df, years, height, width, cwd_city + f'/{city}_colored_geo_{skipped}_{years}_{height}_{width}.png')
-    make_folium_map(in_range_df, years, city_center, cwd_city + f'/{city}_folium_{skipped}_{years}_{height}_{width}.html')
+    make_hist(in_range_df, cwd_city + f'/{city}_hist_{cell_size}_{years}_{grid_height}_{grid_width}.png')
+    make_geo_graph(in_range_df, years, grid_height, grid_width, cwd_city + f'/{city}_colored_geo_{cell_size}_{years}_{grid_height}_{grid_width}.png')
+    make_folium_map(in_range_df, years, city_center, cwd_city + f'/{city}_folium_{cell_size}_{years}_{grid_height}_{grid_width}.html')
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Visualize Google Street View (GSV) data availability in a specified city's bounding area.")
     parser.add_argument("city", type=str, help="Name of the city.")
-    parser.add_argument("--output", type=str, default=os.getcwd(), help="Output path where the GSV availability data will be stored.")
+    parser.add_argument("--output", type=str, default=os.getcwd(), help="Output path where the scraped data is stored.")
     parser.add_argument("--years", type=int, nargs="+", default=list(range(2007, datetime.datetime.now().year + 2)), help="Year range of the GSV data to visualize. Defaults to 2007 (year GSV was introduced) to current year.")
-    parser.add_argument("--height", type=int, default=1000, help="Height of half the bounding box from the center, in meters. Defaults to 1000.")
-    parser.add_argument("--width", type=int, default=-1, help="Width of the half bounding box from the center, in meters. Defaults to value of height.")
-    parser.add_argument("--skipped", type=int, default=30, help="Skipped meters to scrape GSV data. Defaults to 30 meters.")
+    parser.add_argument("--grid_height", type=int, default=1000, help="Height of the visualizaton area (from the city center), in meters. Defaults to 1000.")
+    parser.add_argument("--grid_width", type=int, default=-1, help="Width the visualization area (from the city center), in meters. Defaults to value of height.")
+    parser.add_argument("--cell_size", type=int, default=30, help="Cell size to scrape GSV data. Should be the same as the cell_sized used to scrape data.")
     return parser.parse_args()
 
 def main():
     args = parse_arguments()
-    visualize(args.city, args.output, args.years, args.height, args.width, args.skipped)
+    visualize(args.city, args.output, args.years, args.grid_height, args.grid_width, args.cell_size)
 
 if __name__ == "__main__":
     main()

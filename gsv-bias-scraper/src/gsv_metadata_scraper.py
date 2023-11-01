@@ -144,7 +144,7 @@ def scrap(lats, lons, output_file_path):
     else:
         final_df.to_csv(output_file_path, header=False, index=False)
 
-def GSVBias(city, output=os.getcwd(), height=1000, width = -1, skipped=30):
+def GSVBias(city, output=os.getcwd(), grid_height=1000, grid_width = -1, cell_size=30):
     """
     Visualize Google Street View (GSV) data availability in a specified city's bounding area.
 
@@ -164,48 +164,47 @@ def GSVBias(city, output=os.getcwd(), height=1000, width = -1, skipped=30):
         print(f"Could not find coordinates for {city}. Please try another city")
         return
 
-    if width == -1:
-        width = height
-    lat_radius = height * 0.00000899
-    lon_radius = width * 0.00001141
-    skipped_lon = skipped * 0.00001141
-    skipped_lat = skipped * 0.00000899
+    if grid_width == -1:
+        grid_width = grid_height
+    half_lat_radius = grid_height / 2 * 0.00000899 # turn the unit of the height from meter to radius, and divide it by 2
+    half_lon_radius = grid_width / 2 * 0.00001141 # turn the unit of the width from meter to radius, and divide it by 2
+    cell_size_lon = cell_size * 0.00001141 # turn the unit of the width of the cell from meter to radius
+    cell_size_lat = cell_size * 0.00000899 # turn the unit of the height of the cell from meter to radius
 
     if city_center[0] < 0:
-        lat_radius = -lat_radius
-        skipped_lat = -skipped_lat
+        half_lat_radius = -half_lat_radius
+        cell_size_lat = -cell_size_lat
     if city_center[1] < 0:
-        lon_radius = -lon_radius
-        skipped_lon = -skipped_lon
+        half_lon_radius = -half_lon_radius
+        cell_size_lon = -cell_size_lon
 
-    ymin = city_center[0] - lat_radius
-    ymax = city_center[0] + lat_radius
-    xmin = city_center[1] - lon_radius
-    xmax = city_center[1] + lon_radius
+    ymin = city_center[0] - half_lat_radius
+    ymax = city_center[0] + half_lat_radius
+    xmin = city_center[1] - half_lon_radius
+    xmax = city_center[1] + half_lon_radius
 
-    lons = list(np.arange(xmin, xmax, skipped_lon))
-    lats = list(np.arange(ymin, ymax, skipped_lat))
-
+    lons = list(np.arange(xmin, xmax, cell_size_lon))
+    lats = list(np.arange(ymin, ymax, cell_size_lat))
 
     cwd_city = output + f'/{city}'
     if not os.path.exists(cwd_city):
         os.makedirs(cwd_city)
 
-    scrap(lats, lons, cwd_city + f'/{city}_{skipped}_coords.csv')
+    scrap(lats, lons, cwd_city + f'/{city}_{cell_size}_coords.csv')
 
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Visualize Google Street View (GSV) data availability in a specified city's bounding area.")
     parser.add_argument("city", type=str, help="Name of the city.")
     parser.add_argument("--output", type=str, default=os.getcwd(), help="Output path where the GSV availability data will be stored.")
-    parser.add_argument("--height", type=int, default=1000, help="Height of half the bounding box from the center, in meters. Defaults to 1000.")
-    parser.add_argument("--width", type=int, default=-1, help="Width of the half bounding box from the center, in meters. Defaults to value of height.")
-    parser.add_argument("--skipped", type=int, default=30, help="Skipped meters to scrape GSV data. Defaults to 30 meters.")
+    parser.add_argument("--grid_height", type=int, default=1000, help="Height of the bounding box from the center, in meters. Defaults to 1000.")
+    parser.add_argument("--grid_width", type=int, default=-1, help="Width of the bounding box from the center, in meters. Defaults to value of height.")
+    parser.add_argument("--cell_size", type=int, default=30, help="Skipped meters to scrape GSV data. Defaults to 30 meters.")
     return parser.parse_args()
 
 def main():
     args = parse_arguments()
-    GSVBias(args.city, args.output, args.height, args.width, args.skipped)
+    GSVBias(args.city, args.output, args.grid_height, args.grid_width, args.cell_size)
 
 if __name__ == "__main__":
     main()
