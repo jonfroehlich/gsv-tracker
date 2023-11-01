@@ -56,6 +56,16 @@ async def send_maps_request(async_client, i, combined_df, pbar, sem):
     location_coords = f"{y},{x}"
 
     base_url = 'https://maps.googleapis.com/maps/api/streetview/metadata'
+
+    
+    # The GSV API is here: 
+    #   https://developers.google.com/maps/documentation/streetview/metadata#required-parameters-metadata
+    # You must pass either a location or a pano id. Pano ids may change over time, so GSV docs 
+    # recommend using location. You also need to include an API key.
+    #
+    # There are a number of optional parameters as wel:
+    #   https://developers.google.com/maps/documentation/streetview/metadata#optional_parameters_for_metadata_requests
+    # Currently, we limit the data to outdoor images only. 
     params = {
         'location': location_coords,
         'key': API_KEY,
@@ -75,15 +85,23 @@ async def send_maps_request(async_client, i, combined_df, pbar, sem):
 
     pbar.update(1)
     
+    # The response is a JSON object. We want to extract the location, date, and pano id.
     metadata = response.json()
     if not metadata.get('location', None):
-        return {'lat': y, 'lon': x, 'date': "None"}
+        return {'lat': y, 
+                'lon': x, 
+                'pano_id' : "None",
+                'date': "None",
+                'status': metadata.get('status')} # Let's store the status returned by the api
     else:
-        return {'lat': metadata.get('location').get('lat'), 'lon': metadata.get('location').get('lng'), 'date': metadata.get('date')}
+        return {'lat': metadata.get('location').get('lat'), 
+                'lon': metadata.get('location').get('lng'), 
+                'pano_id' : metadata.get('pano_id'),
+                'date': metadata.get('date')}
 
 
 
-async def get_dates(combined_df, max_concurrent_requests=500):
+async def get_gsv_metadata(combined_df, max_concurrent_requests=500):
     """
     Asynchronously fetch Google Street View dates for a DataFrame of coordinates.
 
@@ -105,9 +123,9 @@ async def get_dates(combined_df, max_concurrent_requests=500):
     return rows
 
 
-def scrap(lats, lons, output_file_path):
+def scrape(lats, lons, output_file_path):
     """
-    Scrap Google Street View data for a given city within specified coordinates.
+    Scrape Google Street View data for a given city within specified coordinates.
 
     Args:
     - lats, lons (list): Lists containing latitude and longitude coordinates.
@@ -135,7 +153,7 @@ def scrap(lats, lons, output_file_path):
             combined_df.loc[len(combined_df)] = new_row        
     combined_df.reset_index(drop=True, inplace=True)
 
-    rows = asyncio.run(get_dates(combined_df))
+    rows = asyncio.run(get_gsv_metadata(combined_df))
 
     final_df = pd.DataFrame(rows)
 
@@ -151,8 +169,8 @@ def GSVBias(city, output=os.getcwd(), grid_height=1000, grid_width = -1, cell_si
     Parameters:
     - `city_name` (`str`): Name of the city to get coordinates for.
     - `output` (`str`): Relative path to store the data CSV, CWD by default.
-    - `height` (`int`): Half of height of the bounding box to scrap data, by default 1000 meters.
-    - `width` (`int`): Half of width of the bounding box to scrap data, by default equals to `lat_radius_meter`.
+    - `height` (`int`): Half of height of the bounding box to scrape data, by default 1000 meters.
+    - `width` (`int`): Half of width of the bounding box to scrape data, by default equals to height
     - `skipped` (`int`): Distance between two intersections on the gird, by default 30 meters.
 
     Outputs:
@@ -190,11 +208,10 @@ def GSVBias(city, output=os.getcwd(), grid_height=1000, grid_width = -1, cell_si
     if not os.path.exists(cwd_city):
         os.makedirs(cwd_city)
 
-    scrap(lats, lons, cwd_city + f'/{city}_{cell_size}_coords.csv')
-
+    scrape(lats, lons, cwd_city + f'/{city}_{cell_size}_coords.csv')
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="Visualize Google Street View (GSV) data availability in a specified city's bounding area.")
+    parser = argparse.ArgumentParser(description="Downloads Google Street View (GSV) metadata in a specified city's bounding area.")
     parser.add_argument("city", type=str, help="Name of the city.")
     parser.add_argument("--output", type=str, default=os.getcwd(), help="Output path where the GSV availability data will be stored.")
     parser.add_argument("--grid_height", type=int, default=1000, help="Height of the bounding box from the center, in meters. Defaults to 1000.")
