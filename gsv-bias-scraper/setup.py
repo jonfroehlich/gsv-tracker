@@ -1,12 +1,12 @@
-from setuptools import setup, find_packages
+from setuptools import setup
 
 setup(
-    name='gsv-bias',
-    version='1.0',
+    name='gsv-bias-scraper',
+    version='1.1',
     entry_points={
         'console_scripts': [
-            'scrape = scraper:main',
-            'visualize = visualization:main',
+            'gsv_metadata_scrape = gsv_metadata_scraper:main',
+            'gsv_visualize = gsv_visualizer:main',
         ]
     },
 )
