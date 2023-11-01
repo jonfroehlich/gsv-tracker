@@ -9,8 +9,9 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_fixed
 import nest_asyncio
 import argparse
+import logging
 
-API_KEY = os.environ.get('api_key')
+GOOGLE_API_KEY = os.environ.get('google_api_key')
 
 def get_coordinates(city_name):
     """
@@ -55,9 +56,8 @@ async def send_maps_request(async_client, i, combined_df, pbar, sem):
     x = combined_df.loc[i]["lon"]
     location_coords = f"{y},{x}"
 
-    base_url = 'https://maps.googleapis.com/maps/api/streetview/metadata'
+    GOOGLE_MAPS_API_BASE_URL = 'https://maps.googleapis.com/maps/api/streetview/metadata'
 
-    
     # The GSV API is here: 
     #   https://developers.google.com/maps/documentation/streetview/metadata#required-parameters-metadata
     # You must pass either a location or a pano id. Pano ids may change over time, so GSV docs 
@@ -68,13 +68,13 @@ async def send_maps_request(async_client, i, combined_df, pbar, sem):
     # Currently, we limit the data to outdoor images only. 
     params = {
         'location': location_coords,
-        'key': API_KEY,
+        'key': GOOGLE_API_KEY,
         'source': 'outdoor'
     }
 
     async with sem:  # Use the semaphore here
         try:
-            response = await async_client.get(base_url, params=params, timeout=60.0)
+            response = await async_client.get(GOOGLE_MAPS_API_BASE_URL, params=params, timeout=60.0)
             response.raise_for_status()
         except (httpx.HTTPStatusError, httpx.RequestError) as exc:
             print(f"Error with request {exc.request.url!r}: {exc}")
@@ -113,6 +113,7 @@ async def get_gsv_metadata(combined_df, max_concurrent_requests=500):
     - list: A list of rows, each row contains a lat, a lon, a date.
     """
 
+    # TODO: please comment the decisions for all of these parameters
     limits = httpx.Limits(max_connections=max_concurrent_requests, max_keepalive_connections=max_concurrent_requests)
     timeout = httpx.Timeout(5.0, connect=5.0)
 
@@ -136,11 +137,14 @@ def scrape(lats, lons, output_file_path):
     """
 
     if os.path.isfile(output_file_path):
+        print(f"We previously found a file at {output_file_path}, reading it in...")
         prev_df = pd.read_csv(output_file_path, header=None, names=['lat', 'lon', 'date'])
         lower_bound_lon = prev_df['lon'].min()
         upper_bound_lon = prev_df['lon'].max()
         lower_bound_lat = prev_df['lat'].min()
         upper_bound_lat = prev_df['lat'].max()
+    else:
+        print(f"Saving contents to {output_file_path}...")
 
     columns = ['lat', 'lon']
     combined_df = pd.DataFrame(columns=columns)
@@ -159,8 +163,10 @@ def scrape(lats, lons, output_file_path):
 
     if os.path.isfile(output_file_path):
         final_df.to_csv(output_file_path, mode='a', header=False, index=False)
+        print(f"Appended data to {output_file_path}...")
     else:
         final_df.to_csv(output_file_path, header=False, index=False)
+        print(f"Saved data to {output_file_path}...")
 
 def GSVBias(city, output=os.getcwd(), grid_height=1000, grid_width = -1, cell_size=30):
     """
@@ -181,6 +187,8 @@ def GSVBias(city, output=os.getcwd(), grid_height=1000, grid_width = -1, cell_si
     if not city_center:
         print(f"Could not find coordinates for {city}. Please try another city")
         return
+    else:
+        print(f"Coordinates for {city} found: {city_center}")
 
     if grid_width == -1:
         grid_width = grid_height
@@ -200,6 +208,8 @@ def GSVBias(city, output=os.getcwd(), grid_height=1000, grid_width = -1, cell_si
     ymax = city_center[0] + half_lat_radius
     xmin = city_center[1] - half_lon_radius
     xmax = city_center[1] + half_lon_radius
+
+    print(f"Bounding box for {city}: [{xmin, ymin}, {xmax, ymax}]")
 
     lons = list(np.arange(xmin, xmax, cell_size_lon))
     lats = list(np.arange(ymin, ymax, cell_size_lat))
