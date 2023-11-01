@@ -38,9 +38,9 @@ done
 
 ```pip3 install .``` 
 
-## Step 6: Set the environment variable key in `environment.yml`  as your own Google API key:
+## Step 6: Set the environment variable key in as your own Google API key:
 
-```API_KEY: "Your Goolge API Key"``` 
+```conda env config vars set api_key=your_key``` 
 
 ## Step 7: Call the command line tools:
 
