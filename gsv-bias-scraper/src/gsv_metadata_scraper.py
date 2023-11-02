@@ -209,6 +209,7 @@ def GSVBias(city, output=os.getcwd(), grid_height=1000, grid_width = -1, cell_si
     xmin = city_center[1] - half_lon_radius
     xmax = city_center[1] + half_lon_radius
 
+    # TODO: add in bounding box printout in miles as well
     print(f"Bounding box for {city}: [{xmin, ymin}, {xmax, ymax}]")
 
     lons = list(np.arange(xmin, xmax, cell_size_lon))
@@ -230,6 +231,15 @@ def parse_arguments():
     return parser.parse_args()
 
 def main():
+    if not GOOGLE_API_KEY:
+        print(f"The Google Maps API key appears not to be set")
+        print(f"Please set your API key as an environment variable named 'google_api_key'")
+        print(f"From terminal, run `conda env config vars set google_api_key=YOUR_API_KEY")
+        print(f"You can verify that the key was set by running `conda env config vars list`")
+        return
+    else:
+        print(f"Your Google Maps API key is set to {GOOGLE_API_KEY}")
+
     args = parse_arguments()
     GSVBias(args.city, args.output, args.grid_height, args.grid_width, args.cell_size)
 
