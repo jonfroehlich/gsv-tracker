@@ -71,8 +71,8 @@ and four optional arguments:
 
 - `city_name`: Name of the city to get coordinates for; if need to specify states, follow the format "city_name, state_name."
 - `output`: Relative path to store all GSV data and visualization results, CWD by default.
-- `height`: Half of height of the bounding box to scrap data, by default 1000 meters.
-- `width`: Half of width of the bounding box to scrap data, by default equals to `lat_radius_meter`.
+- `height`: Height of the bounding box to scrap data, by default 1000 meters.
+- `width`: Width of the bounding box to scrap data, by default equals to `lat_radius_meter`.
 - `skipped`: Distance between two intersections on the gird, by default 30 meters.
 
 if you want to make visualization based on scraper data (make sure to scrap the specific area with certain skipped step before visualize its GSV availability), use:
@@ -82,8 +82,8 @@ if you want to make visualization based on scraper data (make sure to scrap the 
 - `city_name`: Name of the city you want to make visualizations; if need to specify states, follow the format "city_name, state_name."
 - `output`: Relative path to store all visualizations, CWD by default, should be the same as the path to `city_name` directory that contains the data CSV.
 - `years`: Years to consider for visualization, by default from 2007 to now.
-- `height`: Half of height of the bounding box to visualize data, by default 1000 meters.
-- `width`: Half of width of the bounding box to visualize data, by default equals to `lat_radius_meter`.
+- `height`: Height of the bounding box to visualize data, by default 1000 meters.
+- `width`: Width of the bounding box to visualize data, by default equals to `lat_radius_meter`.
 - `skipped`: Should be the same as the `skipped` of the scraped data CSV that the user wants to make visualization on, by default 30 meters.
 
 
@@ -96,7 +96,7 @@ if you want to make visualization based on scraper data (make sure to scrap the 
      - `city_name` (`str`): Name of the city to get coordinates for.
    - **Return**: A tuple containing the latitude and longitude of the city or `None` if the city is not found.
 
-**`send_maps_request(async_client, i, combined_df, pbar, sem) -> dictionary`**
+**`send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat) -> dictionary`**
 
    - **Purpose**: Send an asynchronous request to Google Maps API to retrieve metadata for specified coordinates.
    - **Parameters**:
@@ -105,14 +105,22 @@ if you want to make visualization based on scraper data (make sure to scrap the 
       - `combined_df` (`pd.DataFrame`): DataFrame containing latitude and longitude coordinates.
       - `pbar` (`tqdm.tqdm`): Progress bar for tracking the progress of requests.
       - `sem` (`asyncio.Semaphore`): Semaphore for controlling concurrency.
+      - `lower_bound_lon` (`int`): longitude lower bound for the bounding box
+      - `upper_bound_lon` (`int`): longitude upper bound for the bounding box
+      - `lower_bound_lat` (`int`): latitude lower bound for the bounding box
+      - `upper_bound_lat` (`int`): latitude upper bound for the bounding box
    - **Return**: A dictionary containing latitude, longitude, and date retrieved from one API call.
    
-**`get_dates(combined_df, max_concurrent_requests=500) -> list`**
+**`get_dates(combined_df, max_concurrent_requests=500, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat) -> list`**
 
    - **Purpose**: Asynchronously fetch Google Street View dates for a DataFrame of coordinates.
    - **Parameters**:
       - `combined_df` (`pd.DataFrame`): DataFrame containing latitude and longitude coordinates.
       - `max_concurrent_requests` (`int`): Maximum concurrent requests, by defaults 500.
+      - `lower_bound_lon` (`int`): longitude lower bound for the bounding box
+      - `upper_bound_lon` (`int`): longitude upper bound for the bounding box
+      - `lower_bound_lat` (`int`): latitude lower bound for the bounding box
+      - `upper_bound_lat` (`int`): latitude upper bound for the bounding box
    - **Return**: list: A list of rows, each row contains a lat, a lon, a date.
 
 **`scrap(lats, lons, years)`**
@@ -133,17 +141,6 @@ if you want to make visualization based on scraper data (make sure to scrap the 
      - `output_file_path` (`str`): Absolute path to store the visualization.
    - **Outputs**: A histogram showing GSV data distribution over time, including mean, median, and standard deviation.
 
-**`make_geo_graph(df, years, height, width, output_file_path)`**
-
-   - **Purpose**: Visualize GSV data distribution in a region with year-specific colors.
-   - **Parameters**:
-      - `df` (`pd.DataFrame`): DataFrame containing Google Street View data.
-      - `years` (a set of `int`): Years to consider for visualization.
-      - `height` (`int`): Half of height of the bounding box.
-      - `width` (`int`): Half of width of the bounding box.
-      - `output_file_path` (`str`): Absolute path to store the visualization.
-   - **Outputs**: A colored map visualizing the spatial distribution of GSV data in the city's bounding area, each color indicating different years.
-
 **`make_folium_map(df, years, city_center, output_file_path)`**
 
    - **Purpose**: Create a Folium map displaying Google Street View data with colors indicating years.
@@ -154,28 +151,28 @@ if you want to make visualization based on scraper data (make sure to scrap the 
       - `output_file_path` (`str`): Absolute path to store the visualization.
    - **Outputs**: An interactive folium map that put the colored map on top of the city's real street map.
 
-**`GSVBias(city_name, output, height, width, skipped)`**
+**`GSVBias(city_name, output, grid_height, grid_width, cell_size)`**
 
    - **Purpose**: The main function to scrap GSV data in a specified region.
    - **Parameters**:
       - `city_name` (`str`): Name of the city to get coordinates for.
       - `output` (`str`): Relative path to store the data CSV, CWD by default.
-      - `height` (`int`): Half of height of the bounding box to scrap data, by default 1000 meters.
-      - `width` (`int`): Half of width of the bounding box to scrap data, by default equals to `lat_radius_meter`.
-      - `skipped` (`int`): Distance between two intersections on the gird, by default 30 meters.
+      - `grid_height` (`int`): Height of the bounding box to scrap data, by default 1000 meters.
+      - `grid_width` (`int`): Width of the bounding box to scrap data, by default equals to `lat_radius_meter`.
+      - `cell_size` (`int`): Distance between two intersections on the gird, by default 30 meters.
    - **Outputs**: A CSV containing all GSV availability data, stored in the directory called `city_name` in `output`, uniquely defined by city name and skipped meters.
 
-**`visualize(city_name, output, years, height, width, skipped)`**
+**`visualize(city_name, output, years, grid_height, grid_width, cell_size)`**
 
    - **Purpose**: The main function to analyze and visualize GSV data in a specified region.
    - **Parameters**:
       - `city_name` (`str`): Name of the city you want to make visualizations.
       - `output` (`str`): Relative path to store all visualizations, CWD by default, should be the same as the path to `city_name` directory that contains the data CSV.
       - `years` (a set of `int`): Years to consider for visualization, by default from 2007 to now.
-      - `height` (`int`): Half of height of the bounding box to visualize data, by default 1000 meters.
-      - `width` (`int`): Half of width of the bounding box to visualize data, by default equals to `lat_radius_meter`.
-      - `skipped` (`int`): Should be the same as the `skipped` of the scraped data CSV that the user wants to make visualization on, by default 30 meters.
-   - **Outputs**: Making a histogram, a colored geo map, and a folium map based on the CSV data the user scrapped.
+      - `grid_height` (`int`): Height of the bounding box to visualize data, by default 1000 meters.
+      - `grid_width` (`int`): Width of the bounding box to visualize data, by default equals to `lat_radius_meter`.
+      - `cell_size` (`int`): Should be the same as the `cell_size` of the scraped data CSV that the user wants to make visualization on, by default 30 meters.
+   - **Outputs**: Making a histogram and a folium map based on the CSV data the user scrapped.
 
 ## Dependencies:
 

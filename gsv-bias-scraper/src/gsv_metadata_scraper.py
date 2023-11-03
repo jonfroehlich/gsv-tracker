@@ -1,4 +1,5 @@
 import os
+import sys
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -9,6 +10,7 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_fixed
 import nest_asyncio
 import argparse
+from itertools import product
 import logging
 
 GOOGLE_API_KEY = os.environ.get('google_api_key')
@@ -37,7 +39,7 @@ nest_asyncio.apply()
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(0.1))  # Shorter wait due to higher rate limit
-async def send_maps_request(async_client, i, combined_df, pbar, sem):
+async def send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat):
     """
     Send an asynchronous request to Google Maps API to retrieve metadata for specified coordinates.
 
@@ -54,6 +56,11 @@ async def send_maps_request(async_client, i, combined_df, pbar, sem):
 
     y = combined_df.loc[i]["lat"]
     x = combined_df.loc[i]["lon"]
+
+    if lower_bound_lat < y < upper_bound_lat and lower_bound_lon < x < upper_bound_lon:
+        pbar.update(1)
+        return {}
+
     location_coords = f"{y},{x}"
 
     GOOGLE_MAPS_API_BASE_URL = 'https://maps.googleapis.com/maps/api/streetview/metadata'
@@ -82,9 +89,8 @@ async def send_maps_request(async_client, i, combined_df, pbar, sem):
         except Exception as e:
             print(f"An unexpected error occurred: {e}")
             raise
-
     pbar.update(1)
-    
+
     # The response is a JSON object. We want to extract the location, date, and pano id.
     metadata = response.json()
     if not metadata.get('location', None):
@@ -101,7 +107,7 @@ async def send_maps_request(async_client, i, combined_df, pbar, sem):
 
 
 
-async def get_gsv_metadata(combined_df, max_concurrent_requests=500):
+async def get_gsv_metadata(combined_df, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, max_concurrent_requests=500):
     """
     Asynchronously fetch Google Street View dates for a DataFrame of coordinates.
 
@@ -120,7 +126,7 @@ async def get_gsv_metadata(combined_df, max_concurrent_requests=500):
     async with httpx.AsyncClient(limits=limits, timeout=timeout) as async_client:
         with tqdm(total=len(combined_df), desc="Fetching dates") as pbar:
             sem = asyncio.Semaphore(max_concurrent_requests)
-            rows = await asyncio.gather(*(send_maps_request(async_client, i, combined_df, pbar, sem) for i in range(len(combined_df))))
+            rows = await asyncio.gather(*(send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat) for i in range(len(combined_df))))
     return rows
 
 
@@ -135,7 +141,7 @@ def scrape(lats, lons, output_file_path):
     Returns:
     - None: write a csv file in output_file_path
     """
-
+    lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat = sys.maxsize, -sys.maxsize - 1, sys.maxsize, -sys.maxsize - 1
     if os.path.isfile(output_file_path):
         print(f"We previously found a file at {output_file_path}, reading it in...")
         prev_df = pd.read_csv(output_file_path, header=None, names=['lat', 'lon', 'date'])
@@ -146,20 +152,13 @@ def scrape(lats, lons, output_file_path):
     else:
         print(f"Saving contents to {output_file_path}...")
 
-    columns = ['lat', 'lon']
-    combined_df = pd.DataFrame(columns=columns)
+    combinations = list(product(lats, lons))
+    combined_df = pd.DataFrame(combinations, columns=['lat', 'lon'])
 
-    for x in lons:
-        for y in lats:
-            if os.path.isfile(output_file_path) and lower_bound_lon < x < upper_bound_lon and lower_bound_lat < y < upper_bound_lat:
-                continue
-            new_row = {'lat': y, 'lon': x}
-            combined_df.loc[len(combined_df)] = new_row        
-    combined_df.reset_index(drop=True, inplace=True)
-
-    rows = asyncio.run(get_gsv_metadata(combined_df))
+    rows = asyncio.run(get_gsv_metadata(combined_df, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat))
 
     final_df = pd.DataFrame(rows)
+    final_df = final_df.dropna(how='all')
 
     if os.path.isfile(output_file_path):
         final_df.to_csv(output_file_path, mode='a', header=False, index=False)
@@ -175,8 +174,8 @@ def GSVBias(city, output=os.getcwd(), grid_height=1000, grid_width = -1, cell_si
     Parameters:
     - `city_name` (`str`): Name of the city to get coordinates for.
     - `output` (`str`): Relative path to store the data CSV, CWD by default.
-    - `height` (`int`): Half of height of the bounding box to scrape data, by default 1000 meters.
-    - `width` (`int`): Half of width of the bounding box to scrape data, by default equals to height
+    - `height` (`int`): Height of the bounding box to scrape data, by default 1000 meters.
+    - `width` (`int`): Width of the bounding box to scrape data, by default equals to height
     - `skipped` (`int`): Distance between two intersections on the gird, by default 30 meters.
 
     Outputs:
@@ -189,6 +188,7 @@ def GSVBias(city, output=os.getcwd(), grid_height=1000, grid_width = -1, cell_si
         return
     else:
         print(f"Coordinates for {city} found: {city_center}")
+
 
     if grid_width == -1:
         grid_width = grid_height
