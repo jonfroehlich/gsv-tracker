@@ -12,5 +12,4 @@ dependencies:
   - tenacity=8.2.3
   - nest-asyncio=1.5.8 
   - geopy=2.4.0
-  - gsv-bias-scraper
 
