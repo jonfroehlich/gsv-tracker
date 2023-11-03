@@ -43,80 +43,53 @@ def make_hist(df, output_file_path):
     df_copy = df_copy[df_copy['date'].notna() & (df_copy['date'] != 'None')]
     df_copy['date'] = pd.to_datetime(df_copy['date'], format='%Y-%m', errors='coerce')
     df_copy = df_copy[df_copy['date'].notna()]
+    df_copy['year'] = df_copy['date'].dt.year
 
-    plt.figure(figsize=(12, 7))
-    plt.hist(df_copy['date'], bins=50, edgecolor='black', alpha=0.7)
+    colors = {2023: '#000000', 2022: '#006400', 2021: '#009900', 2020: '#00be00', 2019: '#00e300', 2018: '#00ff00', 2017: '#33ff33', 2016: '#66ff66',
+        2015: '#99ff99', 2014: '#b3ffb3', 2013: '#ccffcc', 2012: '#d9f7b1', 2011: '#e6ef99', 2010: '#f3e780', 2009: '#ffd966', 2008: '#ffc03f',
+        2007: '#ffaa00', 2006: '#ff8c00', 2005: '#ff6600'}
+    
+    # Set the figure size
+    plt.rcParams["figure.figsize"] = [28, 10]
+    plt.rcParams["figure.autolayout"] = True
+
+    # Figure and set of subplots
+    fig, ax = plt.subplots()
+    my_ticks = []
+    my_bins = []
+    for i in range(2006, 2025):
+        my_ticks.append(datetime.datetime(i, 1, 1))
+        for j in range(1, 13):
+            my_bins.append(datetime.datetime(i, j, 1))
+
+    for i in np.arange(0, 216, 12):
+        plt.axvspan(my_bins[i], my_bins[i + 12], facecolor=colors[2006 + (i // 12)], alpha=1)
+
+    N, bins, patches = ax.hist(df_copy['date'], bins=my_bins, edgecolor='black', linewidth=1)
+    plt.xlim(datetime.datetime(2006, 1, 1), datetime.datetime(2024, 1, 1))
 
     mean_value = df_copy['date'].mean()
     median_value = df_copy['date'].median()
     std_value = df_copy['date'].std()
 
-    plt.text(0.02, 0.80, f'Mean: {mean_value}', transform=plt.gca().transAxes, verticalalignment='top')
-    plt.text(0.02, 0.75, f'Median: {median_value}', transform=plt.gca().transAxes, verticalalignment='top')
-    plt.text(0.02, 0.70, f'Standard Deviation: {std_value}', transform=plt.gca().transAxes, verticalalignment='top')
+    plt.text(0.02, 0.90, f'Total Counts: {df_copy.shape[0]}', transform=plt.gca().transAxes, verticalalignment='top')
+    plt.text(0.02, 0.85, f'Mean: {mean_value}', transform=plt.gca().transAxes, verticalalignment='top')
+    plt.text(0.02, 0.80, f'Median: {median_value}', transform=plt.gca().transAxes, verticalalignment='top')
+    plt.text(0.02, 0.75, f'Standard Deviation: {std_value}', transform=plt.gca().transAxes, verticalalignment='top')
+
+    for i in range(len(N)):
+        if N[i] != 0 and my_bins[i] not in my_ticks:
+            my_ticks.append(my_bins[i])
 
     plt.xlabel('Date')
     plt.ylabel('Frequency')
     plt.title('Distribution of Data Over Time')
-    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
     plt.tight_layout()
-    plt.xticks(rotation=45)
+    plt.xticks(my_ticks, rotation=90)
+
+    fig.subplots_adjust(left=0.03, right=0.97, top=0.95, bottom=0.11)
 
     plt.savefig(output_file_path)
-
-
-def make_geo_graph(df, years, height, width, output_file_path):
-    """
-    Plot a scatter plot representing the distribution of Google Street View data in a specified region with colors indicating years.
-
-    Args:
-    - df (pd.DataFrame): Dataframe containing Google Street View data with a 'date' column in 'YYYY-MM' format.
-    - years (list, optional): A list of years you want to consider for the scatter plot. Defaults to None, which considers all unique years in the df.
-    - height (int, optional): Height of the bounding box from the center in meters. Defaults to 1000.
-    - width (int, optional): Width of the bounding box from the center in meters. Defaults equal to value of `height`.
-    - output_file_path (str): Path that stores the data
-
-    Output:
-    - A colored map visualizing the spatial distribution of GSV data in the city's bounding area, each color indicating different years, in output_file_path.
-    """
-
-    df['date'].fillna('1900-01', inplace=True)
-    df['date'] = pd.to_datetime(df['date'])
-    df['year'] = df['date'].dt.year
-
-    colors = {2023: '#000000', 2022: '#006400', 2021: '#009900', 2020: '#00be00', 2019: '#00e300', 2018: '#00ff00', 2017: '#33ff33', 2016: '#66ff66',
-        2015: '#99ff99', 2014: '#b3ffb3', 2013: '#ccffcc', 2012: '#d9f7b1', 2011: '#e6ef99', 2010: '#f3e780', 2009: '#ffd966', 2008: '#ffc03f',
-        2007: '#ffaa00', 2006: '#ff8c00', 2005: '#ff6600', 1900: '#FF4500'}
-
-    distinct_years = df['year'].unique()
-    unique_colors = [colors[year] for year in distinct_years]
-    value_to_color = {value: color for value, color in zip(distinct_years, unique_colors)}
-    df['color'] = df['year'].map(value_to_color)
-
-    sorted_df = df.sort_values(by='year', ascending=False)
-
-    def specified_years(arr):
-        unique_years = sorted_df['year'].unique()
-
-        plt.figure(figsize=(width / 50, height / 50))
-
-        for year in unique_years:
-            if year not in arr:
-                continue
-            year_data = df[df['year'] == year]
-            plt.scatter(year_data['lon'], year_data['lat'], color=year_data['color'], label=f'Year {year}', alpha = 0.7, s = 100)
-
-        none_data = df[df['year'] == 1900]
-        plt.scatter(none_data['lon'], none_data['lat'], color=none_data['color'], label=f'None', alpha = 0.7, s = 100)
-
-        plt.xlabel('Longitude')
-        plt.ylabel('Latitude')
-        plt.title('Coordinate Data with Year-based Colors')
-        plt.legend(loc="upper left", markerscale=2)
-        plt.grid(True)
-        plt.savefig(output_file_path)
-
-    specified_years(years)
 
 
 def make_folium_map(df, years, city_center, output_file_path):
@@ -139,7 +112,7 @@ def make_folium_map(df, years, city_center, output_file_path):
 
     colors = {2023: '#000000', 2022: '#006400', 2021: '#009900', 2020: '#00be00', 2019: '#00e300', 2018: '#00ff00', 2017: '#33ff33', 2016: '#66ff66',
         2015: '#99ff99', 2014: '#b3ffb3', 2013: '#ccffcc', 2012: '#d9f7b1', 2011: '#e6ef99', 2010: '#f3e780', 2009: '#ffd966', 2008: '#ffc03f',
-        2007: '#ffaa00', 2006: '#ff8c00', 2005: '#ff6600', 1900: '#FF4500'}
+        2007: '#ffaa00', 2006: '#ff8c00', 2005: '#ff6600', 1900: '#D3D3D3'}
 
     distinct_years = df['year'].unique()
     unique_colors = [colors[year] for year in distinct_years]
@@ -170,14 +143,13 @@ def visualize(city, output=os.getcwd(), years=np.arange(2007, datetime.datetime.
     - `city_name` (`str`): Name of the city you want to make visualizations.
     - `output` (`str`): Relative path to store all visualizations, CWD by default, should be the same as the path to `city_name` directory that contains the data CSV.
     - `years` (a set of `int`): Years to consider for visualization, by default from 2007 to now.
-    - `height` (`int`): Half of height of the bounding box to visualize data, by default 1000 meters.
-    - `width` (`int`): Half of width of the bounding box to visualize data, by default equals to `lat_radius_meter`.
+    - `height` (`int`): Height of the bounding box to visualize data, by default 1000 meters.
+    - `width` (`int`): Width of the bounding box to visualize data, by default equals to `lat_radius_meter`.
     - `skipped` (`int`): Should be the same as the `skipped` of data CSV the user wants to make visualization on, by default 30 meters.
 
     Outputs:
     1. A histogram showing GSV data distribution over time, including mean, median, and standard deviation.
-    2. A colored map visualizing the spatial distribution of GSV data in the city's bounding area, each color indicating different years.
-    3. An interactive folium map that put the colored map on top of the city's real street map.
+    2. An interactive folium map that put the colored map on top of the city's real street map.
     """
     city_center = get_coordinates(city)
     if not city_center:
@@ -218,7 +190,6 @@ def visualize(city, output=os.getcwd(), years=np.arange(2007, datetime.datetime.
     in_range_df = pd.DataFrame(in_range_data)
 
     make_hist(in_range_df, cwd_city + f'/{city}_hist_{cell_size}_{years}_{grid_height}_{grid_width}.png')
-    make_geo_graph(in_range_df, years, grid_height, grid_width, cwd_city + f'/{city}_colored_geo_{cell_size}_{years}_{grid_height}_{grid_width}.png')
     make_folium_map(in_range_df, years, city_center, cwd_city + f'/{city}_folium_{cell_size}_{years}_{grid_height}_{grid_width}.html')
 
 def parse_arguments():
