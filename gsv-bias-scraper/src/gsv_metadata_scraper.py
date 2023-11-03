@@ -167,7 +167,7 @@ def scrape(lats, lons, output_file_path):
         final_df.to_csv(output_file_path, header=False, index=False)
         print(f"Saved data to {output_file_path}...")
 
-def GSVBias(city, output=os.getcwd(), grid_height=1000, grid_width = -1, cell_size=30):
+def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_size=30):
     """
     Visualize Google Street View (GSV) data availability in a specified city's bounding area.
 
@@ -182,12 +182,12 @@ def GSVBias(city, output=os.getcwd(), grid_height=1000, grid_width = -1, cell_si
     -A CSV containing all gsv availability data, stored in the directory called `city_name` in `output`, uniquely defined by city name and skipped meters.
     """
 
-    city_center = get_coordinates(city)
+    city_center = get_coordinates(city_name)
     if not city_center:
-        print(f"Could not find coordinates for {city}. Please try another city")
+        print(f"Could not find coordinates for {city_name}. Please try another city")
         return
     else:
-        print(f"Coordinates for {city} found: {city_center}")
+        print(f"Coordinates for {city_name} found: {city_center}")
 
 
     if grid_width == -1:
@@ -210,38 +210,68 @@ def GSVBias(city, output=os.getcwd(), grid_height=1000, grid_width = -1, cell_si
     xmax = city_center[1] + half_lon_radius
 
     # TODO: add in bounding box printout in miles/meters as well
-    print(f"Bounding box for {city}: [{xmin, ymin}, {xmax, ymax}]")
+    print(f"Bounding box for {city_name}: [{xmin, ymin}, {xmax, ymax}]")
 
     lons = list(np.arange(xmin, xmax, cell_size_lon))
     lats = list(np.arange(ymin, ymax, cell_size_lat))
 
-    cwd_city = output + f'/{city}'
-    if not os.path.exists(cwd_city):
-        os.makedirs(cwd_city)
+    print(f"Will query Google Street View every {cell_size} meters for data")
 
-    scrape(lats, lons, cwd_city + f'/{city}_{cell_size}_coords.csv')
+    # TODO check the math on this
+    print(f"This will result in roughly {grid_width * grid_height / cell_size} queries")
+
+    output_dir_for_city = os.path.join(base_output_dir, city_name)
+    if not os.path.exists(output_dir_for_city):
+        os.makedirs(output_dir_for_city)
+
+    output_filename_for_city = f"{city_name}_{cell_size}_coords.csv"
+    output_filename_with_path = os.path.join(output_dir_for_city, output_filename_for_city)
+    scrape(lats, lons, output_filename_with_path)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Downloads Google Street View (GSV) metadata in a specified city's bounding area.")
     parser.add_argument("city", type=str, help="Name of the city.")
-    parser.add_argument("--output", type=str, default=os.getcwd(), help="Output path where the GSV availability data will be stored.")
+    parser.add_argument("--output", type=str, default=None, help="Output path where the GSV availability data will be stored.")
     parser.add_argument("--grid_height", type=int, default=1000, help="Height of the bounding box from the center, in meters. Defaults to 1000.")
     parser.add_argument("--grid_width", type=int, default=-1, help="Width of the bounding box from the center, in meters. Defaults to value of height.")
     parser.add_argument("--cell_size", type=int, default=30, help="Skipped meters to scrape GSV data. Defaults to 30 meters.")
     return parser.parse_args()
 
 def main():
+
     if not GOOGLE_API_KEY:
         print(f"The Google Maps API key appears not to be set")
         print(f"Please set your API key as an environment variable named 'google_api_key'")
-        print(f"From terminal, run `conda env config vars set google_api_key=YOUR_API_KEY")
+        print(f"From terminal, run `conda env config vars set google_api_key=YOUR_API_KEY'")
         print(f"You can verify that the key was set by running `conda env config vars list`")
+        print(f"You may need to reactivate your environment by running `conda activate gsv-bias-venv`")
         return
     else:
         print(f"Your Google Maps API key is set to {GOOGLE_API_KEY}")
 
     args = parse_arguments()
-    GSVBias(args.city, args.output, args.grid_height, args.grid_width, args.cell_size)
+
+    base_output_dir = args.output
+    # We try and default to gsv-bias-scraper/data
+    if base_output_dir is None:
+        cur_dir = os.getcwd()
+
+        # Check if the current directory is "src"
+        if os.path.basename(cur_dir) == "src":
+            # Get the parent directory of "src"
+            parent_dir = os.path.dirname(cur_dir)
+            
+            # Set the new directory to be the sub-directory of "data" under the parent directory
+            base_output_dir = os.path.join(parent_dir, "data")    
+        elif os.path.basename(cur_dir) == "gsv-bias-scraper":
+            base_output_dir = os.path.join(cur_dir, "data")
+
+        if not os.path.exists(base_output_dir):
+            os.makedirs(base_output_dir)
+
+        print(f"No output path specified, defaulting to '{base_output_dir}'")
+
+    GSVBias(args.city, base_output_dir, args.grid_height, args.grid_width, args.cell_size)
 
 if __name__ == "__main__":
     main()
