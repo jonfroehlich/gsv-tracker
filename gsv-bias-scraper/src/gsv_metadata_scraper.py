@@ -209,7 +209,7 @@ def GSVBias(city, output=os.getcwd(), grid_height=1000, grid_width = -1, cell_si
     xmin = city_center[1] - half_lon_radius
     xmax = city_center[1] + half_lon_radius
 
-    # TODO: add in bounding box printout in miles as well
+    # TODO: add in bounding box printout in miles/meters as well
     print(f"Bounding box for {city}: [{xmin, ymin}, {xmax, ymax}]")
 
     lons = list(np.arange(xmin, xmax, cell_size_lon))
