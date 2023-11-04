@@ -6,25 +6,8 @@ import numpy as np
 import datetime
 from geopy.geocoders import Nominatim
 import argparse
+from utils import get_coordinates, get_default_data_dir, get_filename_with_path, get_bounding_box
 
-def get_coordinates(city_name):
-    """
-    Get the latitude and longitude coordinates for a given city.
-
-    Args:
-    - city_name (str): The name of the city.
-
-    Returns:
-    - tuple: A tuple containing the latitude and longitude coordinates. Returns None if the city cannot be found.
-    """
-    geolocator = Nominatim(user_agent="city_coordinate_finder")
-    location = geolocator.geocode(city_name)
-
-    if location is not None:
-        latitude, longitude = location.latitude, location.longitude
-        return latitude, longitude
-    else:
-        return None
 
 def make_hist(df, output_file_path):
     """
@@ -135,13 +118,13 @@ def make_folium_map(df, years, city_center, output_file_path):
 
     m.save(output_file_path)
 
-def visualize(city, output=os.getcwd(), years=np.arange(2007, datetime.datetime.now().year + 2), grid_height=1000, grid_width=-1, cell_size=30):
+def visualize(city_name, base_input_dir, years=np.arange(2007, datetime.datetime.now().year + 2), grid_height=1000, grid_width=-1, cell_size=30):
     """
     Visualize Google Street View (GSV) data availability in a specified city's bounding area.
 
     Parameters:
     - `city_name` (`str`): Name of the city you want to make visualizations.
-    - `output` (`str`): Relative path to store all visualizations, CWD by default, should be the same as the path to `city_name` directory that contains the data CSV.
+    - `base_input_dir` (`str`): Relative path to store all visualizations, CWD by default, should be the same as the path to `city_name` directory that contains the data CSV.
     - `years` (a set of `int`): Years to consider for visualization, by default from 2007 to now.
     - `height` (`int`): Height of the bounding box to visualize data, by default 1000 meters.
     - `width` (`int`): Width of the bounding box to visualize data, by default equals to `lat_radius_meter`.
@@ -151,35 +134,24 @@ def visualize(city, output=os.getcwd(), years=np.arange(2007, datetime.datetime.
     1. A histogram showing GSV data distribution over time, including mean, median, and standard deviation.
     2. An interactive folium map that put the colored map on top of the city's real street map.
     """
-    city_center = get_coordinates(city)
+    city_center = get_coordinates(city_name)
     if not city_center:
-        print(f"Could not find coordinates for {city}. Please try another city")
+        print(f"Could not find coordinates for {city_name}. Please try another city")
         return
 
     if grid_width == -1:
         grid_width = grid_height
-    half_lat_radius = grid_height / 2 * 0.00000899
-    half_lon_radius = grid_width / 2 * 0.00001141
 
-    if city_center[0] < 0:
-        half_lat_radius = -half_lat_radius
-    if city_center[1] < 0:
-        half_lon_radius = -half_lon_radius
+    (ymin, ymax, xmin, xmax) = get_bounding_box(city_center, grid_height, grid_width)
 
-    ymin = city_center[0] - half_lat_radius
-    ymax = city_center[0] + half_lat_radius
-    xmin = city_center[1] - half_lon_radius
-    xmax = city_center[1] + half_lon_radius
+    input_filename_with_path = get_filename_with_path(base_input_dir, city_name, grid_height, grid_width, cell_size)
+    print("input_filename_with_path: ", input_filename_with_path)
 
-    cwd_city = output + f'/{city}'
-    if not os.path.exists(cwd_city):
-        print("please specify output as the directory where the scraped data is stored.")
-        return
-    if not os.path.exists(cwd_city + f'/{city}_{cell_size}_coords.csv'):
-        print("The city with the specified cell size has not been scrapped yet.")
+    if not os.path.isfile(input_filename_with_path):
+        print("We could not find the input data file {input_filename_with_path}. Please double check your path.}")
         return
     
-    df = pd.read_csv(cwd_city + f'/{city}_{cell_size}_coords.csv', header=None, names=['lat', 'lon', 'pano_id', 'date', 'status'])
+    df = pd.read_csv(input_filename_with_path, header=None, names=['lat', 'lon', 'pano_id', 'date', 'status'])
     in_range_data = []
     for index, row in df.iterrows():
         if row['lat'] < min(ymin, ymax) or row['lat'] > max(ymin, ymax) or row['lon'] < min(xmin, xmax) or row['lon'] > max(xmin, xmax):
@@ -189,13 +161,17 @@ def visualize(city, output=os.getcwd(), years=np.arange(2007, datetime.datetime.
         in_range_data.append(row)
     in_range_df = pd.DataFrame(in_range_data)
 
-    make_hist(in_range_df, cwd_city + f'/{city}_hist_{cell_size}_{years}_{grid_height}_{grid_width}.png')
-    make_folium_map(in_range_df, years, city_center, cwd_city + f'/{city}_folium_{cell_size}_{years}_{grid_height}_{grid_width}.html')
+    output_dir = os.path.dirname(input_filename_with_path)
+    hist_filename_with_path = os.path.join(output_dir, f'{city_name}_hist_{cell_size}_{years}_{grid_height}_{grid_width}.png')
+    make_hist(in_range_df, hist_filename_with_path)
+
+    folium_filename_with_path = os.path.join(output_dir, f'{city_name}_folium_{cell_size}_{years}_{grid_height}_{grid_width}.html')
+    make_folium_map(in_range_df, years, city_center, folium_filename_with_path)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Visualize Google Street View (GSV) data availability in a specified city's bounding area.")
     parser.add_argument("city", type=str, help="Name of the city.")
-    parser.add_argument("--output", type=str, default=os.getcwd(), help="Output path where the scraped data is stored.")
+    parser.add_argument("--data_path", type=str, default=None, help="Data path where the scraped data is stored.")
     parser.add_argument("--years", type=int, nargs="+", default=list(range(2007, datetime.datetime.now().year + 2)), help="Year range of the GSV data to visualize. Defaults to 2007 (year GSV was introduced) to current year.")
     parser.add_argument("--grid_height", type=int, default=1000, help="Height of the visualizaton area (from the city center), in meters. Defaults to 1000.")
     parser.add_argument("--grid_width", type=int, default=-1, help="Width of the visualization area (from the city center), in meters. Defaults to value of height.")
@@ -204,7 +180,13 @@ def parse_arguments():
 
 def main():
     args = parse_arguments()
-    visualize(args.city, args.output, args.years, args.grid_height, args.grid_width, args.cell_size)
+
+    base_input_dir = args.data_path
+    if base_input_dir is None:
+        base_input_dir = get_default_data_dir(os.getcwd())
+        print(f"No input path specified, defaulting to '{base_input_dir}'")
+
+    visualize(args.city, base_input_dir, args.years, args.grid_height, args.grid_width, args.cell_size)
 
 if __name__ == "__main__":
     main()
