@@ -1,10 +1,8 @@
-import os
-import sys
+import sys, os
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import pandas as pd
-from geopy.geocoders import Nominatim
 import asyncio
 import httpx
 from tenacity import retry, stop_after_attempt, wait_fixed
@@ -12,31 +10,10 @@ import nest_asyncio
 import argparse
 from itertools import product
 import logging
+from utils import get_coordinates, get_default_data_dir, get_filename_with_path, get_bounding_box
 
 GOOGLE_API_KEY = os.environ.get('google_api_key')
-
-def get_coordinates(city_name):
-    """
-    Get the latitude and longitude coordinates for a given city.
-
-    Args:
-    - city_name (str): The name of the city.
-
-    Returns:
-    - tuple: A tuple containing the latitude and longitude coordinates. Returns None if the city cannot be found.
-    """
-    geolocator = Nominatim(user_agent="city_coordinate_finder")
-    location = geolocator.geocode(city_name)
-
-    if location is not None:
-        latitude, longitude = location.latitude, location.longitude
-        return latitude, longitude
-    else:
-        return None
-
-
 nest_asyncio.apply()
-
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(0.1))  # Shorter wait due to higher rate limit
 async def send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat):
@@ -184,6 +161,7 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
 
     city_center = get_coordinates(city_name)
     if not city_center:
+        # TODO: if we can't find the city, we should also support just passing a bounding box
         print(f"Could not find coordinates for {city_name}. Please try another city")
         return
     else:
@@ -192,22 +170,17 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
 
     if grid_width == -1:
         grid_width = grid_height
-    half_lat_radius = grid_height / 2 * 0.00000899 # turn the unit of the height from meter to radius, and divide it by 2
-    half_lon_radius = grid_width / 2 * 0.00001141 # turn the unit of the width from meter to radius, and divide it by 2
+    
+    
     cell_size_lon = cell_size * 0.00001141 # turn the unit of the width of the cell from meter to radius
     cell_size_lat = cell_size * 0.00000899 # turn the unit of the height of the cell from meter to radius
 
     if city_center[0] < 0:
-        half_lat_radius = -half_lat_radius
         cell_size_lat = -cell_size_lat
     if city_center[1] < 0:
-        half_lon_radius = -half_lon_radius
         cell_size_lon = -cell_size_lon
 
-    ymin = city_center[0] - half_lat_radius
-    ymax = city_center[0] + half_lat_radius
-    xmin = city_center[1] - half_lon_radius
-    xmax = city_center[1] + half_lon_radius
+    (ymin, ymax, xmin, xmax) = get_bounding_box(city_center, grid_height, grid_width)
 
     # TODO: add in bounding box printout in miles/meters as well
     print(f"Bounding box for {city_name}: [{xmin, ymin}, {xmax, ymax}]")
@@ -215,17 +188,14 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
     lons = list(np.arange(xmin, xmax, cell_size_lon))
     lats = list(np.arange(ymin, ymax, cell_size_lat))
 
-    print(f"Will query Google Street View every {cell_size} meters for data")
+    print(f"Will query Google Street View every {cell_size:0.1f} meters for data")
 
     # TODO check the math on this
     print(f"This will result in roughly {grid_width * grid_height / cell_size} queries")
 
-    output_dir_for_city = os.path.join(base_output_dir, city_name)
-    if not os.path.exists(output_dir_for_city):
-        os.makedirs(output_dir_for_city)
-
-    output_filename_for_city = f"{city_name}_{cell_size}_coords.csv"
-    output_filename_with_path = os.path.join(output_dir_for_city, output_filename_for_city)
+    print("The base_output_dir is: ", base_output_dir)
+          
+    output_filename_with_path = get_filename_with_path(base_output_dir, city_name, grid_height, grid_width, cell_size)
     scrape(lats, lons, output_filename_with_path)
 
 def parse_arguments():
@@ -254,21 +224,7 @@ def main():
     base_output_dir = args.output
     # We try and default to gsv-bias-scraper/data
     if base_output_dir is None:
-        cur_dir = os.getcwd()
-
-        # Check if the current directory is "src"
-        if os.path.basename(cur_dir) == "src":
-            # Get the parent directory of "src"
-            parent_dir = os.path.dirname(cur_dir)
-            
-            # Set the new directory to be the sub-directory of "data" under the parent directory
-            base_output_dir = os.path.join(parent_dir, "data")    
-        elif os.path.basename(cur_dir) == "gsv-bias-scraper":
-            base_output_dir = os.path.join(cur_dir, "data")
-
-        if not os.path.exists(base_output_dir):
-            os.makedirs(base_output_dir)
-
+        base_output_dir = get_default_data_dir(os.getcwd())
         print(f"No output path specified, defaulting to '{base_output_dir}'")
 
     GSVBias(args.city, base_output_dir, args.grid_height, args.grid_width, args.cell_size)
