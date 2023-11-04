@@ -240,14 +240,14 @@ def parse_arguments():
 def main():
 
     if not GOOGLE_API_KEY:
-        print(f"The Google Maps API key appears not to be set")
+        print(f"\nThe Google Maps API key appears not to be set!\n")
         print(f"Please set your API key as an environment variable named 'google_api_key'")
-        print(f"From terminal, run `conda env config vars set google_api_key=YOUR_API_KEY'")
-        print(f"You can verify that the key was set by running `conda env config vars list`")
-        print(f"You may need to reactivate your environment by running `conda activate gsv-bias-venv`")
+        print(f" 1. From terminal, run `conda env config vars set google_api_key=YOUR_API_KEY'")
+        print(f" 2. You can verify that the key was set by running `conda env config vars list`")
+        print(f" 3. You may need to reactivate your environment by running `conda activate gsv-bias-venv`\n")
         return
     else:
-        print(f"Your Google Maps API key is set to {GOOGLE_API_KEY}")
+        print(f"\nYour Google Maps API key is set to {GOOGLE_API_KEY}\n")
 
     args = parse_arguments()
 
