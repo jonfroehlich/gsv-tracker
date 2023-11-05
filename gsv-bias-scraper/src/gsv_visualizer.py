@@ -6,10 +6,13 @@ import numpy as np
 import datetime
 from geopy.geocoders import Nominatim
 import argparse
-from utils import get_coordinates, get_default_data_dir, get_filename_with_path, get_bounding_box
+from utils import get_coordinates, get_default_data_dir, get_filename_with_path, get_bounding_box, add_year_and_color_column
 
+COLORS = {2024: '#000000', 2023: '#000000', 2022: '#006400', 2021: '#009900', 2020: '#00be00', 2019: '#00e300', 2018: '#00ff00', 2017: '#33ff33', 2016: '#66ff66',
+        2015: '#99ff99', 2014: '#b3ffb3', 2013: '#ccffcc', 2012: '#d9f7b1', 2011: '#e6ef99', 2010: '#f3e780', 2009: '#ffd966', 2008: '#ffc03f',
+        2007: '#ffaa00', 2006: '#ff8c00', 2005: '#ff6600'}
 
-def make_hist(df, output_file_path):
+def make_hist_and_pie(df, output_file_path):
     """
     Plot a histogram representing the distribution of Google Street View data over time.
 
@@ -27,10 +30,6 @@ def make_hist(df, output_file_path):
     df_copy['date'] = pd.to_datetime(df_copy['date'], format='%Y-%m', errors='coerce')
     df_copy = df_copy[df_copy['date'].notna()]
     df_copy['year'] = df_copy['date'].dt.year
-
-    colors = {2023: '#000000', 2022: '#006400', 2021: '#009900', 2020: '#00be00', 2019: '#00e300', 2018: '#00ff00', 2017: '#33ff33', 2016: '#66ff66',
-        2015: '#99ff99', 2014: '#b3ffb3', 2013: '#ccffcc', 2012: '#d9f7b1', 2011: '#e6ef99', 2010: '#f3e780', 2009: '#ffd966', 2008: '#ffc03f',
-        2007: '#ffaa00', 2006: '#ff8c00', 2005: '#ff6600'}
     
     # Set the figure size
     plt.rcParams["figure.figsize"] = [28, 10]
@@ -45,11 +44,19 @@ def make_hist(df, output_file_path):
         for j in range(1, 13):
             my_bins.append(datetime.datetime(i, j, 1))
 
-    for i in np.arange(0, 216, 12):
-        plt.axvspan(my_bins[i], my_bins[i + 12], facecolor=colors[2006 + (i // 12)], alpha=1)
-
     N, bins, patches = ax.hist(df_copy['date'], bins=my_bins, edgecolor='black', linewidth=1)
     plt.xlim(datetime.datetime(2006, 1, 1), datetime.datetime(2024, 1, 1))
+
+    # Set each bar's color and frequency label on top of the bar
+    for i in range(len(patches)):
+        patches[i].set_fc(COLORS[2006 + (i // 12)])
+        if N[i] != 0:
+            ax.text(my_bins[i + 1], N[i], f'{int(N[i])}', ha='right', va='bottom', fontsize=10)
+
+    # Set year labels on x-axis 
+    for i in range(len(N)):
+        if N[i] != 0 and my_bins[i] not in my_ticks:
+            my_ticks.append(my_bins[i])
 
     mean_value = df_copy['date'].mean()
     median_value = df_copy['date'].median()
@@ -59,10 +66,6 @@ def make_hist(df, output_file_path):
     plt.text(0.02, 0.85, f'Mean: {mean_value}', transform=plt.gca().transAxes, verticalalignment='top')
     plt.text(0.02, 0.80, f'Median: {median_value}', transform=plt.gca().transAxes, verticalalignment='top')
     plt.text(0.02, 0.75, f'Standard Deviation: {std_value}', transform=plt.gca().transAxes, verticalalignment='top')
-
-    for i in range(len(N)):
-        if N[i] != 0 and my_bins[i] not in my_ticks:
-            my_ticks.append(my_bins[i])
 
     plt.xlabel('Date')
     plt.ylabel('Frequency')
@@ -74,6 +77,31 @@ def make_hist(df, output_file_path):
 
     plt.savefig(output_file_path)
 
+def make_bar_chart(df, output_file_path):
+    
+    # Sample data and preprocessing
+    df = add_year_and_color_column(df)
+    years = np.sort(df['year'].unique())
+    cleaned_years = years[years != 1900]  # Remove rows with no data
+    proportions = [(df['year'] == i).sum() for i in cleaned_years]
+    colors = [COLORS[i] for i in cleaned_years]
+
+    # Create a bar chart
+    fig, ax = plt.subplots()
+    ax.bar(cleaned_years, proportions, color=colors)
+
+    # Add labels to the bars
+    for year, proportion in zip(cleaned_years, proportions):
+        ax.text(year, proportion, f'{np.round(proportion / np.sum(proportions), 3)}%', ha='center', va='bottom', fontsize=14)
+
+    plt.xlabel('Year')
+    plt.ylabel('Proportion')
+    plt.title('Yearly Proportions')
+    plt.xticks(cleaned_years)
+
+    # Save or display the plot
+    plt.savefig(output_file_path)
+
 
 def make_folium_map(df, years, city_center, output_file_path):
     """
@@ -81,28 +109,14 @@ def make_folium_map(df, years, city_center, output_file_path):
 
     Args:
     - df (pd.DataFrame): DataFrame containing Google Street View data with a 'date' column.
-    - year_span (list): A list of years to consider for the scatter plot.
+    - year (list): A list of years to consider for the scatter plot.
     - city_center (tuple): Tuple of latitude and longitude representing the center of the map.
     - output_file_path (str): Path that stores the data
 
     Output:
     - An interactive folium map that put the colored map on top of the city's real street map, in output_file_path.
     """
-
-    df['date'].fillna('1900-01', inplace=True)
-    df['date'] = pd.to_datetime(df['date'])
-    df['year'] = df['date'].dt.year
-
-    colors = {2023: '#000000', 2022: '#006400', 2021: '#009900', 2020: '#00be00', 2019: '#00e300', 2018: '#00ff00', 2017: '#33ff33', 2016: '#66ff66',
-        2015: '#99ff99', 2014: '#b3ffb3', 2013: '#ccffcc', 2012: '#d9f7b1', 2011: '#e6ef99', 2010: '#f3e780', 2009: '#ffd966', 2008: '#ffc03f',
-        2007: '#ffaa00', 2006: '#ff8c00', 2005: '#ff6600', 1900: '#D3D3D3'}
-
-    distinct_years = df['year'].unique()
-    unique_colors = [colors[year] for year in distinct_years]
-    value_to_color = {value: color for value, color in zip(distinct_years, unique_colors)}
-    df['color'] = df['year'].map(value_to_color)
-
-    sorted_df = df.sort_values(by='year', ascending=False)
+    df = add_year_and_color_column(df)
 
     m = folium.Map(location=city_center, zoom_start=12)
     for index, row in df.iterrows():
@@ -163,10 +177,13 @@ def visualize(city_name, base_input_dir, years=np.arange(2007, datetime.datetime
 
     output_dir = os.path.dirname(input_filename_with_path)
     hist_filename_with_path = os.path.join(output_dir, f'{city_name}_hist_{cell_size}_{years}_{grid_height}_{grid_width}.png')
-    make_hist(in_range_df, hist_filename_with_path)
+    make_hist_and_pie(in_range_df, hist_filename_with_path)
 
     folium_filename_with_path = os.path.join(output_dir, f'{city_name}_folium_{cell_size}_{years}_{grid_height}_{grid_width}.html')
     make_folium_map(in_range_df, years, city_center, folium_filename_with_path)
+
+    pie_filename_with_path = os.path.join(output_dir, f'{city_name}_bar_{cell_size}_{years}_{grid_height}_{grid_width}.png')
+    make_bar_chart(in_range_df, pie_filename_with_path)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Visualize Google Street View (GSV) data availability in a specified city's bounding area.")

@@ -12,6 +12,7 @@ from itertools import product
 import logging
 from utils import get_coordinates, get_default_data_dir, get_filename_with_path, get_bounding_box
 
+LATITUDE_TO_METER_CONST = 0.00000899
 GOOGLE_API_KEY = os.environ.get('google_api_key')
 nest_asyncio.apply()
 
@@ -121,7 +122,7 @@ def scrape(lats, lons, output_file_path):
     lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat = sys.maxsize, -sys.maxsize - 1, sys.maxsize, -sys.maxsize - 1
     if os.path.isfile(output_file_path):
         print(f"We previously found a file at {output_file_path}, reading it in...")
-        prev_df = pd.read_csv(output_file_path, header=None, names=['lat', 'lon', 'date'])
+        prev_df = pd.read_csv(output_file_path, header=None, names=['lat', 'lon', 'pano_id', 'date', 'status'])
         lower_bound_lon = prev_df['lon'].min()
         upper_bound_lon = prev_df['lon'].max()
         lower_bound_lat = prev_df['lat'].min()
@@ -143,6 +144,7 @@ def scrape(lats, lons, output_file_path):
     else:
         final_df.to_csv(output_file_path, header=False, index=False)
         print(f"Saved data to {output_file_path}...")
+
 
 def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_size=30):
     """
@@ -171,9 +173,8 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
     if grid_width == -1:
         grid_width = grid_height
     
-    
-    cell_size_lon = cell_size * 0.00001141 # turn the unit of the width of the cell from meter to radius
-    cell_size_lat = cell_size * 0.00000899 # turn the unit of the height of the cell from meter to radius
+    cell_size_lat = cell_size * LATITUDE_TO_METER_CONST # turn the unit of the height of the cell from meter to radius
+    cell_size_lon = cell_size * (1 / (40075000 * (np.cos(city_center[0]) / 360))) # turn the unit of the width of the cell from meter to radius
 
     if city_center[0] < 0:
         cell_size_lat = -cell_size_lat
@@ -182,16 +183,17 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
 
     (ymin, ymax, xmin, xmax) = get_bounding_box(city_center, grid_height, grid_width)
 
-    # TODO: add in bounding box printout in miles/meters as well
+    # TODO: add in bounding box printout in miles/meters as well: Done
     print(f"Bounding box for {city_name}: [{xmin, ymin}, {xmax, ymax}]")
+    print(f"Bounding box height {grid_height} meters, bounding box width {grid_width} meters")
 
     lons = list(np.arange(xmin, xmax, cell_size_lon))
     lats = list(np.arange(ymin, ymax, cell_size_lat))
 
     print(f"Will query Google Street View every {cell_size:0.1f} meters for data")
 
-    # TODO check the math on this
-    print(f"This will result in roughly {grid_width * grid_height / cell_size} queries")
+    # TODO check the math on this: Done, now number of queries is correct
+    print(f"This will result in roughly {int(np.round(grid_width * grid_height / (cell_size * cell_size)))} queries")
 
     print("The base_output_dir is: ", base_output_dir)
           
