@@ -1,5 +1,6 @@
 import os # for get_default_data_dir
 from geopy.geocoders import Nominatim # for getting coordinates from city name
+import pandas as pd
 
 def get_coordinates(city_name):
     """
@@ -65,3 +66,19 @@ def get_filename_with_path(data_dir, city_name, grid_height, grid_width, cell_si
     output_filename_with_path = os.path.join(output_dir_for_city, output_filename_for_city)
 
     return output_filename_with_path
+
+def add_year_and_color_column(df):
+    df['date'].fillna('1900-01', inplace=True) #'1900-01' represents no data 
+    df['date'] = pd.to_datetime(df['date'])
+    df['year'] = df['date'].dt.year
+
+    colors = {2023: '#000000', 2022: '#006400', 2021: '#009900', 2020: '#00be00', 2019: '#00e300', 2018: '#00ff00', 2017: '#33ff33', 2016: '#66ff66',
+        2015: '#99ff99', 2014: '#b3ffb3', 2013: '#ccffcc', 2012: '#d9f7b1', 2011: '#e6ef99', 2010: '#f3e780', 2009: '#ffd966', 2008: '#ffc03f',
+        2007: '#ffaa00', 2006: '#ff8c00', 2005: '#ff6600', 1900: '#D3D3D3'}
+
+    distinct_years = df['year'].unique()
+    unique_colors = [colors[year] for year in distinct_years]
+    value_to_color = {value: color for value, color in zip(distinct_years, unique_colors)}
+    df['color'] = df['year'].map(value_to_color)
+
+    return df
