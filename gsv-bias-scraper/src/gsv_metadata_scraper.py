@@ -169,9 +169,12 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
     else:
         print(f"Coordinates for {city_name} found: {city_center}")
 
-
     if grid_width == -1:
         grid_width = grid_height
+
+    if grid_height > 1000000 or grid_width > 1000000:
+        print(f"The bounding height {grid_height} meters, width {grid_width} meters is too large. Please scrape city by city.")
+        return
     
     cell_size_lat = cell_size * LATITUDE_TO_METER_CONST 
     cell_size_lon = np.abs(cell_size * (1 / (40075000 * (np.cos(city_center[0]) / 360))))
@@ -189,7 +192,7 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
 
     # TODO: add in bounding box printout in miles/meters as well: Done
     print(f"Bounding box for {city_name}: [{xmin, ymin}, {xmax, ymax}]")
-    print(f"Bounding box height {grid_height} meters, bounding box width {grid_width} meters")
+    print(f"Bounding box height {grid_height} meters, width {grid_width} meters")
 
     lons = list(np.arange(xmin, xmax, cell_size_lon))
     lats = list(np.arange(ymin, ymax, cell_size_lat))
