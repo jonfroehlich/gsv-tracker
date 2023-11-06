@@ -10,6 +10,7 @@ import nest_asyncio
 import argparse
 from itertools import product
 import logging
+import csv
 from utils import get_coordinates, get_default_data_dir, get_filename_with_path, get_bounding_box
 
 LATITUDE_TO_METER_CONST = 0.00000899 #refer to https://stackoverflow.com/questions/639695/how-to-convert-latitude-or-longitude-to-meters
@@ -17,7 +18,7 @@ GOOGLE_API_KEY = os.environ.get('google_api_key')
 nest_asyncio.apply()
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(0.1))  # Shorter wait due to higher rate limit
-async def send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat):
+async def send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, output_file_path):
     """
     Send an asynchronous request to Google Maps API to retrieve metadata for specified coordinates.
 
@@ -37,7 +38,7 @@ async def send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound
 
     if lower_bound_lat < y < upper_bound_lat and lower_bound_lon < x < upper_bound_lon:
         pbar.update(1)
-        return {}
+        return
     
     location_coords = f"{y},{x}"
 
@@ -72,20 +73,29 @@ async def send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound
     # The response is a JSON object. We want to extract the location, date, and pano id.
     metadata = response.json()
     if not metadata.get('location', None):
-        return {'lat': y, 
+        data_row = [{'lat': y, 
                 'lon': x, 
                 'pano_id' : "None",
                 'date': "None",
-                'status': metadata.get('status')} # Let's store the status returned by the api
+                'status': metadata.get('status')}] # Let's store the status returned by the api
     else:
-        return {'lat': metadata.get('location').get('lat'), 
+        data_row = [{'lat': metadata.get('location').get('lat'), 
                 'lon': metadata.get('location').get('lng'), 
                 'pano_id' : metadata.get('pano_id'),
-                'date': metadata.get('date')}
+                'date': metadata.get('date')}]
+        
+    header = ['lat', 'lon', 'pano_id', 'date', 'status']
+    with open(output_file_path, mode='a', newline='') as csv_file:
+        # Create a CSV DictWriter
+        writer = csv.DictWriter(csv_file, fieldnames=header)
+
+        # Write each dictionary to the CSV file
+        for data in data_row:
+            writer.writerow(data)
 
 
 
-async def get_gsv_metadata(combined_df, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, max_concurrent_requests=500):
+async def get_gsv_metadata(combined_df, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, output_file_path, max_concurrent_requests=500):
     """
     Asynchronously fetch Google Street View dates for a DataFrame of coordinates.
 
@@ -104,7 +114,7 @@ async def get_gsv_metadata(combined_df, lower_bound_lon, upper_bound_lon, lower_
     async with httpx.AsyncClient(limits=limits, timeout=timeout) as async_client:
         with tqdm(total=len(combined_df), desc="Fetching dates") as pbar:
             sem = asyncio.Semaphore(max_concurrent_requests)
-            rows = await asyncio.gather(*(send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat) for i in range(len(combined_df))))
+            rows = await asyncio.gather(*(send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, output_file_path) for i in range(len(combined_df))))
     return rows
 
 
@@ -133,17 +143,17 @@ def scrape(lats, lons, output_file_path):
     combinations = list(product(lats, lons))
     combined_df = pd.DataFrame(combinations, columns=['lat', 'lon'])
 
-    rows = asyncio.run(get_gsv_metadata(combined_df, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat))
+    rows = asyncio.run(get_gsv_metadata(combined_df, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, output_file_path))
 
-    final_df = pd.DataFrame(rows)
-    final_df = final_df.dropna(how='all')
+    # final_df = pd.DataFrame(rows)
+    # final_df = final_df.dropna(how='all')
 
-    if os.path.isfile(output_file_path):
-        final_df.to_csv(output_file_path, mode='a', header=False, index=False)
-        print(f"Appended data to {output_file_path}...")
-    else:
-        final_df.to_csv(output_file_path, header=False, index=False)
-        print(f"Saved data to {output_file_path}...")
+    # if os.path.isfile(output_file_path):
+    #     final_df.to_csv(output_file_path, mode='a', header=False, index=False)
+    #     print(f"Appended data to {output_file_path}...")
+    # else:
+    #     final_df.to_csv(output_file_path, header=False, index=False)
+    #     print(f"Saved data to {output_file_path}...")
 
 
 def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_size=30):
