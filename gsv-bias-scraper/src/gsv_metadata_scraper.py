@@ -12,7 +12,7 @@ from itertools import product
 import logging
 from utils import get_coordinates, get_default_data_dir, get_filename_with_path, get_bounding_box
 
-LATITUDE_TO_METER_CONST = 0.00000899
+LATITUDE_TO_METER_CONST = 0.00000899 #refer to https://stackoverflow.com/questions/639695/how-to-convert-latitude-or-longitude-to-meters
 GOOGLE_API_KEY = os.environ.get('google_api_key')
 nest_asyncio.apply()
 
@@ -38,7 +38,7 @@ async def send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound
     if lower_bound_lat < y < upper_bound_lat and lower_bound_lon < x < upper_bound_lon:
         pbar.update(1)
         return {}
-
+    
     location_coords = f"{y},{x}"
 
     GOOGLE_MAPS_API_BASE_URL = 'https://maps.googleapis.com/maps/api/streetview/metadata'
@@ -173,8 +173,12 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
     if grid_width == -1:
         grid_width = grid_height
     
-    cell_size_lat = cell_size * LATITUDE_TO_METER_CONST # turn the unit of the height of the cell from meter to radius
-    cell_size_lon = cell_size * (1 / (40075000 * (np.cos(city_center[0]) / 360))) # turn the unit of the width of the cell from meter to radius
+    cell_size_lat = cell_size * LATITUDE_TO_METER_CONST 
+    cell_size_lon = np.abs(cell_size * (1 / (40075000 * (np.cos(city_center[0]) / 360))))
+
+    print(cell_size_lat)
+    print(cell_size_lon)
+    #refer to https://stackoverflow.com/questions/639695/how-to-convert-latitude-or-longitude-to-meters
 
     if city_center[0] < 0:
         cell_size_lat = -cell_size_lat
@@ -193,7 +197,7 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
     print(f"Will query Google Street View every {cell_size:0.1f} meters for data")
 
     # TODO check the math on this: Done, now number of queries is correct
-    print(f"This will result in roughly {int(np.round(grid_width * grid_height / (cell_size * cell_size)))} queries")
+    print(f"This will result in roughly {int(np.round(len(lats) * len(lons)))} queries")
 
     print("The base_output_dir is: ", base_output_dir)
           
