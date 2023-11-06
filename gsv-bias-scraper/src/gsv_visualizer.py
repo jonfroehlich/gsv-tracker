@@ -81,23 +81,24 @@ def make_bar_chart(df, output_file_path):
     
     # Sample data and preprocessing
     df = add_year_and_color_column(df)
-    years = np.sort(df['year'].unique())
-    cleaned_years = years[years != 1900]  # Remove rows with no data
-    proportions = [(df['year'] == i).sum() for i in cleaned_years]
-    colors = [COLORS[i] for i in cleaned_years]
+    filtered_df = df[df['year'] != 1900] # Remove rows with no data
+    years = np.sort(filtered_df['year'].unique())
+    proportions = [((filtered_df['year'] == i).sum() / filtered_df.shape[0] * 100) for i in years]
+    colors = [COLORS[i] for i in years]
 
     # Create a bar chart
     fig, ax = plt.subplots()
-    ax.bar(cleaned_years, proportions, color=colors)
+    ax.bar(years, proportions, color=colors)
 
     # Add labels to the bars
-    for year, proportion in zip(cleaned_years, proportions):
-        ax.text(year, proportion, f'{np.round(proportion / np.sum(proportions), 3)}%', ha='center', va='bottom', fontsize=14)
+    for year, proportion in zip(years, proportions):
+        ax.text(year, proportion, f'{np.round(proportion, 2)}%', ha='center', va='bottom', fontsize=14)
 
+    plt.ylim(0, 100)
     plt.xlabel('Year')
     plt.ylabel('Proportion')
     plt.title('Yearly Proportions')
-    plt.xticks(cleaned_years)
+    plt.xticks(years)
 
     # Save or display the plot
     plt.savefig(output_file_path)
