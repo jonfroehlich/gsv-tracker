@@ -18,7 +18,7 @@ GOOGLE_API_KEY = os.environ.get('google_api_key')
 nest_asyncio.apply()
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(0.1))  # Shorter wait due to higher rate limit
-async def send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, output_file_path):
+async def send_maps_request(async_client, y, x, pbar, sem, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, output_file_path):
     """
     Send an asynchronous request to Google Maps API to retrieve metadata for specified coordinates.
 
@@ -32,10 +32,6 @@ async def send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound
     Returns:
     - dict: Dictionary containing latitude, longitude, and date retrieved from the API.
     """
-
-    y = combined_df.loc[i]["lat"]
-    x = combined_df.loc[i]["lon"]
-
     if lower_bound_lat < y < upper_bound_lat and lower_bound_lon < x < upper_bound_lon:
         pbar.update(1)
         return
@@ -88,14 +84,13 @@ async def send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound
     with open(output_file_path, mode='a', newline='') as csv_file:
         # Create a CSV DictWriter
         writer = csv.DictWriter(csv_file, fieldnames=header)
-
         # Write each dictionary to the CSV file
         for data in data_row:
             writer.writerow(data)
 
 
 
-async def get_gsv_metadata(combined_df, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, output_file_path, max_concurrent_requests=500):
+async def get_gsv_metadata(xmin, xmax, cell_size_lon, ymin, ymax, cell_size_lat, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, output_file_path, max_concurrent_requests=500):
     """
     Asynchronously fetch Google Street View dates for a DataFrame of coordinates.
 
@@ -111,14 +106,45 @@ async def get_gsv_metadata(combined_df, lower_bound_lon, upper_bound_lon, lower_
     limits = httpx.Limits(max_connections=max_concurrent_requests, max_keepalive_connections=max_concurrent_requests)
     timeout = httpx.Timeout(5.0, connect=5.0)
 
+    class CoordinateIterator:
+        def __init__(self, y_start, y_end, y_step, x_start, x_end, x_step):
+            self.y = y_start
+            self.y_end = y_end
+            self.y_step = y_step
+            self.x_start = x_start
+            self.x = x_start
+            self.x_end = x_end
+            self.x_step = x_step
+            self.cnt = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            self.cnt += 1
+            if (self.cnt > 2000):
+                raise StopIteration
+            if abs(self.y) < abs(self.y_end):
+                returned_y, returned_x = self.y, self.x
+                if abs(self.x) < abs(self.x_end) and abs(self.y) < abs(self.y_end):
+                    self.x += self.x_step
+                elif abs(self.x) >= abs(self.x_end) and abs(self.y) < abs(self.y_end):
+                    self.x = self.x_start
+                    self.y += self.y_step
+                return [returned_y, returned_x]
+            else:
+                raise StopIteration
+            
+    coordinate_iterator = CoordinateIterator(ymin, ymax, cell_size_lat, xmin, xmax, cell_size_lon)
+    total_counts = int(((abs(xmin - xmax) // abs(cell_size_lon)) + 2) * ((abs(ymin - ymax) // abs(cell_size_lat)) + 1))
+
     async with httpx.AsyncClient(limits=limits, timeout=timeout) as async_client:
-        with tqdm(total=len(combined_df), desc="Fetching dates") as pbar:
+        with tqdm(total=total_counts, desc="Fetching dates") as pbar:
             sem = asyncio.Semaphore(max_concurrent_requests)
-            rows = await asyncio.gather(*(send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, output_file_path) for i in range(len(combined_df))))
-    return rows
+            await asyncio.gather(*[send_maps_request(async_client, y, x, pbar, sem, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, output_file_path) 
+                                 for y, x in coordinate_iterator])
 
-
-def scrape(lats, lons, output_file_path):
+def scrape(xmin, xmax, cell_size_lon, ymin, ymax, cell_size_lat, output_file_path):
     """
     Scrape Google Street View data for a given city within specified coordinates.
 
@@ -140,20 +166,7 @@ def scrape(lats, lons, output_file_path):
     else:
         print(f"Saving contents to {output_file_path}...")
 
-    combinations = list(product(lats, lons))
-    combined_df = pd.DataFrame(combinations, columns=['lat', 'lon'])
-
-    rows = asyncio.run(get_gsv_metadata(combined_df, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, output_file_path))
-
-    # final_df = pd.DataFrame(rows)
-    # final_df = final_df.dropna(how='all')
-
-    # if os.path.isfile(output_file_path):
-    #     final_df.to_csv(output_file_path, mode='a', header=False, index=False)
-    #     print(f"Appended data to {output_file_path}...")
-    # else:
-    #     final_df.to_csv(output_file_path, header=False, index=False)
-    #     print(f"Saved data to {output_file_path}...")
+    asyncio.run(get_gsv_metadata(xmin, xmax, cell_size_lon, ymin, ymax, cell_size_lat, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, output_file_path))
 
 
 def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_size=30):
@@ -188,9 +201,6 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
     
     cell_size_lat = cell_size * LATITUDE_TO_METER_CONST 
     cell_size_lon = np.abs(cell_size * (1 / (40075000 * (np.cos(city_center[0]) / 360))))
-
-    print(cell_size_lat)
-    print(cell_size_lon)
     #refer to https://stackoverflow.com/questions/639695/how-to-convert-latitude-or-longitude-to-meters
 
     if city_center[0] < 0:
@@ -204,18 +214,15 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
     print(f"Bounding box for {city_name}: [{xmin, ymin}, {xmax, ymax}]")
     print(f"Bounding box height {grid_height} meters, width {grid_width} meters")
 
-    lons = list(np.arange(xmin, xmax, cell_size_lon))
-    lats = list(np.arange(ymin, ymax, cell_size_lat))
-
     print(f"Will query Google Street View every {cell_size:0.1f} meters for data")
 
     # TODO check the math on this: Done, now number of queries is correct
-    print(f"This will result in roughly {int(np.round(len(lats) * len(lons)))} queries")
+    print(f"This will result in roughly {int(((abs(xmin - xmax) // abs(cell_size_lon)) + 2) * ((abs(ymin - ymax) // abs(cell_size_lat)) + 1))} queries")
 
     print("The base_output_dir is: ", base_output_dir)
           
     output_filename_with_path = get_filename_with_path(base_output_dir, city_name, grid_height, grid_width, cell_size)
-    scrape(lats, lons, output_filename_with_path)
+    scrape(xmin, xmax, cell_size_lon, ymin, ymax, cell_size_lat, output_filename_with_path)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Downloads Google Street View (GSV) metadata in a specified city's bounding area.")
