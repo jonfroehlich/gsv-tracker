@@ -216,7 +216,7 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
 
     print(f"Will query Google Street View every {cell_size:0.1f} meters for data")
 
-    # TODO check the math on this: Done, now number of queries is correct
+    # TODO check the math on this: Done
     print(f"This will result in roughly {int(((abs(xmin - xmax) // abs(cell_size_lon)) + 2) * ((abs(ymin - ymax) // abs(cell_size_lat)) + 1))} queries")
 
     print("The base_output_dir is: ", base_output_dir)
