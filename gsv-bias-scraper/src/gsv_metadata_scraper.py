@@ -121,9 +121,6 @@ async def get_gsv_metadata(xmin, xmax, cell_size_lon, ymin, ymax, cell_size_lat,
             return self
 
         def __next__(self):
-            self.cnt += 1
-            if (self.cnt > 2000):
-                raise StopIteration
             if abs(self.y) < abs(self.y_end):
                 returned_y, returned_x = self.y, self.x
                 if abs(self.x) < abs(self.x_end) and abs(self.y) < abs(self.y_end):
