@@ -71,16 +71,20 @@ async def send_maps_request(async_client, y, x, pbar, sem, lower_bound_lon, uppe
     if not metadata.get('location', None):
         data_row = [{'lat': y, 
                 'lon': x, 
+                'query_lat': y,
+                'query_lon': x,
                 'pano_id' : "None",
                 'date': "None",
                 'status': metadata.get('status')}] # Let's store the status returned by the api
     else:
         data_row = [{'lat': metadata.get('location').get('lat'), 
                 'lon': metadata.get('location').get('lng'), 
+                'query_lat': y,
+                'query_lon': x,
                 'pano_id' : metadata.get('pano_id'),
                 'date': metadata.get('date')}]
         
-    header = ['lat', 'lon', 'pano_id', 'date', 'status']
+    header = ['lat', 'lon', 'query_lat', 'query_lon', 'pano_id', 'date', 'status']
     with open(output_file_path, mode='a', newline='') as csv_file:
         # Create a CSV DictWriter
         writer = csv.DictWriter(csv_file, fieldnames=header)
@@ -155,7 +159,7 @@ def scrape(xmin, xmax, cell_size_lon, ymin, ymax, cell_size_lat, output_file_pat
     lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat = sys.maxsize, -sys.maxsize - 1, sys.maxsize, -sys.maxsize - 1
     if os.path.isfile(output_file_path):
         print(f"We previously found a file at {output_file_path}, reading it in...")
-        prev_df = pd.read_csv(output_file_path, header=None, names=['lat', 'lon', 'pano_id', 'date', 'status'])
+        prev_df = pd.read_csv(output_file_path, header=None, names=['lat', 'lon', 'query_lat', 'query_lon', 'pano_id', 'date', 'status'])
         lower_bound_lon = prev_df['lon'].min()
         upper_bound_lon = prev_df['lon'].max()
         lower_bound_lat = prev_df['lat'].min()
