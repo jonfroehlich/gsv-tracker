@@ -11,9 +11,11 @@ import argparse
 from itertools import product
 import logging
 import csv
-from utils import get_coordinates, get_default_data_dir, get_filename_with_path, get_bounding_box
+import json
+from utils import get_coordinates, get_default_data_dir, get_filename_with_path, get_bounding_box, get_user_coordinates
 
-LATITUDE_TO_METER_CONST = 0.00000899 #refer to https://stackoverflow.com/questions/639695/how-to-convert-latitude-or-longitude-to-meters
+METER_TO_LATTITUDE_CONST = 0.00000899 #refer to https://stackoverflow.com/questions/639695/how-to-convert-latitude-or-longitude-to-meters
+METER_TO_LONGITUDE_CONST = 40075000
 GOOGLE_API_KEY = os.environ.get('google_api_key')
 nest_asyncio.apply()
 
@@ -187,21 +189,26 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
 
     city_center = get_coordinates(city_name)
     if not city_center:
-        # TODO: if we can't find the city, we should also support just passing a bounding box
-        print(f"Could not find coordinates for {city_name}. Please try another city")
-        return
+        # TODO: if we can't find the city, we should also support just passing a bounding box: Done
+        print(f"Could not find coordinates for {city_name}. Please enter it manually")
+        ymin, ymax, xmin, xmax = get_user_coordinates()
+        city_center = [(ymax + ymin) / 2, (xmax + xmin) / 2]
+        grid_height = int(abs(ymax - ymin) / METER_TO_LATTITUDE_CONST)
+        grid_width = int(abs(xmax - xmin) / abs(1 / (METER_TO_LONGITUDE_CONST * (np.cos(city_center[0]) / 360))))
+
     else:
         print(f"Coordinates for {city_name} found: {city_center}")
-
+        (ymin, ymax, xmin, xmax) = get_bounding_box(city_center, grid_height, grid_width)
+        
     if grid_width == -1:
         grid_width = grid_height
 
     if grid_height > 1000000 or grid_width > 1000000:
         print(f"The bounding height {grid_height} meters, width {grid_width} meters is too large. Please scrape city by city.")
         return
-    
-    cell_size_lat = cell_size * LATITUDE_TO_METER_CONST 
-    cell_size_lon = np.abs(cell_size * (1 / (40075000 * (np.cos(city_center[0]) / 360))))
+
+    cell_size_lat = cell_size * METER_TO_LATTITUDE_CONST 
+    cell_size_lon = abs(cell_size * (1 / (METER_TO_LONGITUDE_CONST * (np.cos(city_center[0]) / 360))))
     #refer to https://stackoverflow.com/questions/639695/how-to-convert-latitude-or-longitude-to-meters
 
     if city_center[0] < 0:
@@ -209,10 +216,8 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
     if city_center[1] < 0:
         cell_size_lon = -cell_size_lon
 
-    (ymin, ymax, xmin, xmax) = get_bounding_box(city_center, grid_height, grid_width)
-
     # TODO: add in bounding box printout in miles/meters as well: Done
-    print(f"Bounding box for {city_name}: [{xmin, ymin}, {xmax, ymax}]")
+    print(f"Bounding box for {city_name}: [{ymin, xmin}, {ymax, xmax}]")
     print(f"Bounding box height {grid_height} meters, width {grid_width} meters")
 
     print(f"Will query Google Street View every {cell_size:0.1f} meters for data")
@@ -222,7 +227,11 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
 
     print("The base_output_dir is: ", base_output_dir)
           
+    data = {"ymin": ymin, "ymax": ymax, "xmin": xmin, "xmax": xmax}
+    
     output_filename_with_path = get_filename_with_path(base_output_dir, city_name, grid_height, grid_width, cell_size)
+    with open(os.path.join(base_output_dir, f"{city_name}/bounding_box.json"), 'w') as json_file:
+        json.dump(data, json_file)
     scrape(xmin, xmax, cell_size_lon, ymin, ymax, cell_size_lat, output_filename_with_path)
 
 def parse_arguments():
@@ -235,7 +244,6 @@ def parse_arguments():
     return parser.parse_args()
 
 def main():
-
     if not GOOGLE_API_KEY:
         print(f"\nThe Google Maps API key appears not to be set!\n")
         print(f"Please set your API key as an environment variable named 'google_api_key'")

@@ -20,6 +20,19 @@ def get_coordinates(city_name):
         return latitude, longitude
     else:
         return None
+    
+def get_user_coordinates():
+    lat_lower = float(input("Enter lattitude lower bound: "))
+    lat_upper = float(input("Enter lattitude upper bound: "))
+    lon_lower = float(input("Enter longitude lower bound: "))
+    lon_upper = float(input("Enter longitude upper bound: "))
+
+    #To make the scraper work properly, ymin needs to be the lattitude with smaller absolute value, same for xmin
+    ymin = lat_lower if abs(lat_lower) < abs(lat_upper) else lat_upper
+    ymax = lat_lower if abs(lat_lower) > abs(lat_upper) else lat_upper
+    xmin = lon_lower if abs(lon_lower) < abs(lon_upper) else lon_upper
+    xmax = lon_lower if abs(lon_lower) > abs(lon_upper) else lon_upper
+    return ymin, ymax, xmin, xmax
 
 def get_bounding_box(city_center, grid_height, grid_width):
     half_lat_radius = grid_height / 2 * 0.00000899 # turn the unit of the height from meter to radius, and divide it by 2

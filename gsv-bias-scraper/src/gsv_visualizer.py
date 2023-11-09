@@ -6,6 +6,7 @@ import numpy as np
 import datetime
 from geopy.geocoders import Nominatim
 import argparse
+import json
 from utils import get_coordinates, get_default_data_dir, get_filename_with_path, get_bounding_box, add_year_and_color_column
 
 COLORS = {2024: '#000000', 2023: '#000000', 2022: '#006400', 2021: '#009900', 2020: '#00be00', 2019: '#00e300', 2018: '#00ff00', 2017: '#33ff33', 2016: '#66ff66',
@@ -149,15 +150,18 @@ def visualize(city_name, base_input_dir, years=np.arange(2007, datetime.datetime
     1. A histogram showing GSV data distribution over time, including mean, median, and standard deviation.
     2. An interactive folium map that put the colored map on top of the city's real street map.
     """
-    city_center = get_coordinates(city_name)
-    if not city_center:
-        print(f"Could not find coordinates for {city_name}. Please try another city")
-        return
+    try:
+        with open(os.path.join(base_input_dir, city_name, "bounding_box.json"), 'r') as json_file:
+            data = json.load(json_file)
 
+    except FileNotFoundError:
+        print(f"{city_name} has not been scraped yet.")
+        
     if grid_width == -1:
         grid_width = grid_height
 
-    (ymin, ymax, xmin, xmax) = get_bounding_box(city_center, grid_height, grid_width)
+    ymin, ymax, xmin, xmax = data["ymin"], data["ymax"], data["xmin"], data["xmax"]
+    city_center = [(ymax + ymin) / 2, (xmax + xmin) / 2]
 
     input_filename_with_path = get_filename_with_path(base_input_dir, city_name, grid_height, grid_width, cell_size)
     print("input_filename_with_path: ", input_filename_with_path)
