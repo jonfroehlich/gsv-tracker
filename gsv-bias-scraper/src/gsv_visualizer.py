@@ -196,7 +196,7 @@ def parse_arguments():
     parser.add_argument("city", type=str, help="Name of the city.")
     parser.add_argument("--data_path", type=str, default=None, help="Data path where the scraped data is stored.")
     parser.add_argument("--years", type=int, nargs="+", default=list(range(2007, datetime.datetime.now().year + 2)), help="Year range of the GSV data to visualize. Defaults to 2007 (year GSV was introduced) to current year.")
-    parser.add_argument("--grid_height", type=int, default=1000, help="Height of the visualizaton area (from the city center), in meters. Defaults to 1000.")
+    parser.add_argument("--grid_height", type=int, default=1000, help="Height of the visualization area (from the city center), in meters. Defaults to 1000.")
     parser.add_argument("--grid_width", type=int, default=-1, help="Width of the visualization area (from the city center), in meters. Defaults to value of height.")
     parser.add_argument("--cell_size", type=int, default=30, help="Cell size to scrape GSV data. Should be the same as the cell_sized used to scrape data.")
     return parser.parse_args()
