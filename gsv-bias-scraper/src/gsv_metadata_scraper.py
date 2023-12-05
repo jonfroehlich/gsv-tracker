@@ -193,8 +193,8 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
     """
 
     city_center = get_coordinates(city_name)
+    ymin, ymax, xmin, xmax = 0, 0, 0, 0
     if not city_center:
-        # TODO: if we can't find the city, we should also support just passing a bounding box: Done
         print(f"Could not find coordinates for {city_name}. Please enter it manually")
         ymin, ymax, xmin, xmax = get_user_coordinates()
         city_center = [(ymax + ymin) / 2, (xmax + xmin) / 2]
@@ -221,20 +221,17 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
     if city_center[1] < 0:
         cell_size_lon = -cell_size_lon
 
-    # TODO: add in bounding box printout in miles/meters as well: Done
     print(f"Bounding box for {city_name}: [{ymin, xmin}, {ymax, xmax}]")
     print(f"Bounding box height {grid_height} meters, width {grid_width} meters")
-
     print(f"Will query Google Street View every {cell_size:0.1f} meters for data")
-
-    # TODO check the math on this: Done
     print(f"This will result in roughly {int(((abs(xmin - xmax) // abs(cell_size_lon)) + 2) * ((abs(ymin - ymax) // abs(cell_size_lat)) + 1))} queries")
-
     print("The base_output_dir is: ", base_output_dir)
           
     data = {"ymin": ymin, "ymax": ymax, "xmin": xmin, "xmax": xmax}
     
     output_filename_with_path = get_filename_with_path(base_output_dir, city_name, grid_height, grid_width, cell_size)
+
+    # TODO: not sure what we're doing with this json file; how does this work if we run multiple queries for the same city?
     with open(os.path.join(base_output_dir, f"{city_name}/bounding_box.json"), 'w') as json_file:
         json.dump(data, json_file)
     scrape(xmin, xmax, cell_size_lon, ymin, ymax, cell_size_lat, output_filename_with_path)
@@ -245,7 +242,7 @@ def parse_arguments():
                                      
         Example usage:
         python gsv_metadata_scraper.py "Seattle, WA" # Downloads GSV metadata for Seattle, WA w/defaults
-        python gsv_metadata_scraper.py "Berkeley, CA" --grid_width 5000 --cell_size 50 # Downloads GSV metadata for Berkeley with 5km x 5km bounding box and 50m resolution
+        python gsv_metadata_scraper.py "Berkeley, CA" --grid_height 5000 --cell_size 50 # Downloads GSV metadata for Berkeley with 5km x 5km bounding box and 50m resolution
         """, formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("city", type=str, help="Name of the city.")
     parser.add_argument("--output", type=str, default=None, help="Output path where the GSV availability data will be stored.")
