@@ -42,7 +42,7 @@ done
 #
 # To activate this environment, use
 #
-#     $ conda activate gsv-date-analysis
+#     $ conda activate gsv-bias-venv
 #
 # To deactivate an active environment, use
 #
@@ -58,20 +58,20 @@ Optionally, if you'd like to list the active conda environments on your system a
 ### Step 3: Activate the environment
 
 ```
-> conda activate gsv-date-analysis
+> conda activate gsv-bias-venv
 ```
 
 ### Step 4: Open jupyter notebook
-Now you should see the command line prompt prefixed by the current environment: `(gsv-date-analysis)`. So, your command prompt should look like the following or something similar:
+Now you should see the command line prompt prefixed by the current environment: `(gsv-bias-venv)`. So, your command prompt should look like the following or something similar:
 
 ```
-(gsv-date-analysis)$
+(gsv-bias-venv)$
 ```
 
 Now you can type in `jupyter notebook` and find `analysis.ipynb`. 
 
 ```
-(gsv-date-analysis)$ jupyter notebook
+(gsv-bias-venv)$ jupyter notebook
 ```
 
 In Jupyter Notebook environment, navigate to the `analysis.ipynb` file and open it.
