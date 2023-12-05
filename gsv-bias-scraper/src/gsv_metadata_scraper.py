@@ -90,6 +90,11 @@ async def send_maps_request(async_client, y, x, pbar, sem, lower_bound_lon, uppe
     with open(output_file_path, mode='a', newline='') as csv_file:
         # Create a CSV DictWriter
         writer = csv.DictWriter(csv_file, fieldnames=header)
+
+        # Check to see if the file is new. If so, write the header
+        if csv_file.tell() == 0:
+            writer.writeheader()
+
         # Write each dictionary to the CSV file
         for data in data_row:
             writer.writerow(data)
