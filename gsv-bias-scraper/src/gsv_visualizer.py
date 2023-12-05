@@ -170,7 +170,8 @@ def visualize(city_name, base_input_dir, years=np.arange(2007, datetime.datetime
         print("We could not find the input data file {input_filename_with_path}. Please double check your path.}")
         return
     
-    df = pd.read_csv(input_filename_with_path, header=None, names=['lat', 'lon', 'query_lat', 'query_lon', 'pano_id', 'date', 'status'])
+    # Updated because our new DF has headers
+    df = pd.read_csv(input_filename_with_path) #, header=None, names=['lat', 'lon', 'query_lat', 'query_lon', 'pano_id', 'date', 'status'])
     in_range_data = []
     for index, row in df.iterrows():
         if row['lat'] < min(ymin, ymax) or row['lat'] > max(ymin, ymax) or row['lon'] < min(xmin, xmax) or row['lon'] > max(xmin, xmax):
