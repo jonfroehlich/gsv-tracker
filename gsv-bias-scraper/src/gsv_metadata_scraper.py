@@ -240,7 +240,13 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
     scrape(xmin, xmax, cell_size_lon, ymin, ymax, cell_size_lat, output_filename_with_path)
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="Downloads Google Street View (GSV) metadata in a specified city's bounding area.")
+    parser = argparse.ArgumentParser(description="""
+        Downloads Google Street View (GSV) metadata in a specified city's bounding area.
+                                     
+        Example usage:
+        python gsv_metadata_scraper.py "Seattle, WA" # Downloads GSV metadata for Seattle, WA w/defaults
+        python gsv_metadata_scraper.py "Berkeley, CA" --grid_width 5000 --cell_size 50 # Downloads GSV metadata for Berkeley with 5km x 5km bounding box and 50m resolution
+        """, formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("city", type=str, help="Name of the city.")
     parser.add_argument("--output", type=str, default=None, help="Output path where the GSV availability data will be stored.")
     parser.add_argument("--grid_height", type=int, default=1000, help="Height of the bounding box from the center, in meters. Defaults to 1000.")
