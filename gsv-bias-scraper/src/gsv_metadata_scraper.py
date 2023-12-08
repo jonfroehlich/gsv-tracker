@@ -14,7 +14,7 @@ import csv
 import json
 from utils import get_coordinates, get_default_data_dir, get_filename_with_path, get_bounding_box, get_user_coordinates
 
-METER_TO_LATTITUDE_CONST = 0.00000899 #refer to https://stackoverflow.com/questions/639695/how-to-convert-latitude-or-longitude-to-meters
+METER_TO_LATITUDE_CONST = 0.00000899 #refer to https://stackoverflow.com/questions/639695/how-to-convert-latitude-or-longitude-to-meters
 METER_TO_LONGITUDE_CONST = 40075000
 GOOGLE_API_KEY = os.environ.get('google_api_key')
 nest_asyncio.apply()
@@ -198,7 +198,7 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
         print(f"Could not find coordinates for {city_name}. Please enter it manually")
         ymin, ymax, xmin, xmax = get_user_coordinates()
         city_center = [(ymax + ymin) / 2, (xmax + xmin) / 2]
-        grid_height = int(abs(ymax - ymin) / METER_TO_LATTITUDE_CONST)
+        grid_height = int(abs(ymax - ymin) / METER_TO_LATITUDE_CONST)
         grid_width = int(abs(xmax - xmin) / abs(1 / (METER_TO_LONGITUDE_CONST * (np.cos(city_center[0]) / 360))))
 
     else:
@@ -212,7 +212,7 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
         print(f"The bounding height {grid_height} meters, width {grid_width} meters is too large. Please scrape city by city.")
         return
 
-    cell_size_lat = cell_size * METER_TO_LATTITUDE_CONST 
+    cell_size_lat = cell_size * METER_TO_LATITUDE_CONST 
     cell_size_lon = abs(cell_size * (1 / (METER_TO_LONGITUDE_CONST * (np.cos(city_center[0]) / 360))))
     #refer to https://stackoverflow.com/questions/639695/how-to-convert-latitude-or-longitude-to-meters
 
