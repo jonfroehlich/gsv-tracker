@@ -165,6 +165,7 @@ def scrape(xmin, xmax, cell_size_lon, ymin, ymax, cell_size_lat, output_file_pat
     """
     lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat = sys.maxsize, -sys.maxsize - 1, sys.maxsize, -sys.maxsize - 1
     if os.path.isfile(output_file_path):
+        # TODO: what if we are running a new query but for a larger area? This code doesn't seem to work for that
         print(f"We previously found a file at {output_file_path}, reading it in...")
         prev_df = pd.read_csv(output_file_path, header=None, names=['lat', 'lon', 'query_lat', 'query_lon', 'pano_id', 'date', 'status'])
         lower_bound_lon = prev_df['lon'].min()
