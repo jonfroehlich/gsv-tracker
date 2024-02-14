@@ -10,14 +10,17 @@ import nest_asyncio
 import argparse
 from itertools import product
 import logging
-from utils import get_coordinates, get_default_data_dir, get_filename_with_path, get_bounding_box
+import csv
+import json
+from utils import get_coordinates, get_default_data_dir, get_filename_with_path, get_bounding_box, get_user_coordinates
 
-LATITUDE_TO_METER_CONST = 0.00000899
+METER_TO_LATITUDE_CONST = 0.00000899 #refer to https://stackoverflow.com/questions/639695/how-to-convert-latitude-or-longitude-to-meters
+METER_TO_LONGITUDE_CONST = 40075000
 GOOGLE_API_KEY = os.environ.get('google_api_key')
 nest_asyncio.apply()
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(0.1))  # Shorter wait due to higher rate limit
-async def send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat):
+async def send_maps_request(async_client, y, x, pbar, sem, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, output_file_path):
     """
     Send an asynchronous request to Google Maps API to retrieve metadata for specified coordinates.
 
@@ -31,14 +34,10 @@ async def send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound
     Returns:
     - dict: Dictionary containing latitude, longitude, and date retrieved from the API.
     """
-
-    y = combined_df.loc[i]["lat"]
-    x = combined_df.loc[i]["lon"]
-
     if lower_bound_lat < y < upper_bound_lat and lower_bound_lon < x < upper_bound_lon:
         pbar.update(1)
-        return {}
-
+        return
+    
     location_coords = f"{y},{x}"
 
     GOOGLE_MAPS_API_BASE_URL = 'https://maps.googleapis.com/maps/api/streetview/metadata'
@@ -72,20 +71,37 @@ async def send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound
     # The response is a JSON object. We want to extract the location, date, and pano id.
     metadata = response.json()
     if not metadata.get('location', None):
-        return {'lat': y, 
+        data_row = [{'lat': y, 
                 'lon': x, 
+                'query_lat': y,
+                'query_lon': x,
                 'pano_id' : "None",
                 'date': "None",
-                'status': metadata.get('status')} # Let's store the status returned by the api
+                'status': metadata.get('status')}] # Let's store the status returned by the api
     else:
-        return {'lat': metadata.get('location').get('lat'), 
+        data_row = [{'lat': metadata.get('location').get('lat'), 
                 'lon': metadata.get('location').get('lng'), 
+                'query_lat': y,
+                'query_lon': x,
                 'pano_id' : metadata.get('pano_id'),
-                'date': metadata.get('date')}
+                'date': metadata.get('date')}]
+        
+    header = ['lat', 'lon', 'query_lat', 'query_lon', 'pano_id', 'date', 'status']
+    with open(output_file_path, mode='a', newline='') as csv_file:
+        # Create a CSV DictWriter
+        writer = csv.DictWriter(csv_file, fieldnames=header)
+
+        # Check to see if the file is new. If so, write the header
+        if csv_file.tell() == 0:
+            writer.writeheader()
+
+        # Write each dictionary to the CSV file
+        for data in data_row:
+            writer.writerow(data)
 
 
 
-async def get_gsv_metadata(combined_df, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, max_concurrent_requests=500):
+async def get_gsv_metadata(xmin, xmax, cell_size_lon, ymin, ymax, cell_size_lat, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, output_file_path, max_concurrent_requests=500):
     """
     Asynchronously fetch Google Street View dates for a DataFrame of coordinates.
 
@@ -101,14 +117,42 @@ async def get_gsv_metadata(combined_df, lower_bound_lon, upper_bound_lon, lower_
     limits = httpx.Limits(max_connections=max_concurrent_requests, max_keepalive_connections=max_concurrent_requests)
     timeout = httpx.Timeout(5.0, connect=5.0)
 
+    class CoordinateIterator:
+        def __init__(self, y_start, y_end, y_step, x_start, x_end, x_step):
+            self.y = y_start
+            self.y_end = y_end
+            self.y_step = y_step
+            self.x_start = x_start
+            self.x = x_start
+            self.x_end = x_end
+            self.x_step = x_step
+            self.cnt = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if abs(self.y) < abs(self.y_end):
+                returned_y, returned_x = self.y, self.x
+                if abs(self.x) < abs(self.x_end) and abs(self.y) < abs(self.y_end):
+                    self.x += self.x_step
+                elif abs(self.x) >= abs(self.x_end) and abs(self.y) < abs(self.y_end):
+                    self.x = self.x_start
+                    self.y += self.y_step
+                return [returned_y, returned_x]
+            else:
+                raise StopIteration
+            
+    coordinate_iterator = CoordinateIterator(ymin, ymax, cell_size_lat, xmin, xmax, cell_size_lon)
+    total_counts = int(((abs(xmin - xmax) // abs(cell_size_lon)) + 2) * ((abs(ymin - ymax) // abs(cell_size_lat)) + 1))
+
     async with httpx.AsyncClient(limits=limits, timeout=timeout) as async_client:
-        with tqdm(total=len(combined_df), desc="Fetching dates") as pbar:
+        with tqdm(total=total_counts, desc="Fetching dates") as pbar:
             sem = asyncio.Semaphore(max_concurrent_requests)
-            rows = await asyncio.gather(*(send_maps_request(async_client, i, combined_df, pbar, sem, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat) for i in range(len(combined_df))))
-    return rows
+            await asyncio.gather(*[send_maps_request(async_client, y, x, pbar, sem, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, output_file_path) 
+                                 for y, x in coordinate_iterator])
 
-
-def scrape(lats, lons, output_file_path):
+def scrape(xmin, xmax, cell_size_lon, ymin, ymax, cell_size_lat, output_file_path):
     """
     Scrape Google Street View data for a given city within specified coordinates.
 
@@ -121,8 +165,9 @@ def scrape(lats, lons, output_file_path):
     """
     lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat = sys.maxsize, -sys.maxsize - 1, sys.maxsize, -sys.maxsize - 1
     if os.path.isfile(output_file_path):
+        # TODO: what if we are running a new query but for a larger area? This code doesn't seem to work for that
         print(f"We previously found a file at {output_file_path}, reading it in...")
-        prev_df = pd.read_csv(output_file_path, header=None, names=['lat', 'lon', 'pano_id', 'date', 'status'])
+        prev_df = pd.read_csv(output_file_path, header=None, names=['lat', 'lon', 'query_lat', 'query_lon', 'pano_id', 'date', 'status'])
         lower_bound_lon = prev_df['lon'].min()
         upper_bound_lon = prev_df['lon'].max()
         lower_bound_lat = prev_df['lat'].min()
@@ -130,20 +175,7 @@ def scrape(lats, lons, output_file_path):
     else:
         print(f"Saving contents to {output_file_path}...")
 
-    combinations = list(product(lats, lons))
-    combined_df = pd.DataFrame(combinations, columns=['lat', 'lon'])
-
-    rows = asyncio.run(get_gsv_metadata(combined_df, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat))
-
-    final_df = pd.DataFrame(rows)
-    final_df = final_df.dropna(how='all')
-
-    if os.path.isfile(output_file_path):
-        final_df.to_csv(output_file_path, mode='a', header=False, index=False)
-        print(f"Appended data to {output_file_path}...")
-    else:
-        final_df.to_csv(output_file_path, header=False, index=False)
-        print(f"Saved data to {output_file_path}...")
+    asyncio.run(get_gsv_metadata(xmin, xmax, cell_size_lon, ymin, ymax, cell_size_lat, lower_bound_lon, upper_bound_lon, lower_bound_lat, upper_bound_lat, output_file_path))
 
 
 def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_size=30):
@@ -162,46 +194,57 @@ def GSVBias(city_name, base_output_dir, grid_height=1000, grid_width = -1, cell_
     """
 
     city_center = get_coordinates(city_name)
+    ymin, ymax, xmin, xmax = 0, 0, 0, 0
     if not city_center:
-        # TODO: if we can't find the city, we should also support just passing a bounding box
-        print(f"Could not find coordinates for {city_name}. Please try another city")
-        return
+        print(f"Could not find coordinates for {city_name}. Please enter it manually")
+        ymin, ymax, xmin, xmax = get_user_coordinates()
+        city_center = [(ymax + ymin) / 2, (xmax + xmin) / 2]
+        grid_height = int(abs(ymax - ymin) / METER_TO_LATITUDE_CONST)
+        grid_width = int(abs(xmax - xmin) / abs(1 / (METER_TO_LONGITUDE_CONST * (np.cos(city_center[0]) / 360))))
+
     else:
         print(f"Coordinates for {city_name} found: {city_center}")
-
-
+        (ymin, ymax, xmin, xmax) = get_bounding_box(city_center, grid_height, grid_width)
+        
     if grid_width == -1:
         grid_width = grid_height
-    
-    cell_size_lat = cell_size * LATITUDE_TO_METER_CONST # turn the unit of the height of the cell from meter to radius
-    cell_size_lon = cell_size * (1 / (40075000 * (np.cos(city_center[0]) / 360))) # turn the unit of the width of the cell from meter to radius
+
+    if grid_height > 1000000 or grid_width > 1000000:
+        print(f"The bounding height {grid_height} meters, width {grid_width} meters is too large. Please scrape city by city.")
+        return
+
+    cell_size_lat = cell_size * METER_TO_LATITUDE_CONST 
+    cell_size_lon = abs(cell_size * (1 / (METER_TO_LONGITUDE_CONST * (np.cos(city_center[0]) / 360))))
+    #refer to https://stackoverflow.com/questions/639695/how-to-convert-latitude-or-longitude-to-meters
 
     if city_center[0] < 0:
         cell_size_lat = -cell_size_lat
     if city_center[1] < 0:
         cell_size_lon = -cell_size_lon
 
-    (ymin, ymax, xmin, xmax) = get_bounding_box(city_center, grid_height, grid_width)
-
-    # TODO: add in bounding box printout in miles/meters as well: Done
-    print(f"Bounding box for {city_name}: [{xmin, ymin}, {xmax, ymax}]")
-    print(f"Bounding box height {grid_height} meters, bounding box width {grid_width} meters")
-
-    lons = list(np.arange(xmin, xmax, cell_size_lon))
-    lats = list(np.arange(ymin, ymax, cell_size_lat))
-
+    print(f"Bounding box for {city_name}: [{ymin, xmin}, {ymax, xmax}]")
+    print(f"Bounding box height {grid_height} meters, width {grid_width} meters")
     print(f"Will query Google Street View every {cell_size:0.1f} meters for data")
-
-    # TODO check the math on this: Done, now number of queries is correct
-    print(f"This will result in roughly {int(np.round(grid_width * grid_height / (cell_size * cell_size)))} queries")
-
+    print(f"This will result in roughly {int(((abs(xmin - xmax) // abs(cell_size_lon)) + 2) * ((abs(ymin - ymax) // abs(cell_size_lat)) + 1))} queries")
     print("The base_output_dir is: ", base_output_dir)
           
+    data = {"ymin": ymin, "ymax": ymax, "xmin": xmin, "xmax": xmax}
+    
     output_filename_with_path = get_filename_with_path(base_output_dir, city_name, grid_height, grid_width, cell_size)
-    scrape(lats, lons, output_filename_with_path)
+
+    # TODO: not sure what we're doing with this json file; how does this work if we run multiple queries for the same city?
+    with open(os.path.join(base_output_dir, f"{city_name}/bounding_box.json"), 'w') as json_file:
+        json.dump(data, json_file)
+    scrape(xmin, xmax, cell_size_lon, ymin, ymax, cell_size_lat, output_filename_with_path)
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="Downloads Google Street View (GSV) metadata in a specified city's bounding area.")
+    parser = argparse.ArgumentParser(description="""
+        Downloads Google Street View (GSV) metadata in a specified city's bounding area.
+                                     
+        Example usage:
+        python gsv_metadata_scraper.py "Seattle, WA" # Downloads GSV metadata for Seattle, WA w/defaults
+        python gsv_metadata_scraper.py "Berkeley, CA" --grid_height 5000 --cell_size 50 # Downloads GSV metadata for Berkeley with 5km x 5km bounding box and 50m resolution
+        """, formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("city", type=str, help="Name of the city.")
     parser.add_argument("--output", type=str, default=None, help="Output path where the GSV availability data will be stored.")
     parser.add_argument("--grid_height", type=int, default=1000, help="Height of the bounding box from the center, in meters. Defaults to 1000.")
@@ -210,7 +253,6 @@ def parse_arguments():
     return parser.parse_args()
 
 def main():
-
     if not GOOGLE_API_KEY:
         print(f"\nThe Google Maps API key appears not to be set!\n")
         print(f"Please set your API key as an environment variable named 'google_api_key'")

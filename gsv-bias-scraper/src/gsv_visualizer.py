@@ -6,6 +6,7 @@ import numpy as np
 import datetime
 from geopy.geocoders import Nominatim
 import argparse
+import json
 from utils import get_coordinates, get_default_data_dir, get_filename_with_path, get_bounding_box, add_year_and_color_column
 
 COLORS = {2024: '#000000', 2023: '#000000', 2022: '#006400', 2021: '#009900', 2020: '#00be00', 2019: '#00e300', 2018: '#00ff00', 2017: '#33ff33', 2016: '#66ff66',
@@ -81,23 +82,24 @@ def make_bar_chart(df, output_file_path):
     
     # Sample data and preprocessing
     df = add_year_and_color_column(df)
-    years = np.sort(df['year'].unique())
-    cleaned_years = years[years != 1900]  # Remove rows with no data
-    proportions = [(df['year'] == i).sum() for i in cleaned_years]
-    colors = [COLORS[i] for i in cleaned_years]
+    filtered_df = df[df['year'] != 1900] # Remove rows with no data
+    years = np.sort(filtered_df['year'].unique())
+    proportions = [((filtered_df['year'] == i).sum() / filtered_df.shape[0] * 100) for i in years]
+    colors = [COLORS[i] for i in years]
 
     # Create a bar chart
     fig, ax = plt.subplots()
-    ax.bar(cleaned_years, proportions, color=colors)
+    ax.bar(years, proportions, color=colors)
 
     # Add labels to the bars
-    for year, proportion in zip(cleaned_years, proportions):
-        ax.text(year, proportion, f'{np.round(proportion / np.sum(proportions), 3)}%', ha='center', va='bottom', fontsize=14)
+    for year, proportion in zip(years, proportions):
+        ax.text(year, proportion, f'{np.round(proportion, 2)}%', ha='center', va='bottom', fontsize=14)
 
+    plt.ylim(0, 100)
     plt.xlabel('Year')
     plt.ylabel('Proportion')
     plt.title('Yearly Proportions')
-    plt.xticks(cleaned_years)
+    plt.xticks(years)
 
     # Save or display the plot
     plt.savefig(output_file_path)
@@ -148,15 +150,18 @@ def visualize(city_name, base_input_dir, years=np.arange(2007, datetime.datetime
     1. A histogram showing GSV data distribution over time, including mean, median, and standard deviation.
     2. An interactive folium map that put the colored map on top of the city's real street map.
     """
-    city_center = get_coordinates(city_name)
-    if not city_center:
-        print(f"Could not find coordinates for {city_name}. Please try another city")
-        return
+    try:
+        with open(os.path.join(base_input_dir, city_name, "bounding_box.json"), 'r') as json_file:
+            data = json.load(json_file)
 
+    except FileNotFoundError:
+        print(f"{city_name} has not been scraped yet.")
+        
     if grid_width == -1:
         grid_width = grid_height
 
-    (ymin, ymax, xmin, xmax) = get_bounding_box(city_center, grid_height, grid_width)
+    ymin, ymax, xmin, xmax = data["ymin"], data["ymax"], data["xmin"], data["xmax"]
+    city_center = [(ymax + ymin) / 2, (xmax + xmin) / 2]
 
     input_filename_with_path = get_filename_with_path(base_input_dir, city_name, grid_height, grid_width, cell_size)
     print("input_filename_with_path: ", input_filename_with_path)
@@ -165,7 +170,8 @@ def visualize(city_name, base_input_dir, years=np.arange(2007, datetime.datetime
         print("We could not find the input data file {input_filename_with_path}. Please double check your path.}")
         return
     
-    df = pd.read_csv(input_filename_with_path, header=None, names=['lat', 'lon', 'pano_id', 'date', 'status'])
+    # Updated because our new DF has headers
+    df = pd.read_csv(input_filename_with_path) #, header=None, names=['lat', 'lon', 'query_lat', 'query_lon', 'pano_id', 'date', 'status'])
     in_range_data = []
     for index, row in df.iterrows():
         if row['lat'] < min(ymin, ymax) or row['lat'] > max(ymin, ymax) or row['lon'] < min(xmin, xmax) or row['lon'] > max(xmin, xmax):
@@ -190,7 +196,7 @@ def parse_arguments():
     parser.add_argument("city", type=str, help="Name of the city.")
     parser.add_argument("--data_path", type=str, default=None, help="Data path where the scraped data is stored.")
     parser.add_argument("--years", type=int, nargs="+", default=list(range(2007, datetime.datetime.now().year + 2)), help="Year range of the GSV data to visualize. Defaults to 2007 (year GSV was introduced) to current year.")
-    parser.add_argument("--grid_height", type=int, default=1000, help="Height of the visualizaton area (from the city center), in meters. Defaults to 1000.")
+    parser.add_argument("--grid_height", type=int, default=1000, help="Height of the visualization area (from the city center), in meters. Defaults to 1000.")
     parser.add_argument("--grid_width", type=int, default=-1, help="Width of the visualization area (from the city center), in meters. Defaults to value of height.")
     parser.add_argument("--cell_size", type=int, default=30, help="Cell size to scrape GSV data. Should be the same as the cell_sized used to scrape data.")
     return parser.parse_args()
