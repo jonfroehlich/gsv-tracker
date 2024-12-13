@@ -18,6 +18,18 @@ from .fileutils import generate_base_filename
 
 logger = logging.getLogger(__name__)
 
+METADATA_DTYPES = {
+    'query_lat': float,
+    'query_lon': float,
+    'query_timestamp': str,
+    'pano_lat': float,
+    'pano_lon': float,
+    'pano_id': str,
+    'copyright_info': str,
+    'status': str
+    # capture_date handled by parse_dates
+}
+
 class DownloadError(Exception):
     """Custom exception for download-related errors."""
     pass
@@ -108,7 +120,11 @@ def get_processed_points(file_path: str) -> set:
         return set()
     
     try:
-        df = pd.read_csv(file_path)
+        df = pd.read_csv(
+            file_path,
+            dtype=METADATA_DTYPES,
+            parse_dates=['capture_date']
+        )
         return {(row['query_lat'], row['query_lon']) for _, row in df.iterrows()}
     except Exception as e:
         logger.error(f"Error reading existing file: {str(e)}")
@@ -180,7 +196,7 @@ async def process_batch_async(
                 await progress_queue.put(1)
         
         # Save batch results to temporary file
-        df_batch = pd.DataFrame(batch_results)
+        df_batch = pd.DataFrame(batch_results, dtype=METADATA_DTYPES)
         df_batch.to_csv(temp_file, index=False)
         
         # Create a proper lock file with content
@@ -288,7 +304,10 @@ async def download_gsv_metadata_async(
         # Check if compressed file exists
         if os.path.exists(file_name_compressed_with_path):
             logger.info(f"Found completed compressed file: {file_name_compressed_with_path}")
-            return pd.read_csv(file_name_compressed_with_path, compression='gzip', parse_dates=['capture_date'])
+            return pd.read_csv(file_name_compressed_with_path, 
+                               dtype=METADATA_DTYPES,
+                               compression='gzip', 
+                               parse_dates=['capture_date'])
 
         # Calculate grid dimensions
         width_steps = int(grid_width / step_length)
@@ -402,7 +421,12 @@ async def download_gsv_metadata_async(
         os.remove(file_name_with_path)
         
         # Read the final compressed file
-        df = pd.read_csv(file_name_compressed_with_path, compression='gzip', parse_dates=['capture_date'])
+        df = pd.read_csv(
+            file_name_compressed_with_path,
+            compression='gzip',
+            dtype=METADATA_DTYPES,
+            parse_dates=['capture_date'],
+            low_memory=False)
         
         end_time = time.time()
         elapsed_time = end_time - start_time
