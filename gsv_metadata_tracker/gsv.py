@@ -117,24 +117,9 @@ async def process_batch_async(
 ) -> List[Dict]:
     """
     Process a batch of points asynchronously and save results safely.
-    
-    Args:
-        points: List of points to process
-        api_key: Google Street View API key
-        progress_queue: Queue for progress tracking
-        base_file_path: Base path for saving results
-        write_header: Whether to write CSV header
-        timeout: Request timeout settings
-        connection_limit: Maximum number of concurrent connections to the API
-    
-    Returns:
-        List of processed results
-    
-    Raises:
-        DownloadError: If batch processing fails
     """
     results = []
-    batch_id = int(time.time() * 1000)  # Unique batch ID using millisecond timestamp
+    batch_id = int(time.time() * 1000)
     temp_file = f"{base_file_path}.batch_{batch_id}.tmp"
     lock_file = f"{base_file_path}.lock"
     
@@ -188,12 +173,32 @@ async def process_batch_async(
         df_batch = pd.DataFrame(batch_results)
         df_batch.to_csv(temp_file, index=False)
         
-        # Acquire lock and append to main file
-        with FileLock(lock_file):
+        # Create a proper lock file with content
+        lock = FileLock(lock_file)
+        try:
+            # Add a small delay to ensure lock file is properly created
+            lock.acquire(timeout=10)
+            
+            # Write process information to lock file
+            with open(lock_file, 'w') as f:
+                f.write(f"Process ID: {os.getpid()}\n")
+                f.write(f"Timestamp: {datetime.now().isoformat()}\n")
+                f.write(f"Batch ID: {batch_id}\n")
+            
+            # Perform the file operations
             if os.path.exists(base_file_path):
                 df_batch.to_csv(base_file_path, mode='a', header=False, index=False)
             else:
                 df_batch.to_csv(base_file_path, index=False)
+                
+        finally:
+            # Ensure lock is released and lock file is removed
+            if lock.is_locked:
+                lock.release()
+            try:
+                os.remove(lock_file)
+            except FileNotFoundError:
+                pass
         
         # Clean up temp file
         if os.path.exists(temp_file):
@@ -202,8 +207,13 @@ async def process_batch_async(
         results.extend(batch_results)
         
     except Exception as e:
-        if os.path.exists(temp_file):
-            os.remove(temp_file)
+        # Clean up temporary files in case of error
+        for file in [temp_file, lock_file]:
+            try:
+                if os.path.exists(file):
+                    os.remove(file)
+            except Exception as cleanup_error:
+                logger.error(f"Error cleaning up {file}: {cleanup_error}")
         raise DownloadError(f"Error processing batch: {str(e)}")
     
     return results
