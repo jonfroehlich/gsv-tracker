@@ -51,6 +51,9 @@ def download_gsv_metadata(
     
     logger.info(f"Examining street view data for {city_name} centered at {center_lat},{center_lon}" +
                 f" with a grid of {grid_width/1000:.1f}km x {grid_height/1000:.1f}km and step_length={step_length} meters")
+    
+    print(f"Examining street view data for {city_name} centered at {center_lat},{center_lon}" +
+          f" with a grid of {grid_width/1000:.1f}km x {grid_height/1000:.1f}km and step_length={step_length} meters")
 
     # Define file names
     file_name = generate_base_filename(city_name, grid_width, grid_height, step_length) + ".csv"
@@ -66,11 +69,13 @@ def download_gsv_metadata(
     # Check if compressed file exists
     if os.path.exists(file_name_compressed_with_path):
         logger.info(f"Found completed compressed file: {file_name_compressed_with_path}")
+        print(f"Found completed compressed file: {file_name_compressed_with_path}")
         end_time = time.time()
         elapsed_time = end_time - start_time
         # Read directly from gzipped file
         df = pd.read_csv(file_name_compressed_with_path, compression='gzip', parse_dates=['capture_date'])
         logger.info(f"Loaded {len(df)} rows in {elapsed_time:.2f} seconds")
+        print(f"Loaded {len(df)} rows in {elapsed_time:.2f} seconds")
         return df
 
     # Calculate grid dimensions
