@@ -22,7 +22,7 @@ def load_config() -> Dict[str, Any]:
             "1. Please set the API key using:\n"
             "  > conda env config vars set GMAPS_API_KEY=YOUR_API_KEY\n"
             "2. You will then need to reactivate your environment for the changes to take effect.\n"
-            "  > conda activate gsv-metadata-tracker\n"
+            "  > conda activate gsv-tracker\n"
             "3. To check the current environment variables, use:\n"
             "  > conda env config vars list\n"
             "\nIf you do not have a Google Maps API key, you can create one at https://console.cloud.google.com/apis/credentials\n"
