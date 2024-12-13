@@ -1,4 +1,4 @@
-name: gsv-metadata-tracker
+name: gsv-tracker
 channels:
   - conda-forge
   - defaults
