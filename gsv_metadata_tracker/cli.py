@@ -25,16 +25,16 @@ import os
 import asyncio
 import aiohttp
 from typing import Optional
-from .fileutils import generate_base_filename
 from . import (
-    load_config, 
-    download_gsv_metadata_async,
-    get_city_coordinates, 
-    get_city_bounding_box,
+    load_config,
+    get_city_coordinates,
+    get_search_dimensions,
     create_visualization_map,
-    display_search_area
+    display_search_area,
+    download_gsv_metadata_async,
+    generate_base_filename,
+    open_in_browser
 )
-from .geoutils import get_search_dimensions
 
 def parse_args():
     """
@@ -181,39 +181,52 @@ async def async_main():
     
     try:
         config = load_config()
+        # Create visualization directory
+        vis_path = os.path.join(config['download_path'], 'vis')
+        os.makedirs(vis_path, exist_ok=True)
+
         location = get_city_coordinates(args.city)
         
         if not location:
             logging.error(f"Could not find coordinates for {args.city}")
             sys.exit(1)
 
-        # If checking boundaries, create and save visualization then exit
-        if args.check_boundary:
-            base_name = generate_base_filename(args.city, args.width, args.height, args.step)
-            preview_path = os.path.join(config['download_path'], f"{base_name}_preview.html")
-            
-            # Create preview map using your display_search_area function
-            preview_map = display_search_area(
-                args.city,
-                location.latitude,
-                location.longitude,
-                args.width,
-                args.height,
-                args.step
-            )
-            preview_map.save(preview_path)
-            
-            print(f"\nSearch area preview saved to: {preview_path}")
-            print("Review the visualization and adjust parameters if needed.")
-            print("\nTo download data with these parameters, run the same command without --check-boundary")
-            return 0
-        
         width, height = get_search_dimensions(
             args.city,
             args.width,
             args.height,
             args.force_size
         )
+
+        print(f"The search dimensions for {args.city} are {width:.1f}m x {height:.1f}m")
+
+        # If checking boundaries, create and save visualization then exit
+        if args.check_boundary:
+            base_name = generate_base_filename(args.city, width, height, args.step)
+            boundary_vis_full_path = os.path.join(vis_path, f"{base_name}_search_boundary.html")
+            
+            # Create preview map using your display_search_area function
+            search_area_map = display_search_area(
+                args.city,
+                location.latitude,
+                location.longitude,
+                width,
+                height,
+                args.step
+            )
+            search_area_map.save(boundary_vis_full_path)
+            
+            print(f"\nSearch area preview saved to: {boundary_vis_full_path}")
+            print("Review the visualization and adjust parameters if needed.")
+            print("\nTo download data with these parameters, run the same command without --check-boundary")
+            
+            # Auto-open the visualization
+            success, error_msg = open_in_browser(boundary_vis_full_path)
+            if not success:
+                logging.warning(f"Could not automatically open visualization: {error_msg}")
+                print(f"Please open {boundary_vis_full_path} in your web browser to view the visualization.")
+            
+            return 0
             
         logging.info(f"Analyzing {args.city} at {location.latitude}, {location.longitude}")
         logging.info(f"Using batch_size={args.batch_size}, connection_limit={args.connection_limit}")

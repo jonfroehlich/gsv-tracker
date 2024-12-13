@@ -1,19 +1,20 @@
-# __init__.py
-
-from .download import download_gsv_metadata  # single-threaded version
-from .download_async import download_gsv_metadata_async  # async version
+# Import everything we want to expose at package level
+from .download import download_gsv_metadata
+from .download_async import download_gsv_metadata_async
 from .config import load_config
-from .geocoding import get_city_coordinates, get_city_bounding_box
-from .visualization import create_visualization_map, display_search_area
-from .comparator import compare_gsv_files  # new comparison utility
+from .geoutils import get_city_coordinates, get_search_dimensions
+from .vis import display_search_area, create_visualization_map
+from .fileutils import generate_base_filename, open_in_browser
 
+# Define what's available when someone does "from gsv_metadata_tracker import *"
 __all__ = [
-    'download_gsv_metadata',        # single-threaded download
-    'download_gsv_metadata_async',  # async download
-    'load_config',                  # configuration loader
-    'get_city_coordinates',         # geocoding utilities
-    'get_city_bounding_box',
-    'create_visualization_map',     # visualization
+    'download_gsv_metadata',
+    'download_gsv_metadata_async',
+    'load_config',
+    'get_city_coordinates',
+    'get_search_dimensions',
     'display_search_area',
-    'compare_gsv_files',           # comparison utility
+    'create_visualization_map',
+    'generate_base_filename',
+    'open_in_browser'
 ]

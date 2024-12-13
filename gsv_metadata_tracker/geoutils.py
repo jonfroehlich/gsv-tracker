@@ -72,3 +72,36 @@ def get_search_dimensions(
     logger.info(f"Search area for {city_name}: {area:.1f} square km")
     
     return width, height
+
+def get_best_folium_zoom_level(search_grid_width_in_meters: float,
+                               search_grid_height_in_meters: float) -> int:
+    # Calculate appropriate zoom level based on search area size
+    # Folium zoom levels:
+    # 20: Building level (~50m across)
+    # 19: ~100m
+    # 18: ~200m
+    # 17: ~400m
+    # 16: ~800m
+    # 15: ~1.5km
+    # 14: ~3km
+    # 13: ~6km
+    # 12: ~12km
+    max_dimension = max(search_grid_width_in_meters, search_grid_height_in_meters)
+    if max_dimension <= 100:
+        zoom_level = 19
+    elif max_dimension <= 200:
+        zoom_level = 18
+    elif max_dimension <= 400:
+        zoom_level = 17
+    elif max_dimension <= 800:
+        zoom_level = 16
+    elif max_dimension <= 1500:
+        zoom_level = 15
+    elif max_dimension <= 3000:
+        zoom_level = 14
+    elif max_dimension <= 6000:
+        zoom_level = 13
+    else:
+        zoom_level = 12
+    
+    return zoom_level
