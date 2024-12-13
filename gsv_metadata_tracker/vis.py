@@ -1,6 +1,7 @@
 # gsv_metadata_tracker/vis.py
 
 import folium
+from folium import plugins
 import branca.colormap as cm
 import pandas as pd
 from datetime import datetime
@@ -10,7 +11,9 @@ import seaborn as sns
 import matplotlib.colors
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from math import cos, pi
 from typing import Optional
+from .geoutils import get_best_folium_zoom_level
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +40,44 @@ def display_search_area(city_name: str, city_center_lat: float,
         distortion using the Haversine approximation. The grid lines are drawn
         taking into account that degrees of longitude vary with latitude.
     """
-    # Create map centered on the city
-    m = folium.Map(location=[city_center_lat, city_center_lng], zoom_start=15)
 
-     # Create styled HTML for popup
+    # Grid styling parameters
+    GRID_BACKGROUND_COLOR = '#3B82F6'  # Medium blue
+    GRID_BACKGROUND_OPACITY = 0.15
+    GRID_BORDER_COLOR = '#2563EB'      # Slightly darker blue
+    GRID_BORDER_WEIGHT = 2
+    GRID_LINE_COLOR = 'blue'
+    GRID_LINE_WEIGHT = 1.0
+    GRID_LINE_OPACITY = 0.5
+
+    # Calculate total number of grid points
+    points_width = int(search_grid_width_in_meters / step_size_in_meters) + 1
+    points_height = int(search_grid_height_in_meters / step_size_in_meters) + 1
+    total_points = points_width * points_height
+    
+    # Calculate estimated download time (40 points/second)
+    points_per_second = 40
+    estimated_seconds = total_points / points_per_second
+    hours = int(estimated_seconds // 3600)
+    minutes = int((estimated_seconds % 3600) // 60)
+    seconds = int(estimated_seconds % 60)
+
+    if hours > 0:
+        time_str = f"{hours}h {minutes}m {seconds}s"
+    elif minutes > 0:
+        time_str = f"{minutes}m {seconds}s"
+    else:
+        time_str = f"{seconds}s"
+    
+    # Create map centered on the city
+    zoom_level = get_best_folium_zoom_level(search_grid_width_in_meters, search_grid_height_in_meters)
+   
+    # Map base style
+    m = folium.Map(location=[city_center_lat, city_center_lng], 
+                zoom_start=zoom_level,
+                tiles='CartoDB positron')
+    
+    # Create styled HTML for popup
     popup_html = f"""
     <div style="font-family: Arial, sans-serif; line-height: 1.5; padding: 5px;">
         <h4 style="margin: 0 0 10px 0; color: #2c3e50;">{city_name}</h4>
@@ -51,11 +88,19 @@ def display_search_area(city_name: str, city_center_lat: float,
             </tr>
             <tr>
                 <td style="padding: 3px; color: #7f8c8d;"><b>Search Area:</b></td>
-                <td style="padding: 3px;">{search_grid_width_in_meters:,} × {search_grid_height_in_meters:,} meters</td>
+                <td style="padding: 3px;">{search_grid_width_in_meters:,.1f} × {search_grid_height_in_meters:,.1f} meters</td>
             </tr>
             <tr>
                 <td style="padding: 3px; color: #7f8c8d;"><b>Step Size:</b></td>
-                <td style="padding: 3px;">{step_size_in_meters:,} meters</td>
+                <td style="padding: 3px;">{step_size_in_meters:,.1f} meters</td>
+            </tr>
+            <tr>
+                <td style="padding: 3px; color: #7f8c8d;"><b>Grid Points:</b></td>
+                <td style="padding: 3px;">{total_points:,} points ({points_width} × {points_height})</td>
+            </tr>
+            <tr>
+                <td style="padding: 3px; color: #7f8c8d;"><b>Est. Time:</b></td>
+                <td style="padding: 3px;">~{time_str} at 40 points/sec</td>
             </tr>
         </table>
     </div>
@@ -86,10 +131,11 @@ def display_search_area(city_name: str, city_center_lat: float,
     # Draw rectangle for search area
     folium.Rectangle(
         bounds=bounds,
-        color='orange',
+        color=GRID_BORDER_COLOR,
         fill=True,
-        weight=2,
-        fillOpacity=0.1,
+        weight=GRID_BORDER_WEIGHT,
+        fillColor=GRID_BACKGROUND_COLOR,
+        fillOpacity=GRID_BACKGROUND_OPACITY,
         popup=f'Search Area: {search_grid_width_in_meters}m x {search_grid_height_in_meters}m'
     ).add_to(m)
 
@@ -103,9 +149,9 @@ def display_search_area(city_name: str, city_center_lat: float,
         points = [[bounds[0][0], lng], [bounds[1][0], lng]]
         folium.PolyLine(
             points,
-            color='gray',
-            weight=0.5,
-            opacity=0.5
+            color=GRID_LINE_COLOR,
+            weight=GRID_LINE_WEIGHT,
+            opacity=GRID_LINE_OPACITY
         ).add_to(m)
         lng += step_size_lng
 
@@ -115,9 +161,9 @@ def display_search_area(city_name: str, city_center_lat: float,
         points = [[lat, bounds[0][1]], [lat, bounds[1][1]]]
         folium.PolyLine(
             points,
-            color='gray',
-            weight=0.5,
-            opacity=0.5
+            color=GRID_LINE_COLOR,
+            weight=GRID_LINE_WEIGHT,
+            opacity=GRID_LINE_OPACITY
         ).add_to(m)
         lat += step_size_lat
 
