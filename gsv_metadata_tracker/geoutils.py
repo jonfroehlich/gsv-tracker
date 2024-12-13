@@ -67,7 +67,7 @@ def get_search_dimensions(
             print(f"Failed to infer city boundaries: {str(e)}")
             logger.error(f"Failed to infer city boundaries: {str(e)}")
     
-    area = width * height / 1000.0
+    area = (width * height) / 1000.0
     print(f"Search area for {city_name}: {area:.1f} square km")
     logger.info(f"Search area for {city_name}: {area:.1f} square km")
     
