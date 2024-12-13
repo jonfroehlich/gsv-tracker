@@ -45,12 +45,12 @@ def parse_args():
     1. batch_size: Number of requests to prepare and queue at once
        - Larger batches use more memory but can be more efficient
        - Should be >= connection_limit
-       - Default: 100 requests per batch
+       - Default: 200 requests per batch
     
     2. connection_limit: Maximum number of concurrent connections
        - Limits actual simultaneous requests to the API
        - Helps prevent overwhelming network/API
-       - Default: 50 concurrent connections
+       - Default: 100 concurrent connections
        
     For the Google Street View Static API (30,000 requests/minute limit):
     - Conservative: batch_size=100, connection_limit=50
@@ -102,7 +102,7 @@ def parse_args():
     concurrency_group.add_argument(
         '--batch-size',
         type=int,
-        default=100,
+        default=200,
         help='''Number of requests to prepare and queue at once. 
              Should be >= connection-limit. Higher values use more memory 
              but can be more efficient. API limit is 500/second.'''
@@ -111,7 +111,7 @@ def parse_args():
     concurrency_group.add_argument(
         '--connection-limit',
         type=int,
-        default=50,
+        default=100,
         help='''Maximum number of concurrent connections to the API.
              Controls how many requests are actually in-flight at once.
              Should be <= batch-size. Conservative values prevent overwhelming
