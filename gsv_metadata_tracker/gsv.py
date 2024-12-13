@@ -178,6 +178,7 @@ def download_gsv_metadata(
                                            pano_lat, pano_lon, pano_id, capture_date,
                                            copyright_info, status]], columns=df.columns)
                 
+                
                 df_to_append = df_to_append.astype(df.dtypes)
                 df_to_append.to_csv(file_name_downloading_with_path,
                                   mode=write_file_mode,
@@ -191,7 +192,7 @@ def download_gsv_metadata(
                 progress_bar.update(1)
                 
                 # Add a small delay to avoid hitting API rate limits
-                time.sleep(0.1)
+                time.sleep(0.01)
     
     # Rename the downloading file to final csv
     os.rename(file_name_downloading_with_path, file_name_with_path)
