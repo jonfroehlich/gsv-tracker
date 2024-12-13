@@ -1,0 +1,17 @@
+name: gsv-metadata-tracker
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - pandas
+  - numpy
+  - folium
+  - geopy
+  - requests
+  - tqdm
+  - matplotlib
+  - seaborn
+  - branca
+  - python-dotenv
+  - pytest

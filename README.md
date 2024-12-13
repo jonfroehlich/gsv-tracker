@@ -1,78 +1,73 @@
-# gsv-capture-dates
-Google Street View has become a primary scientific instrument in studying the physical world, from urban forestry to computer vision. However, little work examines *where* Google Street View exists and *how frequently* the GSV pano dataset is updated.
+# GSV Metadata Tracker
 
-In this project, we aim to analyze patterns in Google Street View data collection and examine spatio-temporal patterns such as:
+GSV Metadata Tracker is a Python tool for analyzing Google Street View coverage and temporal patterns in cities. It creates interactive visualizations showing when and where Street View imagery was captured.
 
-- What areas of the world are most **frequently updated** and why might this be (e.g., population density patterns, socio-economics, road types, etc.)
-- What areas of the world have been most **recently updated**
-- Where street view imagery doesn't exist at all
+## Features
 
-Our goal is to uncover potential biases/issues in GSV data collection that may impact how researchers use the tool as a scientific instrument.
+- Automatic city boundary detection
+- Interactive map visualization with temporal filtering
+- Statistical analysis of Street View coverage
+- Resumable data collection
+- Automatic data compression
+- Progress tracking with status updates
 
-Our work builds on:
+## Installation
 
-- Curtis, J.W., Curtis, A., Mapes, J. et al. [Using google street view for systematic observation of the built environment: analysis of spatio-temporal instability of imagery dates](https://doi.org/10.1186/1476-072X-12-53). Int J Health Geogr 12, 53 (2013). 
-
-- Smith, Kaufman, & Mooney, [Google street view image availability in the Bronx and San Diego, 2007–2020: Understanding potential biases in virtual audits of urban built environments](https://www.sciencedirect.com/science/article/abs/pii/S1353829221001970), Health & Place, 2021
-- Fry, Mooney, Roriguez, Caiaffa, Lovasi, [Assessing Google Street View Image Availability in Latin American Cities](https://link.springer.com/article/10.1007/s11524-019-00408-7), J. or Urban Health, 2020
-
-## Running the notebook locally using Anaconda 
-To setup your dev environment, follow the instructions below. We use [Anaconda](https://www.anaconda.com/) for environment management. If you're unfamiliar, please consult the [Managing Environments](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html) section in the conda docs for more details. There is also a nice conda cheetsheet [here](https://docs.conda.io/projects/conda/en/4.6.0/_downloads/52a95608c49671267e40c689e0bc00ca/conda-cheatsheet.pdf).
-
-### Step 1: Open your Anaconda terminal and go to the src dir
-On **Mac**, this should be as simple as opening `terminal` (or [`iterm2`](https://iterm2.com/)). On **Windows**, open the `Anaconda Powershell Prompt`.
-
-Make sure you are in the root directory of this project. For example, for me (on my Windows), this is:
-
-```
-> pwd
-D:\git\gsv-capture-dates
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/gsv-metadata-tracker.git
+cd gsv-metadata-tracker
 ```
 
-### Step 2: Create an environment from the environment.yml file
-
-```
-> conda env create -f environment.yml
-```
-
-This might take a few mins but should end with something like
-
-```
-done
-#
-# To activate this environment, use
-#
-#     $ conda activate gsv-bias-venv
-#
-# To deactivate an active environment, use
-#
-#     $ conda deactivate
+2. Create and activate the conda environment:
+```bash
+conda env create -f environment.yml
+conda activate gsv-metadata-tracker
 ```
 
-Optionally, if you'd like to list the active conda environments on your system and verify that the `gsv-date-analysis` environment was created:
-
-```
-> conda env list
-```
-
-### Step 3: Activate the environment
-
-```
-> conda activate gsv-bias-venv
+3. Set your Google Street View API key:
+```bash
+conda env config vars set gmaps_api_key=YOUR_API_KEY
 ```
 
-### Step 4: Open jupyter notebook
-Now you should see the command line prompt prefixed by the current environment: `(gsv-bias-venv)`. So, your command prompt should look like the following or something similar:
-
-```
-(gsv-bias-venv)$
+4. Reactivate your conda environment
+```bash
+conda activate gsv-metadata-tracker
 ```
 
-Now you can type in `jupyter notebook` and find `analysis.ipynb`. 
-
+5. Install the package in development mode:
+```bash
+pip install -e .
 ```
-(gsv-bias-venv)$ jupyter notebook
+
+## Usage
+
+### Basic Usage
+
+Analyze a city's Street View coverage:
+```bash
+gsv-tracker "City Name"
 ```
 
-In Jupyter Notebook environment, navigate to the `analysis.ipynb` file and open it.
+### Command Line Options
 
+- `city`: Name of the city to analyze (required)
+- `--width`: Search grid width in meters (default: 1000)
+- `--height`: Search grid height in meters (default: 1000)
+- `--step`: Distance between sample points in meters (default: 20)
+- `--force-size`: Force using provided dimensions instead of inferring from city boundaries
+- `--output`: Output file path for visualizations
+- `--skip-map`: Skip generating the interactive map
+- `--skip-stats`: Skip generating the statistical visualization
+
+## License
+
+Distributed under the MIT License. See `LICENSE` for more information.
+
+## Acknowledgments
+
+- Google Street View Static API
+- OpenStreetMap and CARTO for map tiles
+- [Folium](https://python-visualization.github.io/folium/) for map visualization
+- [Chart.js](https://www.chartjs.org/) for interactive charts
+- Some of this code was written with the assistance of Anthropic Claude and VSCode Copilot
