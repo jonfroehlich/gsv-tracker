@@ -1,6 +1,6 @@
-# GSV Metadata Tracker
+# GSV Tracker
 
-GSV Metadata Tracker is a Python tool for analyzing Google Street View coverage and temporal patterns in cities. It creates interactive visualizations showing when and where Street View imagery was captured.
+GSV Tracker is a Python tool for analyzing Google Street View coverage and temporal patterns in cities. It creates interactive visualizations showing when and where Street View imagery was captured.
 
 ## Features
 
