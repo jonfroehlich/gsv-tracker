@@ -32,6 +32,7 @@ from . import (
     get_city_coordinates, 
     get_city_bounding_box,
     create_visualization_map,
+    display_search_area
 )
 from .geoutils import get_search_dimensions
 
@@ -123,6 +124,14 @@ def parse_args():
         default=30.0,
         help='Timeout in seconds for each individual API request'
     )
+
+    # Add new boundary check argument
+    parser.add_argument(
+        '--check-boundary',
+        action='store_true',
+        help='Generate visualization of search area without downloading data. '
+             'Useful for verifying the area before starting a download.'
+    )
     
     parser.add_argument(
         '--no-visual',
@@ -177,6 +186,27 @@ async def async_main():
         if not location:
             logging.error(f"Could not find coordinates for {args.city}")
             sys.exit(1)
+
+        # If checking boundaries, create and save visualization then exit
+        if args.check_boundary:
+            base_name = generate_base_filename(args.city, args.width, args.height, args.step)
+            preview_path = os.path.join(config['download_path'], f"{base_name}_preview.html")
+            
+            # Create preview map using your display_search_area function
+            preview_map = display_search_area(
+                args.city,
+                location.latitude,
+                location.longitude,
+                args.width,
+                args.height,
+                args.step
+            )
+            preview_map.save(preview_path)
+            
+            print(f"\nSearch area preview saved to: {preview_path}")
+            print("Review the visualization and adjust parameters if needed.")
+            print("\nTo download data with these parameters, run the same command without --check-boundary")
+            return 0
         
         width, height = get_search_dimensions(
             args.city,

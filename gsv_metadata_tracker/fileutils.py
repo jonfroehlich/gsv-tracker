@@ -46,74 +46,70 @@ def generate_base_filename(
     safe_city_name = sanitize_city_name(city_name)
     return f"{safe_city_name}_width_{int(grid_width)}_height_{int(grid_height)}_step_{step_length}"
 
-def compress_csv(csv_path: str) -> str:
-    """Compress a CSV file into a ZIP archive."""
-    zip_path = csv_path.rsplit('.', 1)[0] + '.zip'
-    csv_name = os.path.basename(csv_path)
+def try_open_with_system_command(file_path: str) -> bool:
+    """
+    Attempt to open file using system-specific commands as fallback.
+    
+    Args:
+        file_path: Path to the file to open
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        system = platform.system().lower()
+        if system == 'darwin':  # macOS
+            subprocess.run(['open', file_path], check=True)
+        elif system == 'windows':
+            subprocess.run(['start', file_path], shell=True, check=True)
+        elif system == 'linux':
+            subprocess.run(['xdg-open', file_path], check=True)
+        else:
+            return False
+        return True
+    except subprocess.SubprocessError:
+        return False
+
+def open_in_browser(file_path: str) -> Tuple[bool, Optional[str]]:
+    """
+    Open a file in the default web browser with error handling and fallback options.
+    
+    Args:
+        file_path: Path to the file to open
+    
+    Returns:
+        Tuple[bool, Optional[str]]: (Success status, Error message if any)
+    """
+    path = Path(file_path).resolve()
+    
+    if not path.exists():
+        return False, f"File not found: {file_path}"
     
     try:
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-            zf.write(csv_path, csv_name)
+        # Convert to proper file URI based on platform
+        if platform.system() == 'Windows':
+            uri = path.as_uri()
+        else:
+            uri = f'file://{path}'
         
-        os.remove(csv_path)
-        logger.info(f"Successfully compressed {csv_path} to {zip_path}")
-        return zip_path
+        # Try primary method: webbrowser module
+        if webbrowser.open(uri, new=2):
+            return True, None
+            
+        # First fallback: Try specific browsers
+        for browser in ['google-chrome', 'firefox', 'safari', 'edge']:
+            try:
+                browser_ctrl = webbrowser.get(browser)
+                if browser_ctrl.open(uri, new=2):
+                    return True, None
+            except webbrowser.Error:
+                continue
+                
+        # Second fallback: system-specific commands
+        if try_open_with_system_command(str(path)):
+            return True, None
+            
+        return False, "Failed to open browser using all available methods"
+        
     except Exception as e:
-        logger.error(f"Failed to compress {csv_path}: {str(e)}")
-        raise
-
-def load_data(
-    city_name: str,
-    width: float,
-    height: float,
-    step: float,
-    base_path: str
-) -> Optional[pd.DataFrame]:
-    """Load GSV metadata from either ZIP or CSV file."""
-    csv_path, temp_path, zip_path = get_data_file_paths(
-        city_name, width, height, step, base_path
-    )
-    
-    if os.path.exists(zip_path):
-        logger.info(f"Loading data from ZIP file: {zip_path}")
-        with zipfile.ZipFile(zip_path, 'r') as zf:
-            with zf.open(zf.namelist()[0]) as f:
-                return pd.read_csv(f, parse_dates=['capture_date'])
-    
-    elif os.path.exists(csv_path):
-        logger.info(f"Loading data from CSV file: {csv_path}")
-        df = pd.read_csv(csv_path, parse_dates=['capture_date'])
-        compress_csv(csv_path)
-        return df
-    
-    elif os.path.exists(temp_path):
-        logger.info(f"Found incomplete download: {temp_path}")
-        return pd.read_csv(temp_path, parse_dates=['capture_date'])
-    
-    return None
-
-def save_data(
-    df: pd.DataFrame,
-    city_name: str,
-    width: float,
-    height: float,
-    step: float,
-    base_path: str,
-    is_final: bool = False
-) -> None:
-    """Save GSV metadata to file."""
-    csv_path, temp_path, zip_path = get_data_file_paths(
-        city_name, width, height, step, base_path
-    )
-    
-    if not is_final:
-        df.to_csv(temp_path, index=False)
-        logger.info(f"Saved intermediate data to: {temp_path}")
-    else:
-        df.to_csv(csv_path, index=False)
-        logger.info(f"Saved final data to: {csv_path}")
-        
-        compress_csv(csv_path)
-        
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        return False, f"Error opening browser: {str(e)}"
