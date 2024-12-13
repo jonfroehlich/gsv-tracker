@@ -15,3 +15,5 @@ dependencies:
   - branca
   - python-dotenv
   - pytest
+  - filelock
+  - aiohttp

@@ -42,7 +42,11 @@ def get_search_dimensions(
 ) -> tuple[float, float]:
     """Get search dimensions either from city boundaries or default values."""
     
-    if not force_size:
+    width, height = default_width, default_height
+    
+    if force_size:
+        print(f"Using forced dimensions: {default_width}m x {default_height}m")
+    else:
         try:
             city_bbox = get_city_bounding_box(city_name)
             if city_bbox:
@@ -57,14 +61,14 @@ def get_search_dimensions(
                 east_mid = (city_bbox['north'], city_bbox['west'])
                 height = geodesic(west_mid, east_mid).meters
                 
-                print(f"Using inferred city boundaries: {width:.0f}m x {height:.0f}m")
-                return width, height
+                print(f"Using inferred city boundaries for {city_name}: {width:.0f}m x {height:.0f}m")
+                logger.info(f"Using inferred city boundaries for {city_name}: {width:.0f}m x {height:.0f}m")
         except Exception as e:
             print(f"Failed to infer city boundaries: {str(e)}")
+            logger.error(f"Failed to infer city boundaries: {str(e)}")
     
-    if force_size:
-        print(f"Using forced dimensions: {default_width}m x {default_height}m")
-    else:
-        print(f"Using default dimensions: {default_width}m x {default_height}m")
-        
-    return default_width, default_height
+    area = width * height / 1000.0
+    print(f"Search area for {city_name}: {area:.1f} square km")
+    logger.info(f"Search area for {city_name}: {area:.1f} square km")
+    
+    return width, height

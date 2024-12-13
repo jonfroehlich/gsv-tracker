@@ -3,3 +3,4 @@
 *.downloading
 *.html
 .DS_Store
+*.lock
