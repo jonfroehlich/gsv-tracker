@@ -15,14 +15,14 @@ GSV Tracker is a Python tool for analyzing Google Street View coverage and tempo
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/gsv-metadata-tracker.git
-cd gsv-metadata-tracker
+git clone https://github.com/yourusername/gsv-tracker.git
+cd gsv-tracker
 ```
 
 2. Create and activate the conda environment:
 ```bash
 conda env create -f environment.yml
-conda activate gsv-metadata-tracker
+conda activate gsv-tracker
 ```
 
 3. Set your Google Street View API key:
@@ -32,7 +32,7 @@ conda env config vars set gmaps_api_key=YOUR_API_KEY
 
 4. Reactivate your conda environment
 ```bash
-conda activate gsv-metadata-tracker
+conda activate gsv-tracker
 ```
 
 5. Install the package in development mode:
