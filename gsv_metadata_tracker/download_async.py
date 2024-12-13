@@ -13,6 +13,7 @@ import asyncio
 import aiohttp
 from filelock import FileLock
 from pathlib import Path
+import backoff
 from .fileutils import generate_base_filename
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,12 @@ class DownloadError(Exception):
     """Custom exception for download-related errors."""
     pass
 
+@backoff.on_exception(
+    backoff.expo,
+    (asyncio.TimeoutError, aiohttp.ClientError),
+    max_tries=3,
+    max_time=60
+)
 async def fetch_gsv_pano_metadata_async(
     lat: float,
     lon: float,
@@ -29,7 +36,7 @@ async def fetch_gsv_pano_metadata_async(
     timeout: aiohttp.ClientTimeout
 ) -> Dict[str, Any]:
     """
-    Get the closest pano data from Google Street View API using aiohttp.
+    Get the closest pano data from Google Street View API using aiohttp with retry logic.
     
     Args:
         lat: Latitude coordinate
@@ -42,7 +49,7 @@ async def fetch_gsv_pano_metadata_async(
         Dict containing the API response
     
     Raises:
-        DownloadError: If the request fails or returns invalid data
+        DownloadError: If the request fails or returns invalid data after all retries
     """
     url = f"https://maps.googleapis.com/maps/api/streetview/metadata?location={lat},{lon}&key={api_key}"
     try:
@@ -50,8 +57,9 @@ async def fetch_gsv_pano_metadata_async(
             if response.status != 200:
                 raise DownloadError(f"HTTP {response.status}: {await response.text()}")
             return await response.json()
-    except asyncio.TimeoutError:
-        raise DownloadError(f"Timeout while fetching data for coordinates {lat},{lon}")
+    except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+        logger.warning(f"Attempt failed for coordinates {lat},{lon}: {str(e)}, retrying...")
+        raise  # Let backoff handle the retry
     except Exception as e:
         raise DownloadError(f"Error fetching data for coordinates {lat},{lon}: {str(e)}")
 
@@ -76,7 +84,7 @@ def generate_grid_points(
     points = []
     total_points = (width_steps + 1) * (height_steps + 1)
     
-    with tqdm(total=total_points, desc="Generating grid points") as pbar:
+    with tqdm(total=total_points, desc="Generating search grid points") as pbar:
         for i in range(-height_steps // 2, height_steps // 2 + 1):
             for j in range(-width_steps // 2, width_steps // 2 + 1):
                 north_point = geopy.distance.distance(meters=i * step_length).destination(origin, 0)
@@ -113,7 +121,8 @@ async def process_batch_async(
     base_file_path: str,
     write_header: bool,
     timeout: aiohttp.ClientTimeout,
-    connection_limit: int
+    connection_limit: int,
+    failed_points_queue: asyncio.Queue
 ) -> List[Dict]:
     """
     Process a batch of points asynchronously and save results safely.
@@ -128,7 +137,7 @@ async def process_batch_async(
         connector = aiohttp.TCPConnector(limit=connection_limit)
         async with aiohttp.ClientSession(connector=connector) as session:
             tasks = []
-            for lat, lon, _, _ in points:
+            for lat, lon, i, j in points:
                 task = fetch_gsv_pano_metadata_async(lat, lon, api_key, session, timeout)
                 tasks.append(task)
             
@@ -138,6 +147,7 @@ async def process_batch_async(
             for (lat, lon, i, j), response in zip(points, responses):
                 if isinstance(response, Exception):
                     logger.error(f"Error processing point ({lat}, {lon}): {str(response)}")
+                    await failed_points_queue.put((lat, lon, i, j))
                     continue
                 
                 query_timestamp = datetime.now().astimezone().isoformat()
@@ -229,7 +239,8 @@ async def download_gsv_metadata_async(
     download_path: str,
     batch_size: int = 50,
     connection_limit: int = 50,
-    request_timeout: float = 30.0
+    request_timeout: float = 30.0,
+    max_retries: int = 3
 ) -> pd.DataFrame:
     """
     Fetch GSV metadata for a city using async/await pattern with safe intermediate file saving.
@@ -246,12 +257,10 @@ async def download_gsv_metadata_async(
         batch_size: Number of requests to prepare and queue at once
         connection_limit: Maximum number of concurrent connections to the API
         request_timeout: Timeout for each request in seconds
+        max_retries: Maximum number of retry attempts for failed points
     
     Returns:
         DataFrame containing the GSV metadata
-    
-    Raises:
-        DownloadError: If the download process fails
     """
     start_time = time.time()
     
@@ -265,13 +274,15 @@ async def download_gsv_metadata_async(
     # Create download directory if it doesn't exist
     Path(download_path).mkdir(parents=True, exist_ok=True)
     
-    # Define file names
-    file_name = generate_base_filename(city_name, grid_width, grid_height, step_length) + ".csv"
+    # Define file names using base filename
+    base_filename = generate_base_filename(city_name, grid_width, grid_height, step_length)
+    file_name = base_filename + ".csv"
     file_name_downloading = file_name + ".downloading"
     file_name_compressed = file_name + ".gz"
     file_name_with_path = os.path.join(download_path, file_name)
     file_name_downloading_with_path = os.path.join(download_path, file_name_downloading)
     file_name_compressed_with_path = os.path.join(download_path, file_name_compressed)
+    failed_points_file = os.path.join(download_path, f"{base_filename}_failed_points.csv")
 
     try:
         # Check if compressed file exists
@@ -295,21 +306,25 @@ async def download_gsv_metadata_async(
             point for point in all_points 
             if (point[0], point[1]) not in processed_points
         ]
+     
+        print(f"Found {len(processed_points)} already processed points. {len(remaining_points)} points remaining.")
+        logger.info(f"Found {len(processed_points)} already processed points. {len(remaining_points)} points remaining.")
         
-        total_points = len(remaining_points)
-        logger.info(f"Found {len(processed_points)} already processed points. {total_points} points remaining.")
-        
-        if total_points == 0:
+        if len(remaining_points) == 0:
             logger.info("All points already processed.")
             os.rename(file_name_downloading_with_path, file_name_with_path)
         else:
-            # Initialize progress tracking
+            # Initialize queues
             progress_queue = asyncio.Queue()
+            failed_points_queue = asyncio.Queue()
             
             # Create progress bar
-            progress_bar = tqdm(total=total_points, desc=f"Downloading GSV pano data for {city_name}")
+            progress_bar = tqdm(
+                total=len(all_points), 
+                initial=len(processed_points),
+                desc=f"Downloading GSV pano data for {city_name}")
             
-            # Process in batches
+            # Process initial points in batches
             write_header = not os.path.exists(file_name_downloading_with_path)
             for i in range(0, len(remaining_points), batch_size):
                 batch_points = remaining_points[i:i + batch_size]
@@ -320,7 +335,8 @@ async def download_gsv_metadata_async(
                     file_name_downloading_with_path,
                     write_header,
                     timeout,
-                    connection_limit
+                    connection_limit,
+                    failed_points_queue
                 )
                 write_header = False
                 
@@ -329,8 +345,51 @@ async def download_gsv_metadata_async(
                     await progress_queue.get()
                     progress_bar.update(1)
             
-            progress_bar.close()
+            # Process failed points with retries
+            retry_count = 0
+            while not failed_points_queue.empty() and retry_count < max_retries:
+                retry_count += 1
+                logger.info(f"Starting retry attempt {retry_count} for failed points")
+                
+                # Collect all failed points for this retry attempt
+                failed_points = []
+                while not failed_points_queue.empty():
+                    failed_points.append(await failed_points_queue.get())
+                
+                if failed_points:
+                    logger.info(f"Retrying {len(failed_points)} failed points")
+                    for i in range(0, len(failed_points), batch_size):
+                        batch_points = failed_points[i:i + batch_size]
+                        await process_batch_async(
+                            batch_points,
+                            api_key,
+                            progress_queue,
+                            file_name_downloading_with_path,
+                            False,  # Never need header for retries
+                            timeout,
+                            connection_limit,
+                            failed_points_queue
+                        )
+                
+                # Wait a bit before next retry
+                if retry_count < max_retries and not failed_points_queue.empty():
+                    await asyncio.sleep(5 * retry_count)  # Increasing delay between retries
+
+            # Log any permanently failed points
+            remaining_failed = []
+            while not failed_points_queue.empty():
+                point = await failed_points_queue.get()
+                remaining_failed.append(point)
             
+            if remaining_failed:
+                logger.error(f"Failed to download data for {len(remaining_failed)} points after all retries")
+                with open(failed_points_file, 'w') as f:
+                    f.write("lat,lon,i,j\n")  # Write header
+                    for lat, lon, i, j in remaining_failed:
+                        f.write(f"{lat},{lon},{i},{j}\n")
+            
+            progress_bar.close()
+
             # Rename the downloading file to final csv
             os.rename(file_name_downloading_with_path, file_name_with_path)
         
