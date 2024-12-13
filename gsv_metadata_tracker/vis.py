@@ -1,6 +1,7 @@
 # gsv_metadata_tracker/vis.py
 
 import folium
+from folium import plugins
 import branca.colormap as cm
 import pandas as pd
 from datetime import datetime
@@ -10,9 +11,166 @@ import seaborn as sns
 import matplotlib.colors
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from math import cos, pi
 from typing import Optional
+from .geoutils import get_best_folium_zoom_level
 
 logger = logging.getLogger(__name__)
+
+def display_search_area(city_name: str, city_center_lat: float,
+                       city_center_lng: float,
+                       search_grid_width_in_meters: float,
+                       search_grid_height_in_meters: float,
+                       step_size_in_meters: float = 20) -> folium.Map:
+    """
+    Creates an interactive map visualization showing a city's search area with grid overlay.
+
+    Args:
+        city_center_lat (float): Latitude of the city center
+        city_center_lng (float): Longitude of the city center
+        search_grid_width_in_meters (float): Width of the search area in meters
+        search_grid_height_in_meters (float): Height of the search area in meters
+        step_size_in_meters (float, optional): Size of each grid cell in meters. Defaults to 20.
+
+    Returns:
+        folium.Map: Interactive map object showing the search area and grid
+
+    Note:
+        The conversion between meters and degrees accounts for latitude-dependent
+        distortion using the Haversine approximation. The grid lines are drawn
+        taking into account that degrees of longitude vary with latitude.
+    """
+
+    # Grid styling parameters
+    GRID_BACKGROUND_COLOR = '#3B82F6'  # Medium blue
+    GRID_BACKGROUND_OPACITY = 0.15
+    GRID_BORDER_COLOR = '#2563EB'      # Slightly darker blue
+    GRID_BORDER_WEIGHT = 2
+    GRID_LINE_COLOR = 'blue'
+    GRID_LINE_WEIGHT = 1.0
+    GRID_LINE_OPACITY = 0.5
+
+    # Calculate total number of grid points
+    points_width = int(search_grid_width_in_meters / step_size_in_meters) + 1
+    points_height = int(search_grid_height_in_meters / step_size_in_meters) + 1
+    total_points = points_width * points_height
+    
+    # Calculate estimated download time (40 points/second)
+    points_per_second = 40
+    estimated_seconds = total_points / points_per_second
+    hours = int(estimated_seconds // 3600)
+    minutes = int((estimated_seconds % 3600) // 60)
+    seconds = int(estimated_seconds % 60)
+
+    if hours > 0:
+        time_str = f"{hours}h {minutes}m {seconds}s"
+    elif minutes > 0:
+        time_str = f"{minutes}m {seconds}s"
+    else:
+        time_str = f"{seconds}s"
+    
+    # Create map centered on the city
+    zoom_level = get_best_folium_zoom_level(search_grid_width_in_meters, search_grid_height_in_meters)
+   
+    # Map base style
+    m = folium.Map(location=[city_center_lat, city_center_lng], 
+                zoom_start=zoom_level,
+                tiles='CartoDB positron')
+    
+    # Create styled HTML for popup
+    popup_html = f"""
+    <div style="font-family: Arial, sans-serif; line-height: 1.5; padding: 5px;">
+        <h4 style="margin: 0 0 10px 0; color: #2c3e50;">{city_name}</h4>
+        <table style="border-collapse: collapse; width: 100%;">
+            <tr>
+                <td style="padding: 3px; color: #7f8c8d;"><b>Center Pt:</b></td>
+                <td style="padding: 3px;">{city_center_lat:.6f}, {city_center_lng:.6f}</td>
+            </tr>
+            <tr>
+                <td style="padding: 3px; color: #7f8c8d;"><b>Search Area:</b></td>
+                <td style="padding: 3px;">{search_grid_width_in_meters:,.1f} × {search_grid_height_in_meters:,.1f} meters</td>
+            </tr>
+            <tr>
+                <td style="padding: 3px; color: #7f8c8d;"><b>Step Size:</b></td>
+                <td style="padding: 3px;">{step_size_in_meters:,.1f} meters</td>
+            </tr>
+            <tr>
+                <td style="padding: 3px; color: #7f8c8d;"><b>Grid Points:</b></td>
+                <td style="padding: 3px;">{total_points:,} points ({points_width} × {points_height})</td>
+            </tr>
+            <tr>
+                <td style="padding: 3px; color: #7f8c8d;"><b>Est. Time:</b></td>
+                <td style="padding: 3px;">~{time_str} at 40 points/sec</td>
+            </tr>
+        </table>
+    </div>
+    """
+
+    # Add center marker
+    folium.Marker(
+        [city_center_lat, city_center_lng],
+        popup=folium.Popup(popup_html, max_width=300),
+        icon=folium.Icon(color='red', icon='info-sign')
+    ).add_to(m)
+
+    # Calculate degrees using proper latitude adjustment
+    # Length of 1° latitude = ~111km (constant)
+    # Length of 1° longitude = 111km * cos(latitude)
+    meters_per_lat_degree = 111000  # More precise than 111320
+    meters_per_lng_degree = meters_per_lat_degree * cos(city_center_lat * pi / 180)
+
+    width_deg = search_grid_width_in_meters / meters_per_lng_degree
+    height_deg = search_grid_height_in_meters / meters_per_lat_degree
+
+    # Calculate bounds
+    bounds = [
+        [city_center_lat - height_deg/2, city_center_lng - width_deg/2],
+        [city_center_lat + height_deg/2, city_center_lng + width_deg/2]
+    ]
+
+    # Draw rectangle for search area
+    folium.Rectangle(
+        bounds=bounds,
+        color=GRID_BORDER_COLOR,
+        fill=True,
+        weight=GRID_BORDER_WEIGHT,
+        fillColor=GRID_BACKGROUND_COLOR,
+        fillOpacity=GRID_BACKGROUND_OPACITY,
+        popup=f'Search Area: {search_grid_width_in_meters}m x {search_grid_height_in_meters}m'
+    ).add_to(m)
+
+    # Add grid overlay
+    step_size_lat = step_size_in_meters / meters_per_lat_degree
+    step_size_lng = step_size_in_meters / meters_per_lng_degree
+
+    # Draw vertical grid lines
+    lng = bounds[0][1]
+    while lng <= bounds[1][1]:
+        points = [[bounds[0][0], lng], [bounds[1][0], lng]]
+        folium.PolyLine(
+            points,
+            color=GRID_LINE_COLOR,
+            weight=GRID_LINE_WEIGHT,
+            opacity=GRID_LINE_OPACITY
+        ).add_to(m)
+        lng += step_size_lng
+
+    # Draw horizontal grid lines
+    lat = bounds[0][0]
+    while lat <= bounds[1][0]:
+        points = [[lat, bounds[0][1]], [lat, bounds[1][1]]]
+        folium.PolyLine(
+            points,
+            color=GRID_LINE_COLOR,
+            weight=GRID_LINE_WEIGHT,
+            opacity=GRID_LINE_OPACITY
+        ).add_to(m)
+        lat += step_size_lat
+
+    # Add scale bar
+    folium.plugins.MeasureControl(position='bottomleft').add_to(m)
+
+    return m
 
 def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
     """
