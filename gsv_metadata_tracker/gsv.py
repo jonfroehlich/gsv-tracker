@@ -2,25 +2,213 @@ import pandas as pd
 import requests
 import time
 from datetime import datetime
-import pytz
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List, Tuple, Optional
 from tqdm import tqdm
 import geopy.distance
 import os
 import gzip
 import shutil
+import asyncio
+import aiohttp
+from filelock import FileLock
+from pathlib import Path
 from .fileutils import generate_base_filename
 
 logger = logging.getLogger(__name__)
 
-def fetch_gsv_pano_metadata(lat: float, lon: float, api_key: str) -> Dict[str, Any]:
-    """Get the closest pano data from Google Street View API."""
-    url = f"https://maps.googleapis.com/maps/api/streetview/metadata?location={lat},{lon}&key={api_key}"
-    response = requests.get(url)
-    return response.json()
+class DownloadError(Exception):
+    """Custom exception for download-related errors."""
+    pass
 
-def download_gsv_metadata(
+async def fetch_gsv_pano_metadata_async(
+    lat: float,
+    lon: float,
+    api_key: str,
+    session: aiohttp.ClientSession,
+    timeout: aiohttp.ClientTimeout
+) -> Dict[str, Any]:
+    """
+    Get the closest pano data from Google Street View API using aiohttp.
+    
+    Args:
+        lat: Latitude coordinate
+        lon: Longitude coordinate
+        api_key: Google Street View API key
+        session: aiohttp ClientSession for making requests
+        timeout: Request timeout settings
+    
+    Returns:
+        Dict containing the API response
+    
+    Raises:
+        DownloadError: If the request fails or returns invalid data
+    """
+    url = f"https://maps.googleapis.com/maps/api/streetview/metadata?location={lat},{lon}&key={api_key}"
+    try:
+        async with session.get(url, timeout=timeout) as response:
+            if response.status != 200:
+                raise DownloadError(f"HTTP {response.status}: {await response.text()}")
+            return await response.json()
+    except asyncio.TimeoutError:
+        raise DownloadError(f"Timeout while fetching data for coordinates {lat},{lon}")
+    except Exception as e:
+        raise DownloadError(f"Error fetching data for coordinates {lat},{lon}: {str(e)}")
+
+def generate_grid_points(
+    origin: geopy.Point,
+    width_steps: int,
+    height_steps: int,
+    step_length: float
+) -> List[Tuple[float, float, int, int]]:
+    """
+    Generate all grid points for the search area with progress bar.
+    
+    Args:
+        origin: Center point of the grid
+        width_steps: Number of steps in width direction
+        height_steps: Number of steps in height direction
+        step_length: Distance between points in meters
+    
+    Returns:
+        List of tuples containing (latitude, longitude, i, j) for each point
+    """
+    points = []
+    total_points = (width_steps + 1) * (height_steps + 1)
+    
+    with tqdm(total=total_points, desc="Generating grid points") as pbar:
+        for i in range(-height_steps // 2, height_steps // 2 + 1):
+            for j in range(-width_steps // 2, width_steps // 2 + 1):
+                north_point = geopy.distance.distance(meters=i * step_length).destination(origin, 0)
+                point = geopy.distance.distance(meters=j * step_length).destination(north_point, 90)
+                points.append((point.latitude, point.longitude, i, j))
+                pbar.update(1)
+    
+    return points
+
+def get_processed_points(file_path: str) -> set:
+    """
+    Get set of already processed points from existing download file.
+    
+    Args:
+        file_path: Path to the intermediate download file
+    
+    Returns:
+        Set of (latitude, longitude) tuples for processed points
+    """
+    if not os.path.exists(file_path):
+        return set()
+    
+    try:
+        df = pd.read_csv(file_path)
+        return {(row['query_lat'], row['query_lon']) for _, row in df.iterrows()}
+    except Exception as e:
+        logger.error(f"Error reading existing file: {str(e)}")
+        return set()
+
+async def process_batch_async(
+    points: List[Tuple[float, float, int, int]],
+    api_key: str,
+    progress_queue: asyncio.Queue,
+    base_file_path: str,
+    write_header: bool,
+    timeout: aiohttp.ClientTimeout,
+    connection_limit: int
+) -> List[Dict]:
+    """
+    Process a batch of points asynchronously and save results safely.
+    
+    Args:
+        points: List of points to process
+        api_key: Google Street View API key
+        progress_queue: Queue for progress tracking
+        base_file_path: Base path for saving results
+        write_header: Whether to write CSV header
+        timeout: Request timeout settings
+        connection_limit: Maximum number of concurrent connections to the API
+    
+    Returns:
+        List of processed results
+    
+    Raises:
+        DownloadError: If batch processing fails
+    """
+    results = []
+    batch_id = int(time.time() * 1000)  # Unique batch ID using millisecond timestamp
+    temp_file = f"{base_file_path}.batch_{batch_id}.tmp"
+    lock_file = f"{base_file_path}.lock"
+    
+    try:
+        # Create connection-limited session
+        connector = aiohttp.TCPConnector(limit=connection_limit)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            tasks = []
+            for lat, lon, _, _ in points:
+                task = fetch_gsv_pano_metadata_async(lat, lon, api_key, session, timeout)
+                tasks.append(task)
+            
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            batch_results = []
+            for (lat, lon, i, j), response in zip(points, responses):
+                if isinstance(response, Exception):
+                    logger.error(f"Error processing point ({lat}, {lon}): {str(response)}")
+                    continue
+                
+                query_timestamp = datetime.now().astimezone().isoformat()
+                
+                status = response['status']
+                result = {
+                    'query_lat': lat,
+                    'query_lon': lon,
+                    'query_timestamp': query_timestamp,
+                    'pano_lat': None,
+                    'pano_lon': None,
+                    'pano_id': None,
+                    'capture_date': None,
+                    'copyright_info': None,
+                    'status': status
+                }
+                
+                if status == 'OK':
+                    result.update({
+                        'pano_lat': response['location']['lat'],
+                        'pano_lon': response['location']['lng'],
+                        'pano_id': response['pano_id'],
+                        'copyright_info': response.get('copyright', None),
+                        'capture_date': response.get('date', None)
+                    })
+                    if not result['capture_date']:
+                        result['status'] = 'NO_DATE'
+                
+                batch_results.append(result)
+                await progress_queue.put(1)
+        
+        # Save batch results to temporary file
+        df_batch = pd.DataFrame(batch_results)
+        df_batch.to_csv(temp_file, index=False)
+        
+        # Acquire lock and append to main file
+        with FileLock(lock_file):
+            if os.path.exists(base_file_path):
+                df_batch.to_csv(base_file_path, mode='a', header=False, index=False)
+            else:
+                df_batch.to_csv(base_file_path, index=False)
+        
+        # Clean up temp file
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+        
+        results.extend(batch_results)
+        
+    except Exception as e:
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+        raise DownloadError(f"Error processing batch: {str(e)}")
+    
+    return results
+
+async def download_gsv_metadata_async(
     city_name: str,
     center_lat: float,
     center_lon: float,
@@ -28,10 +216,13 @@ def download_gsv_metadata(
     grid_height: float,
     step_length: float,
     api_key: str,
-    download_path: str
+    download_path: str,
+    batch_size: int = 50,
+    connection_limit: int = 50,
+    request_timeout: float = 30.0
 ) -> pd.DataFrame:
     """
-    Fetch GSV metadata for a city, with support for resuming downloads.
+    Fetch GSV metadata for a city using async/await pattern with safe intermediate file saving.
     
     Args:
         city_name: Name of the city
@@ -42,16 +233,28 @@ def download_gsv_metadata(
         step_length: Distance between sample points in meters
         api_key: Google Street View API key
         download_path: Path to save data files
+        batch_size: Number of requests to prepare and queue at once
+        connection_limit: Maximum number of concurrent connections to the API
+        request_timeout: Timeout for each request in seconds
     
     Returns:
         DataFrame containing the GSV metadata
+    
+    Raises:
+        DownloadError: If the download process fails
     """
     start_time = time.time()
-    timezone = pytz.timezone('America/Los_Angeles')
     
     logger.info(f"Examining street view data for {city_name} centered at {center_lat},{center_lon}" +
                 f" with a grid of {grid_width/1000:.1f}km x {grid_height/1000:.1f}km and step_length={step_length} meters")
-
+    logger.info(f"Using batch_size={batch_size}, connection_limit={connection_limit}")
+    
+    # Set up timeout
+    timeout = aiohttp.ClientTimeout(total=request_timeout)
+    
+    # Create download directory if it doesn't exist
+    Path(download_path).mkdir(parents=True, exist_ok=True)
+    
     # Define file names
     file_name = generate_base_filename(city_name, grid_width, grid_height, step_length) + ".csv"
     file_name_downloading = file_name + ".downloading"
@@ -60,154 +263,84 @@ def download_gsv_metadata(
     file_name_downloading_with_path = os.path.join(download_path, file_name_downloading)
     file_name_compressed_with_path = os.path.join(download_path, file_name_compressed)
 
-    write_file_mode = 'a'
-    write_file_header = True
-    
-    # Check if compressed file exists
-    if os.path.exists(file_name_compressed_with_path):
-        logger.info(f"Found completed compressed file: {file_name_compressed_with_path}")
+    try:
+        # Check if compressed file exists
+        if os.path.exists(file_name_compressed_with_path):
+            logger.info(f"Found completed compressed file: {file_name_compressed_with_path}")
+            return pd.read_csv(file_name_compressed_with_path, compression='gzip', parse_dates=['capture_date'])
+
+        # Calculate grid dimensions
+        width_steps = int(grid_width / step_length)
+        height_steps = int(grid_height / step_length)
+        
+        # Generate all points
+        origin = geopy.Point(center_lat, center_lon)
+        all_points = generate_grid_points(origin, width_steps, height_steps, step_length)
+        
+        # Get already processed points
+        processed_points = get_processed_points(file_name_downloading_with_path)
+        
+        # Filter out already processed points
+        remaining_points = [
+            point for point in all_points 
+            if (point[0], point[1]) not in processed_points
+        ]
+        
+        total_points = len(remaining_points)
+        logger.info(f"Found {len(processed_points)} already processed points. {total_points} points remaining.")
+        
+        if total_points == 0:
+            logger.info("All points already processed.")
+            os.rename(file_name_downloading_with_path, file_name_with_path)
+        else:
+            # Initialize progress tracking
+            progress_queue = asyncio.Queue()
+            
+            # Create progress bar
+            progress_bar = tqdm(total=total_points, desc=f"Downloading GSV pano data for {city_name}")
+            
+            # Process in batches
+            write_header = not os.path.exists(file_name_downloading_with_path)
+            for i in range(0, len(remaining_points), batch_size):
+                batch_points = remaining_points[i:i + batch_size]
+                await process_batch_async(
+                    batch_points, 
+                    api_key, 
+                    progress_queue, 
+                    file_name_downloading_with_path,
+                    write_header,
+                    timeout,
+                    connection_limit
+                )
+                write_header = False
+                
+                # Update progress bar
+                while not progress_queue.empty():
+                    await progress_queue.get()
+                    progress_bar.update(1)
+            
+            progress_bar.close()
+            
+            # Rename the downloading file to final csv
+            os.rename(file_name_downloading_with_path, file_name_with_path)
+        
+        # Compress the final CSV file
+        with open(file_name_with_path, 'rb') as f_in:
+            with gzip.open(file_name_compressed_with_path, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+        
+        # Remove the uncompressed CSV file
+        os.remove(file_name_with_path)
+        
+        # Read the final compressed file
+        df = pd.read_csv(file_name_compressed_with_path, compression='gzip', parse_dates=['capture_date'])
+        
         end_time = time.time()
         elapsed_time = end_time - start_time
-        # Read directly from gzipped file
-        df = pd.read_csv(file_name_compressed_with_path, compression='gzip', parse_dates=['capture_date'])
-        logger.info(f"Loaded {len(df)} rows in {elapsed_time:.2f} seconds")
+        logger.info(f"Downloaded {len(df)} rows in {elapsed_time:.2f} seconds")
+        logger.info(f"Data compressed and saved to {file_name_compressed_with_path}")
+        
         return df
-
-    # Calculate grid dimensions
-    width_steps = int(grid_width / step_length)
-    height_steps = int(grid_height / step_length)
-    total_points = (width_steps + 1) * (height_steps + 1)
-    
-    # Create origin point
-    origin = geopy.Point(center_lat, center_lon)
-    
-    # Initialize DataFrame with correct column types
-    df = pd.DataFrame({
-        'query_lat': pd.Series(dtype='float'),
-        'query_lon': pd.Series(dtype='float'),
-        'query_timestamp': pd.Series(dtype='str'),
-        'pano_lat': pd.Series(dtype='float'),
-        'pano_lon': pd.Series(dtype='float'),
-        'pano_id': pd.Series(dtype='str'),
-        'capture_date': pd.Series(dtype='datetime64[ns]'),
-        'copyright_info': pd.Series(dtype='str'),
-        'status': pd.Series(dtype='str'),
-    })
-
-    # Handle resuming from existing file
-    start_i = -height_steps // 2
-    start_j = -width_steps // 2
-    
-    if os.path.exists(file_name_downloading_with_path):
-        logger.info(f"Found in-progress download: {file_name_downloading_with_path}")
-        try:
-            df = pd.read_csv(file_name_downloading_with_path)
-            if len(df) > 0:
-                last_point = df.iloc[-1]
-                last_lat, last_lon = last_point['query_lat'], last_point['query_lon']
-                
-                # Calculate approximate grid indices for the last point
-                last_north_dist = geopy.distance.distance(
-                    (origin.latitude, origin.longitude),
-                    (last_lat, origin.longitude)
-                ).meters
-                last_east_dist = geopy.distance.distance(
-                    (origin.latitude, origin.longitude),
-                    (origin.latitude, last_lon)
-                ).meters
-                
-                start_i = int(round(last_north_dist / step_length)) * (-1 if last_lat < origin.latitude else 1)
-                start_j = int(round(last_east_dist / step_length)) * (-1 if last_lon < origin.longitude else 1)
-                
-                # Move to next point
-                if start_j == width_steps // 2:
-                    start_i += 1
-                    start_j = -width_steps // 2
-                else:
-                    start_j += 1
-                
-                write_file_header = False
-                logger.info(f"Resuming from grid position i={start_i}, j={start_j}")
-            
-        except Exception as e:
-            logger.error(f"Error reading existing file: {str(e)}")
-            logger.info("Starting fresh download")
-            df = pd.DataFrame(columns=df.columns)
-
-    # Calculate initial progress
-    initial = (start_i - (-height_steps // 2)) * (width_steps + 1) + (start_j - (-width_steps // 2))
-    
-    # Main download loop with progress bar
-    with tqdm(total=total_points, initial=initial, desc=f"Downloading GSV pano data for {city_name}") as progress_bar:
-        for i in range(start_i, height_steps // 2 + 1):
-            j_start = start_j if i == start_i else -width_steps // 2
-            
-            for j in range(j_start, width_steps // 2 + 1):
-                # Generate single grid point
-                north_point = geopy.distance.distance(meters=i * step_length).destination(origin, 0)
-                point = geopy.distance.distance(meters=j * step_length).destination(north_point, 90)
-                query_lat, query_lon = point.latitude, point.longitude
-                
-                # Get current timestamp
-                current_time = datetime.now(timezone)
-                query_timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S %Z%z")
-                
-                # Fetch pano data
-                pano_data = fetch_gsv_pano_metadata(query_lat, query_lon, api_key)
-                status = pano_data['status']
-                
-                pano_lat = None
-                pano_lon = None
-                pano_id = None
-                capture_date = None
-                copyright_info = None
-                
-                if status == 'OK':
-                    pano_lat = pano_data['location']['lat']
-                    pano_lon = pano_data['location']['lng']
-                    pano_id = pano_data['pano_id']
-                    copyright_info = pano_data.get('copyright', None)
-                    
-                    if 'date' in pano_data:
-                        capture_date = pano_data['date']
-                    else:
-                        status = 'NO_DATE'
-                
-                # Append to DataFrame and save
-                df_to_append = pd.DataFrame([[query_lat, query_lon, query_timestamp,
-                                           pano_lat, pano_lon, pano_id, capture_date,
-                                           copyright_info, status]], columns=df.columns)
-                
-                
-                df_to_append = df_to_append.astype(df.dtypes)
-                df_to_append.to_csv(file_name_downloading_with_path,
-                                  mode=write_file_mode,
-                                  header=write_file_header,
-                                  index=False)
-
-                write_file_header = False
-                df = pd.concat([df, df_to_append], ignore_index=True)
-                
-                progress_bar.set_postfix({"Status": status})
-                progress_bar.update(1)
-                
-                # Add a small delay to avoid hitting API rate limits
-                time.sleep(0.01)
-    
-    # Rename the downloading file to final csv
-    os.rename(file_name_downloading_with_path, file_name_with_path)
-    
-    # Compress the final CSV file
-    with open(file_name_with_path, 'rb') as f_in:
-        with gzip.open(file_name_compressed_with_path, 'wb') as f_out:
-            shutil.copyfileobj(f_in, f_out)
-    
-    # Remove the uncompressed CSV file
-    os.remove(file_name_with_path)
-    
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    logger.info(f"Downloaded {len(df)} rows in {elapsed_time:.2f} seconds")
-    logger.info(f"Data compressed and saved to {file_name_compressed_with_path}")
-    
-    return df
+        
+    except Exception as e:
+        raise DownloadError(f"Download failed: {str(e)}")
