@@ -1,7 +1,7 @@
 # gsv_metadata_tracker/vis.py
 
 import folium
-from folium import plugins
+from folium import plugins, FeatureGroup, Element
 import branca.colormap as cm
 import pandas as pd
 from datetime import datetime
@@ -18,6 +18,8 @@ import zlib
 import base64
 import sys
 from .geoutils import get_best_folium_zoom_level
+from .geoutils import get_bounding_box_size
+from .geoutils import get_bounding_box
 
 logger = logging.getLogger(__name__)
 
@@ -214,10 +216,37 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
     # Calculate map center
     map_center = [valid_rows['pano_lat'].mean(), valid_rows['pano_lon'].mean()]
 
+    # Get bounding box using existing function
+    bbox = get_bounding_box(valid_rows)
+    bbox_coords = [
+        [bbox['south'], bbox['west']],  # Southwest corner
+        [bbox['north'], bbox['east']],  # Northeast corner
+    ]
+
+    # Calculate bounding box dimensions
+    width_meters, height_meters = get_bounding_box_size(valid_rows)
+    area_km2 = (width_meters * height_meters) / 1_000_000  # Convert to km²
+    zoom_level = get_best_folium_zoom_level(width_meters, height_meters)
+
+    # Calculate temporal statistics
+    now = datetime.now()
+    valid_rows['age_years'] = (now - valid_rows['capture_date']).dt.days / 365.25
+    
+    avg_age = valid_rows['age_years'].mean()
+    age_std = valid_rows['age_years'].std()
+    median_age = valid_rows['age_years'].median()
+    total_panos = len(valid_rows)
+    
+    # Calculate coverage density
+    density_per_km2 = total_panos / area_km2
+    
+    # Calculate temporal coverage
+    date_range = (valid_rows['capture_date'].max() - valid_rows['capture_date'].min()).days / 365.25
+
     # Create base map
     folium_map = folium.Map(
         location=map_center,
-        zoom_start=13,
+        zoom_start=zoom_level,
         tiles=None
     )
 
@@ -228,8 +257,41 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
         opacity=0.8
     ).add_to(folium_map)
 
-    # Create feature group for markers
-    fg = folium.FeatureGroup(name="Pano Markers")
+    # Create enhanced tooltip HTML
+    bbox_tooltip_html = f"""
+    <div style='font-family: Arial, sans-serif; font-size: 12px; line-height: 1.5'>
+        <h3 style='margin: 0 0 8px 0'>{city_name}: GSV Coverage Area</h3>
+        <div style='margin-bottom: 4px'>
+            <strong>Grid Area:</strong> {width_meters:,.0f} x {height_meters:,.0f}m ({area_km2:.1f} km²)
+        </div>
+        <div style='margin-bottom: 4px'>
+            <strong>Total GSV Panos:</strong> {total_panos:,} ({density_per_km2:.1f} panos/km²)
+        </div>
+        <div style='margin-bottom: 4px'>
+            <strong>Avg Pano Age:</strong> {avg_age:.1f} yrs (SD={age_std:.1f} yrs)
+        </div>
+        <div style='margin-bottom: 4px'>
+            <strong>Median Pano Age:</strong> {median_age:.1f} yrs
+        </div>
+        <div style='margin-bottom: 4px'>
+            <strong>Temporal Coverage:</strong> {date_range:.1f} years
+        </div>
+        <div style='margin-bottom: 4px'>
+            <strong>Date Range:</strong> {valid_rows['capture_date'].min().strftime('%Y-%m')} to {valid_rows['capture_date'].max().strftime('%Y-%m')}
+        </div>
+    </div>
+    """
+
+     # Add bounding box rectangle with enhanced tooltip
+    folium.Rectangle(
+        bounds=bbox_coords,
+        color='#4CC3D9',  # Muted cyan-blue
+        weight=2,
+        fill=False,
+        opacity=0.7,
+        popup=bbox_tooltip_html,  # Using the same content for popup and tooltip
+        tooltip=bbox_tooltip_html
+    ).add_to(folium_map)
 
     # Change the colormap creation to use years
     oldest_date = valid_rows['capture_date'].min()
@@ -246,9 +308,10 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
 
     # Add markers
     marker_data = []
+    markers_fg = folium.FeatureGroup(name="Pano Markers")  # Create feature group for markers
     for idx, row in tqdm(valid_rows.iterrows(), total=len(valid_rows), desc="Creating GSV point map markers"):
         capture_date = row['capture_date']
-        date_str = capture_date.strftime('%Y-%m-%d')
+        date_str = capture_date.strftime('%Y-%m')
         age_years = (datetime.now() - capture_date).days / 365.25
         color = matplotlib.colors.to_hex(colormap(age_years))
 
@@ -261,7 +324,7 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
             </div>
         """, max_width=300)
 
-        folium.CircleMarker(
+        circle_marker = folium.CircleMarker(
             location=[row['pano_lat'], row['pano_lon']],
             radius=2,
             color=color,
@@ -270,8 +333,14 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
             fill_color=color,
             fill_opacity=0.8,
             popup=popup,
-            tooltip=f"Capture Date: {date_str}<br>Age: {age_years:.1f} years"
-        ).add_to(fg)
+            tooltip=f"Capture Date: {date_str}<br>Age: {age_years:.1f} years", 
+            name='gsv-pano-marker'   
+        )
+
+        # Add custom data attributes
+        #circle_marker.add_child(Element(f'<div data-date="{date_str}" data-age="{age_years}"></div>'))
+        # circle_marker.add_child(Element(f'<path data-date="{date_str}" data-age="{age_years}"></path>'))
+        markers_fg.add_child(circle_marker)
 
         marker_data.append({
             'element_id': f'marker_{idx}',
@@ -279,56 +348,56 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
         })
 
     # Add feature group to map
-    fg.add_to(folium_map)
+    markers_fg.add_to(folium_map)
 
     # Add HTML/CSS for legend and histogram
-    legend_and_hist_html = """
+    legend_and_hist_html = f"""
     <style>
-        .overlay-panel {
+        .overlay-panel {{
             background-color: rgba(255, 255, 255, 0.9);
             padding: 15px;
             border-radius: 6px;
             border: 1px solid #ccc;
             box-shadow: 0 2px 6px rgba(0,0,0,0.2);
             z-index: 1000;
-        }
+        }}
 
-        .histogram-container {
+        .histogram-container {{
             position: fixed;
             bottom: 50px;
             right: 50px;
-        }
+        }}
 
-        .histogram-content {
+        .histogram-content {{
             width: 300px;
             height: 150px;
             margin-top: 10px;
-        }
+        }}
 
-        .legend {
+        .legend {{
             background-color: rgba(255, 255, 255, 0.9) !important;
             padding: 6px !important;
             border-radius: 4px !important;
             border: 1px solid #ccc !important;
-        }
+        }}
 
-        .leaflet-control-colormap {
+        .leaflet-control-colormap {{
             background-color: rgba(255, 255, 255, 0.9) !important;
             padding: 6px !important;
             border-radius: 4px !important;
             border: 1px solid #ccc !important;
             box-shadow: 0 2px 6px rgba(0,0,0,0.2) !important;
-        }
+        }}
 
-        .panel-title {
+        .panel-title {{
             font-size: 14px;
             font-weight: bold;
             margin: 0 0 10px 0;
             color: #333;
-        }
+        }}
     </style>
     <div class="overlay-panel histogram-container">
-        <div class="panel-title">GSV Coverage Over Time</div>
+        <div class="panel-title">{city_name}: GSV Coverage Over Time</div>
         <div class="histogram-content">
             <canvas id="histogramCanvas" width="300" height="150"></canvas>
         </div>
@@ -346,27 +415,64 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
     """))
 
     # Add JavaScript for interactive features
+    hist_data_json = json.dumps(hist_data.to_dict('records'), default=str)
+    marker_data_json = json.dumps(marker_data)
     histogram_js = f"""
     <script>
-    var markerData = {json.dumps(marker_data)};
-    var histogramData = {json.dumps(hist_data.to_dict('records'), default=str)};
+    var markerData = {marker_data_json};
+    var histogramData = {hist_data_json};
     var currentHighlight = null;
 
+    console.log('Histogram data:', histogramData);
+    console.log('Marker data:', markerData);
+
+    // First, verify data is properly passed
+    if (!histogramData) {{
+        console.error('Histogram data is undefined!');
+    }}
+    if (!markerData) {{
+        console.error('Marker data is undefined!');
+    }}
+
+    function getGSVMarkers() {{
+        const allMarkers = document.querySelectorAll('.leaflet-interactive');
+        return Array.from(allMarkers).filter(marker => {{
+            const pathData = marker.getAttribute('d');
+            const isCircle = pathData && pathData.includes('a2,2');
+            return isCircle;
+        }});
+    }}
+
     function highlightDate(targetDate) {{
+        console.log('Highlighting date:', targetDate);
+        console.log('Current highlight:', currentHighlight);
+
         if (currentHighlight !== targetDate) {{
             resetHighlight();
         }}
 
-        const targetYearMonth = targetDate.substring(0, 7);
-        var markers = document.querySelectorAll('.leaflet-interactive');
+        const gsvMarkers = getGSVMarkers();
+        console.log('Found GSV markers:', gsvMarkers ? gsvMarkers.length : 0);
         
-        markers.forEach(function(marker, index) {{
+        let highlightedCount = 0;
+        let filteredCount = 0;
+        gsvMarkers.forEach(function(marker, index) {{
             if (index < markerData.length) {{
-                const markerYearMonth = markerData[index].date.substring(0, 7);
-                marker.style.opacity = markerYearMonth === targetYearMonth ? '1' : '0.2';
-                marker.style.fillOpacity = markerYearMonth === targetYearMonth ? '1' : '0.2';
+                const markerDate = markerData[index].date;
+                const isHighlighted = markerDate === targetDate;
+                marker.style.opacity = isHighlighted ? '1' : '0.1';
+                marker.style.fillOpacity = isHighlighted ? '1' : '0.1';
+                
+                if (isHighlighted) {{
+                    highlightedCount++;
+                }} else {{
+                    filteredCount++;
+                }}
             }}
         }});
+        
+        console.log(`Highlighted: ${{highlightedCount}}, Filtered out: ${{filteredCount}}`);
+        
         
         currentHighlight = targetDate;
 
@@ -379,8 +485,8 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
     }}
 
     function resetHighlight() {{
-        var markers = document.querySelectorAll('.leaflet-interactive');
-        markers.forEach(function(marker) {{
+        const gsvMarkers = getGSVMarkers();
+        gsvMarkers.forEach(function(marker) {{
             marker.style.opacity = '1';
             marker.style.fillOpacity = '0.7';
         }});
@@ -513,20 +619,41 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
         }});
     }}
 
+    // In the DOMContentLoaded handler:
     document.addEventListener('DOMContentLoaded', function() {{
         var checkInterval = setInterval(function() {{
             if (window.Chart) {{
                 clearInterval(checkInterval);
                 setTimeout(function() {{
+                    console.log('Setting up event listeners');
                     createHistogram();
+                    
+                    // Log all interactive markers first
+                    const allMarkers = document.querySelectorAll('.leaflet-interactive');
+                    console.log('All interactive markers:', allMarkers.length);
+                    /* allMarkers.forEach((marker, i) => {{
+                        console.log(`\nMarker ${{i}} details:`);
+                        console.log('- Classes:', marker.className);
+                        console.log('- Tag name:', marker.tagName);
+                        console.log('- Attributes:', Array.from(marker.attributes).map(attr => `${{attr.name}}="${{attr.value}}"`).join(', '));
+                        console.log('- HTML:', marker.outerHTML);
+                        console.log('- Path data:', marker.getAttribute('d'));
+                    }});*/
+                    const gsvMarkers = getGSVMarkers();
+                    console.log('Found GSV markers for setup:', gsvMarkers.length);
+                    //console.log('Marker data length:', markerData.length);
 
-                    var markers = document.querySelectorAll('.leaflet-interactive');
-                    markers.forEach(function(marker, index) {{
-                        if (index < markerData.length) {{
-                            marker.addEventListener('click', function(e) {{
-                                highlightDate(markerData[index].date);
-                            }});
-                        }}
+                    gsvMarkers.forEach(function(marker, index) {{
+                        marker.addEventListener('click', function(e) {{
+                            console.log('Marker clicked:', e.target);
+                            if (index < markerData.length) {{
+                                const date = markerData[index].date;
+                                console.log('Found date:', date);
+                                if (date) {{
+                                    highlightDate(date);
+                                }}
+                            }}
+                        }});
                     }});
 
                     var map = document.querySelector('.folium-map');
