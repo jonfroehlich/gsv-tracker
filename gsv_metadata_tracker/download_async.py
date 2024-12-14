@@ -196,7 +196,8 @@ async def process_batch_async(
                 await progress_queue.put(1)
         
         # Save batch results to temporary file
-        df_batch = pd.DataFrame(batch_results, dtype=METADATA_DTYPES)
+        df_batch = pd.DataFrame(batch_results)  # First create the DataFrame
+        df_batch = df_batch.astype(METADATA_DTYPES)  # Then apply the dtypes
         df_batch.to_csv(temp_file, index=False)
         
         # Create a proper lock file with content
