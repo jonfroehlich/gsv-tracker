@@ -45,12 +45,12 @@ def parse_args():
     1. batch_size: Number of requests to prepare and queue at once
        - Larger batches use more memory but can be more efficient
        - Should be >= connection_limit
-       - Default: 100 requests per batch
+       - Default: 200 requests per batch
     
     2. connection_limit: Maximum number of concurrent connections
        - Limits actual simultaneous requests to the API
        - Helps prevent overwhelming network/API
-       - Default: 50 concurrent connections
+       - Default: 100 concurrent connections
        
     For the Google Street View Static API (30,000 requests/minute limit):
     - Conservative: batch_size=100, connection_limit=50
@@ -102,7 +102,7 @@ def parse_args():
     concurrency_group.add_argument(
         '--batch-size',
         type=int,
-        default=100,
+        default=200,
         help='''Number of requests to prepare and queue at once. 
              Should be >= connection-limit. Higher values use more memory 
              but can be more efficient. API limit is 500/second.'''
@@ -111,7 +111,7 @@ def parse_args():
     concurrency_group.add_argument(
         '--connection-limit',
         type=int,
-        default=50,
+        default=100,
         help='''Maximum number of concurrent connections to the API.
              Controls how many requests are actually in-flight at once.
              Should be <= batch-size. Conservative values prevent overwhelming
@@ -181,10 +181,6 @@ async def async_main():
     
     try:
         config = load_config()
-        # Create visualization directory
-        vis_path = os.path.join(config['download_path'], 'vis')
-        os.makedirs(vis_path, exist_ok=True)
-
         location = get_city_coordinates(args.city)
         
         if not location:
@@ -203,7 +199,7 @@ async def async_main():
         # If checking boundaries, create and save visualization then exit
         if args.check_boundary:
             base_name = generate_base_filename(args.city, width, height, args.step)
-            boundary_vis_full_path = os.path.join(vis_path, f"{base_name}_search_boundary.html")
+            boundary_vis_full_path = os.path.join(config['download_path'], f"{base_name}_search_boundary.html")
             
             # Create preview map using your display_search_area function
             search_area_map = display_search_area(
@@ -251,6 +247,8 @@ async def async_main():
             map_path = os.path.join(config['download_path'], f"{base_name}.html")
             
             map_obj = create_visualization_map(df, args.city)
+
+            print(f"Saving map visualization to {map_path}")
             map_obj.save(map_path)
             logging.info(f"Map visualization saved to {map_path}")
             
