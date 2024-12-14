@@ -3,6 +3,7 @@ from geopy.extra.rate_limiter import RateLimiter
 from geopy.distance import geodesic
 from typing import Optional, Dict, Any
 import logging
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,46 @@ def get_city_bounding_box(city_name: str) -> Optional[Dict[str, float]]:
             'east': float(bbox[3])
         }
     return None
+
+def get_bounding_box(df: pd.DataFrame) -> Dict[str, float]:
+    """
+    Get the bounding box coordinates for a DataFrame of points.
+    
+    Args:
+        df: DataFrame with 'pano_lat' and 'pano_lon' columns
+    
+    Returns:
+        Dictionary with 'south', 'west', 'north', and 'east' keys
+    """
+    return {
+        'south': df['pano_lat'].min(),
+        'west': df['pano_lon'].min(),
+        'north': df['pano_lat'].max(),
+        'east': df['pano_lon'].max()
+    }
+
+def get_bounding_box_size(df: pd.DataFrame) -> tuple[float, float]:
+    """
+    Calculate the width and height of a bounding box containing all points
+    using geopy's geodesic calculations.
+    
+    Returns:
+        tuple of (width_meters, height_meters)
+    """
+    # Get bounding box coordinates
+    min_lat = df['pano_lat'].min()
+    max_lat = df['pano_lat'].max()
+    min_lon = df['pano_lon'].min()
+    max_lon = df['pano_lon'].max()
+    
+    # Calculate width using the middle latitude
+    mid_lat = (min_lat + max_lat) / 2
+    width = geodesic((mid_lat, min_lon), (mid_lat, max_lon)).meters
+    
+    # Calculate height
+    height = geodesic((min_lat, min_lon), (max_lat, min_lon)).meters
+    
+    return width, height
 
 def get_search_dimensions(
     city_name: str, 
