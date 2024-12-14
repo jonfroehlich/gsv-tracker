@@ -25,6 +25,7 @@ import os
 import asyncio
 import aiohttp
 from typing import Optional
+from .fileutils import get_default_vis_dir
 from . import (
     load_config,
     get_city_coordinates,
@@ -182,6 +183,9 @@ async def async_main():
     try:
         config = load_config()
         location = get_city_coordinates(args.city)
+
+        vis_path = get_default_vis_dir()
+        os.makedirs(vis_path, exist_ok=True)
         
         if not location:
             logging.error(f"Could not find coordinates for {args.city}")
@@ -199,7 +203,7 @@ async def async_main():
         # If checking boundaries, create and save visualization then exit
         if args.check_boundary:
             base_name = generate_base_filename(args.city, width, height, args.step)
-            boundary_vis_full_path = os.path.join(config['download_path'], f"{base_name}_search_boundary.html")
+            boundary_vis_full_path = os.path.join(vis_path, f"{base_name}_search_boundary.html")
             
             # Create preview map using your display_search_area function
             search_area_map = display_search_area(
@@ -244,7 +248,7 @@ async def async_main():
         
         if not args.no_visual:
             base_name = generate_base_filename(args.city, width, height, args.step)
-            map_path = os.path.join(config['download_path'], f"{base_name}.html")
+            map_path = os.path.join(vis_path, f"{base_name}.html")
             
             map_obj = create_visualization_map(df, args.city)
 

@@ -10,6 +10,29 @@ import webbrowser
 
 logger = logging.getLogger(__name__)
 
+def get_default_data_dir() -> str:
+    """
+    Get the default data directory for the current platform.
+    
+    Returns:
+        str: Path to the default data directory
+    """
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_dir)
+    data_dir = os.path.join(project_root, "data")
+    return data_dir
+
+def get_default_vis_dir() -> str:
+    """
+    Get the default visualization directory for the current platform.
+    
+    Returns:
+        str: Path to the default visualization directory
+    """
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_dir)
+    vis_dir = os.path.join(project_root, "vis")
+    return vis_dir
 
 def sanitize_city_name(city_name: str) -> str:
     """
