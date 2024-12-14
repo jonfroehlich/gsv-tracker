@@ -1,15 +1,15 @@
 import os
 import logging
 from typing import Dict, Any
+from .fileutils import get_default_data_dir
 
 logger = logging.getLogger(__name__)
 
 def load_config() -> Dict[str, Any]:
     """Load configuration from conda environment variables."""
+
     # Get the project root directory (two levels up from this file)
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(current_dir)
-    data_dir = os.path.join(project_root, "data")
+    data_dir = get_default_data_dir()
  
     config = {
         'api_key': os.environ.get('GMAPS_API_KEY'),
