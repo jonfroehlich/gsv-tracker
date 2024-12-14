@@ -181,10 +181,6 @@ async def async_main():
     
     try:
         config = load_config()
-        # Create visualization directory
-        vis_path = os.path.join(config['download_path'], 'vis')
-        os.makedirs(vis_path, exist_ok=True)
-
         location = get_city_coordinates(args.city)
         
         if not location:
@@ -203,7 +199,7 @@ async def async_main():
         # If checking boundaries, create and save visualization then exit
         if args.check_boundary:
             base_name = generate_base_filename(args.city, width, height, args.step)
-            boundary_vis_full_path = os.path.join(vis_path, f"{base_name}_search_boundary.html")
+            boundary_vis_full_path = os.path.join(config['download_path'], f"{base_name}_search_boundary.html")
             
             # Create preview map using your display_search_area function
             search_area_map = display_search_area(
@@ -251,6 +247,8 @@ async def async_main():
             map_path = os.path.join(config['download_path'], f"{base_name}.html")
             
             map_obj = create_visualization_map(df, args.city)
+
+            print(f"Saving map visualization to {map_path}")
             map_obj.save(map_path)
             logging.info(f"Map visualization saved to {map_path}")
             
