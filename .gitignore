@@ -1,6 +1,6 @@
 
 *.pyc
-*.downloading
-*.html
 .DS_Store
-*.lock
+data/*.lock
+data/*.downloading
+data/*.html
