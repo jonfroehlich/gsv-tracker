@@ -8,11 +8,15 @@ from datetime import datetime
 import json
 import logging
 import seaborn as sns
+from tqdm import tqdm
 import matplotlib.colors
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from math import cos, pi
 from typing import Optional
+import zlib
+import base64
+import sys
 from .geoutils import get_best_folium_zoom_level
 
 logger = logging.getLogger(__name__)
@@ -227,32 +231,33 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
     # Create feature group for markers
     fg = folium.FeatureGroup(name="Pano Markers")
 
-    # Create colormap
+    # Change the colormap creation to use years
     oldest_date = valid_rows['capture_date'].min()
-    days_since_oldest = (datetime.now() - oldest_date).days
-    colormap = cm.linear.YlOrRd_09.scale(0, days_since_oldest)
+    years_since_oldest = (datetime.now() - oldest_date).days / 365.25
+    colormap = cm.linear.YlOrRd_09.scale(0, years_since_oldest)
+    colormap.caption = 'Age (Years)'  # Update caption
 
-    # Prepare histogram data
+    # Prepare histogram data - now using years instead of days
     hist_data = valid_rows.groupby('capture_date').size().reset_index()
     hist_data.columns = ['date', 'count']
     hist_data['date_str'] = hist_data['date'].dt.strftime('%Y-%m')
-    hist_data['days_ago'] = (datetime.now() - hist_data['date']).dt.days
-    hist_data['color'] = hist_data['days_ago'].apply(lambda x: matplotlib.colors.to_hex(colormap(x)))
+    hist_data['years_ago'] = (datetime.now() - hist_data['date']).dt.days / 365.25
+    hist_data['color'] = hist_data['years_ago'].apply(lambda x: matplotlib.colors.to_hex(colormap(x)))
 
     # Add markers
     marker_data = []
-    for idx, row in valid_rows.iterrows():
+    for idx, row in tqdm(valid_rows.iterrows(), total=len(valid_rows), desc="Creating GSV point map markers"):
         capture_date = row['capture_date']
         date_str = capture_date.strftime('%Y-%m-%d')
         age_years = (datetime.now() - capture_date).days / 365.25
-        recency = (datetime.now() - capture_date).days
-        color = matplotlib.colors.to_hex(colormap(recency))
+        color = matplotlib.colors.to_hex(colormap(age_years))
 
         popup = folium.Popup(f"""
             <div>
                 Capture Date: {date_str}
                 <br>Age: {age_years:.1f} years
-                <br>Copyright: {row['copyright_info']}
+                <br>Photographer: {row['copyright_info']}
+                <br><a href="https://www.google.com/maps/@?api=1&map_action=pano&pano={row['pano_id']}" target="_blank">View in GSV</a>
             </div>
         """, max_width=300)
 
@@ -396,6 +401,27 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
     }}
 
     function createHistogram() {{
+        // Calculate width based on number of bars
+        const numBars = histogramData.length;
+        const minWidth = 300;
+        const widthPerBar = 30;  // Minimum width needed per bar
+        const calculatedWidth = Math.max(minWidth, numBars * widthPerBar);
+        
+        // Update container and canvas size
+        const container = document.querySelector('.histogram-content');
+        container.style.width = calculatedWidth + 'px';
+        const canvas = document.getElementById('histogramCanvas');
+        canvas.width = calculatedWidth;
+        
+        // Update container position if it gets too wide
+        const histContainer = document.querySelector('.histogram-container');
+        if (calculatedWidth > minWidth) {{
+            histContainer.style.right = '10px';
+            histContainer.style.bottom = '10px';
+            histContainer.style.maxWidth = '80vw';  // Limit to 80% of viewport width
+            histContainer.style.overflowX = 'auto';
+        }}
+
         var ctx = document.getElementById('histogramCanvas').getContext('2d');
         const maxCount = Math.max(...histogramData.map(d => d.count));
         const yAxisMax = Math.ceil(maxCount * 1.2);
@@ -462,7 +488,7 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
                         max: yAxisMax,
                         title: {{
                             display: true,
-                            text: 'Number of Images'
+                            text: 'GSV Images'
                         }},
                         ticks: {{
                             padding: 5
@@ -472,11 +498,14 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
                         display: true,
                         title: {{
                             display: true,
-                            text: 'Capture Date'
+                            text: 'Capture Date',
+                            padding: {{
+                                top: 25  // Increase padding to avoid collision
+                            }}
                         }},
                         ticks: {{
                             maxRotation: 45,
-                            minRotation: 45
+                            minRotation: 45,   
                         }}
                     }}
                 }}
@@ -518,7 +547,6 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
     folium_map.get_root().html.add_child(folium.Element(histogram_js))
 
     # Add colormap legend
-    colormap.caption = 'Recency (Days)'
     folium_map.add_child(colormap)
 
     return folium_map
