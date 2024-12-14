@@ -395,8 +395,30 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
             margin: 0 0 10px 0;
             color: #333;
         }}
+
+        .minimize-button {{
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 5px;
+            font-size: 16px;
+            color: #666;
+        }}
+
+        .minimize-button:hover {{
+            color: #333;
+        }}
+
+        .histogram-container.minimized {{
+            height: 40px;  /* Just enough for the title bar */
+            overflow: hidden;
+        }}
     </style>
     <div class="overlay-panel histogram-container">
+        <button class="minimize-button" onclick="toggleHistogram()">−</button>
         <div class="panel-title">{city_name}: GSV Coverage Over Time</div>
         <div class="histogram-content">
             <canvas id="histogramCanvas" width="300" height="150"></canvas>
@@ -432,6 +454,21 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
     }}
     if (!markerData) {{
         console.error('Marker data is undefined!');
+    }}
+
+    function toggleHistogram() {{
+        const container = document.querySelector('.histogram-container');
+        const button = document.querySelector('.minimize-button');
+        
+        if (container.classList.contains('minimized')) {{
+            // Maximize
+            container.classList.remove('minimized');
+            button.textContent = '−';  // Minus sign
+        }} else {{
+            // Minimize
+            container.classList.add('minimized');
+            button.textContent = '+';  // Plus sign
+        }}
     }}
 
     function getGSVMarkers() {{
