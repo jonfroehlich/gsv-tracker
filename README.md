@@ -1,8 +1,8 @@
-Thanks! This helps provide more details about the CLI options and concurrency parameters. Let me update the README further, particularly the Usage section to better reflect the actual capabilities:
-
 # GSV Tracker
 
 GSV Tracker is a Python tool for analyzing Google Street View coverage and temporal patterns in cities. It creates interactive visualizations showing when and where Street View imagery was captured, using asynchronous operations for efficient data collection.
+
+The project began in 2021 by Professor Jon E. Froehlich and was also part of the [UC Berkeley Data Science Discovery Program](https://cdss.berkeley.edu/discovery/projects) in 2023 with students Joseph Chen, Wenjing Yi, and Jingfeng Yang. In this project, we were studying underlying biases in Google Street View data.
 
 ## Features
 
@@ -77,11 +77,11 @@ Basic Options:
 - `--log-level`: Set logging level (DEBUG/INFO/WARNING/ERROR/CRITICAL)
 
 Concurrency Control:
-- `--batch-size`: Number of requests to prepare and queue at once (default: 100)
+- `--batch-size`: Number of requests to prepare and queue at once (default: 200)
   - Should be >= connection-limit
   - Higher values use more memory but can be more efficient
-  - API limit is 500 requests/second
-- `--connection-limit`: Maximum concurrent connections to the API (default: 50)
+  - Google Street View Static API limit is 500 requests/second
+- `--connection-limit`: Maximum concurrent connections to the API (default: 100)
   - Controls how many requests are actually in-flight at once
   - Should be <= batch-size
   - Conservative values prevent overwhelming the network/API
