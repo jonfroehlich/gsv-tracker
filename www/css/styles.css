@@ -1,0 +1,101 @@
+body {
+    margin: 0;
+    padding: 20px;
+    font-family: Arial, sans-serif;
+}
+
+#app {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+#citySelector {
+    margin-bottom: 20px;
+}
+
+#map {
+    height: 600px;
+    width: 100%;
+    margin-bottom: 20px;
+}
+
+.overlay-panel {
+    background-color: rgba(255, 255, 255, 0.9);
+    padding: 15px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    z-index: 1000;
+}
+
+.loading {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 24px;
+    z-index: 2000;
+}
+
+.stats-panel {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    width: 300px;
+}
+
+/****************************************************
+ * Histogram styling
+ ****************************************************/
+
+.histogram-container {
+    position: fixed;
+    bottom: 50px;
+    right: 50px;
+    transition: height 0.3s ease;
+    background: rgba(255, 255, 255, 0.95);
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.histogram-container.minimized .histogram-content {
+    height: 0 !important;
+}
+
+.histogram-content {
+    transition: height 0.3s ease;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+}
+
+/* Styling for webkit scrollbars */
+.histogram-content::-webkit-scrollbar {
+    height: 8px;
+}
+
+.histogram-content::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+.histogram-content::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+
+.histogram-content::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+.histogram-header {
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.95);
+    border-bottom: 1px solid #eee;
+    flex-shrink: 0;
+}

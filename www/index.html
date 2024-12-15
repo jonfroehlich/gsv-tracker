@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GSV Coverage Visualization</title>
+    
+    <!-- External Libraries -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    
+    <!-- Application CSS -->
+    <link href="css/normalize.css" rel="stylesheet">
+    <link href="css/styles.css" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <h1>GSV Coverage Visualization</h1>
+        <div id="citySelector">
+            <label for="citySelect">Select a city:</label>
+            <select id="citySelect"></select>
+            <button onclick="loadSelectedCity()">Load Visualization</button>
+        </div>
+        <div id="map"></div>
+    </div>
+    <div id="loading" class="loading" style="display: none;">Loading...</div>
+
+    <!-- Application JavaScript -->
+    <script src="js/config.js"></script>
+    <script src="js/map.js"></script>
+    <script src="js/histogram.js"></script>
+    <script src="js/dataLoader.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
