@@ -1,3 +1,7 @@
+import CONFIG from './config.js';
+import { eventMediator } from './events.js';
+import DataLoader from './dataLoader.js';
+
 /**
  * Handles map visualization and interactions for GSV data
  * @class

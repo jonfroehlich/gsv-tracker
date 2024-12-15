@@ -1,3 +1,10 @@
+import { eventMediator } from './events.js';
+import CONFIG from './config.js';
+import DataLoader from './dataLoader.js';
+import MapVisualizer from './map.js';
+import HistogramVisualizer from './histogram.js';
+import { AppError, DataLoadError, DataValidationError, VisualizationError, ErrorUI } from './errors.js';
+
 /**
  * Main application class that coordinates all components
  * @class
@@ -7,6 +14,8 @@ class App {
      * Initialize the application instance
      */
     constructor() {
+        console.log('App constructor called');
+
         /** @type {MapVisualizer} Map visualization component */
         this.mapVisualizer = new MapVisualizer();
         
@@ -27,9 +36,11 @@ class App {
     /**
      * Initialize the application
      * @async
+     * @returns {Promise<void>}
      * @throws {DataLoadError} If cities data fails to load
      */
     async initialize() {
+        console.log('App initialize method called');
         try {
             // Set up global error handling
             window.onerror = (msg, source, line, col, error) => {
@@ -46,6 +57,7 @@ class App {
             // Set up event listeners
             this.setupEventListeners();
         } catch (error) {
+            console.error('Initialize error:', error);
             this.handleError(new AppError('Failed to initialize application', error));
         }
     }
@@ -58,8 +70,12 @@ class App {
      */
     async loadCitiesData() {
         try {
-            return await DataLoader.loadCities();
+            console.log('App: Starting to load cities data');
+            const cities = await DataLoader.loadCities();
+            console.log('App: Received cities data:', cities);
+            return cities;
         } catch (error) {
+            console.error('App: Error loading cities:', error);
             throw new DataLoadError('cities data', error);
         }
     }
@@ -252,7 +268,7 @@ class App {
     updateStatsPanel(stats, cityName) {
         try {
             const panel = document.querySelector('.stats-panel') || this.createStatsPanel();
-            
+            panel.style.display = 'block';  
             panel.innerHTML = `
                 <h3>${cityName} Statistics</h3>
                 <p>Total Panoramas: ${stats.totalPanos.toLocaleString()}</p>
@@ -277,21 +293,18 @@ class App {
         return panel;
     }
 
-    /**
-     * Populate the city selector with available cities
-     * @param {Array} cities - Array of city data
-     * @private
-     */
     populateCitySelector(cities) {
         try {
+            console.log('Populating city selector with:', cities);
             const select = document.getElementById('citySelect');
             if (!select) {
                 throw new AppError('City select element not found');
             }
-
+    
             select.innerHTML = '<option value="">Select a city...</option>';
             
             cities.forEach(city => {
+                console.log('Adding city:', city);  // Debug each city
                 const option = document.createElement('option');
                 option.value = city.filename;
                 const location = [
@@ -302,7 +315,10 @@ class App {
                 option.textContent = location;
                 select.appendChild(option);
             });
+            
+            console.log('Finished populating selector');
         } catch (error) {
+            console.error('Error populating city selector:', error);
             throw new AppError('Failed to populate city selector', error);
         }
     }
@@ -313,7 +329,7 @@ class App {
      */
     updateLoadButtonState() {
         try {
-            const button = document.querySelector('#citySelector button');
+            const button = document.getElementById('loadButton');
             const select = document.getElementById('citySelect');
             if (!button || !select) {
                 throw new AppError('Required elements not found');
@@ -342,27 +358,6 @@ class App {
         }
     }
 }
-
-// Initialize application when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
-    const app = new App();
-    
-    // Initialize with error handling
-    app.initialize().catch(error => {
-        console.error('Failed to initialize application:', error);
-        const errorUI = new ErrorUI();
-        errorUI.showError('Failed to initialize application. Please refresh the page.');
-    });
-    
-    // Make loadSelectedCity available globally for the button onclick handler
-    window.loadSelectedCity = () => {
-        try {
-            return app.loadSelectedCity();
-        } catch (error) {
-            app.handleError(error);
-        }
-    };
-});
 
 // Export for use in other modules if needed
 export default App;
