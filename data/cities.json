@@ -1,0 +1,277 @@
+{
+    "version": "1.0",
+    "last_updated": "2024-12-15",
+    "cities": [
+      {
+        "name": "Albert Lea",
+        "state": "Minnesota",
+        "country": "USA",
+        "filename": "albert_lea_mn_width_9689_height_10878_step_20.csv.gz",
+        "grid": {
+          "width_meters": 9689,
+          "height_meters": 10878
+        },
+        "file_size_mb": 6.4
+      },
+      {
+        "name": "Alden",
+        "state": "Minnesota",
+        "country": "USA",
+        "filename": "alden_mn_width_1614_height_1623_step_20.csv.gz",
+        "grid": {
+          "width_meters": 1614,
+          "height_meters": 1623
+        },
+        "file_size_mb": 0.14
+      },
+      {
+        "name": "Ames",
+        "state": "Iowa",
+        "country": "USA",
+        "filename": "ames_ia_width_14683_height_11442_step_20.csv.gz",
+        "grid": {
+          "width_meters": 14683,
+          "height_meters": 11442
+        },
+        "file_size_mb": 11.8
+      },
+      {
+        "name": "Amsterdam",
+        "country": "Netherlands",
+        "filename": "amsterdam_nl_width_23873_height_17012_step_20.csv.gz",
+        "grid": {
+          "width_meters": 23873,
+          "height_meters": 17012
+        },
+        "file_size_mb": 37.1
+      },
+      {
+        "name": "Anacortes",
+        "state": "Washington",
+        "country": "USA",
+        "filename": "anacortes_wa_width_13031_height_8278_step_20.csv.gz",
+        "grid": {
+          "width_meters": 13031,
+          "height_meters": 8278
+        },
+        "file_size_mb": 5.6
+      },
+      {
+        "name": "Auckland",
+        "country": "New Zealand",
+        "filename": "auckland_nz_width_28538_height_35511_step_20.csv.gz",
+        "grid": {
+          "width_meters": 28538,
+          "height_meters": 35511
+        },
+        "file_size_mb": 76.0
+      },
+      {
+        "name": "Bellingham",
+        "state": "Washington",
+        "country": "USA",
+        "filename": "bellingham_wa_width_9761_height_14390_step_20.csv.gz",
+        "grid": {
+          "width_meters": 9761,
+          "height_meters": 14390
+        },
+        "file_size_mb": 10.2
+      },
+      {
+        "name": "Burnaby",
+        "state": "British Columbia",
+        "country": "Canada",
+        "filename": "burnaby_bc_width_9573_height_13288_step_20.csv.gz",
+        "grid": {
+          "width_meters": 9573,
+          "height_meters": 13288
+        },
+        "file_size_mb": 12.6
+      },
+      {
+        "name": "Columbia",
+        "state": "South Carolina",
+        "country": "USA",
+        "filename": "columbia_sc_width_43139_height_20892_step_20.csv.gz",
+        "grid": {
+          "width_meters": 43139,
+          "height_meters": 20892
+        },
+        "file_size_mb": 71.1
+      },
+      {
+        "name": "Coupeville",
+        "state": "Washington",
+        "country": "USA",
+        "filename": "coupeville_wa_width_3562_height_2391_step_20.csv.gz",
+        "grid": {
+          "width_meters": 3562,
+          "height_meters": 2391
+        },
+        "file_size_mb": 0.45
+      },
+      {
+        "name": "Fall City",
+        "state": "Washington",
+        "country": "USA",
+        "filename": "fall_city_wa_width_2895_height_2630_step_20.csv.gz",
+        "grid": {
+          "width_meters": 2895,
+          "height_meters": 2630
+        },
+        "file_size_mb": 0.42
+      },
+      {
+        "name": "Kirkland",
+        "state": "Washington",
+        "country": "USA",
+        "filename": "kirkland_wa_width_8447_height_10935_step_20.csv.gz",
+        "grid": {
+          "width_meters": 8447,
+          "height_meters": 10935
+        },
+        "file_size_mb": 8.0
+      },
+      {
+        "name": "La Conner",
+        "state": "Washington",
+        "country": "USA",
+        "filename": "la_conner_wa_width_1333_height_2092_step_20.csv.gz",
+        "grid": {
+          "width_meters": 1333,
+          "height_meters": 2092
+        },
+        "file_size_mb": 0.14
+      },
+      {
+        "name": "La Piedad",
+        "country": "Mexico",
+        "filename": "la_piedad_mx_width_24430_height_21235_step_20.csv.gz",
+        "grid": {
+          "width_meters": 24430,
+          "height_meters": 21235
+        },
+        "file_size_mb": 27.4
+      },
+      {
+        "name": "Madison",
+        "state": "Wisconsin",
+        "country": "USA",
+        "filename": "madison_wi_width_27651_height_19304_step_20.csv.gz",
+        "grid": {
+          "width_meters": 27651,
+          "height_meters": 19304
+        },
+        "file_size_mb": 40.7
+      },
+      {
+        "name": "Neah Bay",
+        "state": "Washington",
+        "country": "USA",
+        "filename": "neah_bay_wa_width_4524_height_4448_step_20.csv.gz",
+        "grid": {
+          "width_meters": 4524,
+          "height_meters": 4448
+        },
+        "file_size_mb": 1.1
+      },
+      {
+        "name": "Oradell",
+        "state": "New Jersey",
+        "country": "USA",
+        "filename": "oradell_nj_width_4102_height_3387_step_20.csv.gz",
+        "grid": {
+          "width_meters": 4102,
+          "height_meters": 3387
+        },
+        "file_size_mb": 1.0
+      },
+      {
+        "name": "Pittsburgh",
+        "state": "Pennsylvania",
+        "country": "USA",
+        "filename": "pittsburgh_pa_width_19498_height_15510_step_20.csv.gz",
+        "grid": {
+          "width_meters": 19498,
+          "height_meters": 15510
+        },
+        "file_size_mb": 32.4
+      },
+      {
+        "name": "Poulsbo",
+        "state": "Washington",
+        "country": "USA",
+        "filename": "poulsbo_wa_width_4991_height_6807_step_20.csv.gz",
+        "grid": {
+          "width_meters": 4991,
+          "height_meters": 6807
+        },
+        "file_size_mb": 1.8
+      },
+      {
+        "name": "Seattle",
+        "state": "Washington",
+        "country": "USA",
+        "filename": "seattle_wa_width_17689_height_28145_step_20.csv.gz",
+        "grid": {
+          "width_meters": 17689,
+          "height_meters": 28145
+        },
+        "file_size_mb": 41.4
+      },
+      {
+        "name": "Spokane",
+        "state": "Washington",
+        "country": "USA",
+        "filename": "spokane_wa_width_22539_height_19125_step_20.csv.gz",
+        "grid": {
+          "width_meters": 22539,
+          "height_meters": 19125
+        },
+        "file_size_mb": 33.5
+      },
+      {
+        "name": "St. Louis",
+        "state": "Missouri",
+        "country": "USA",
+        "filename": "st_louis_mo_width_13619_height_26913_step_20.csv.gz",
+        "grid": {
+          "width_meters": 13619,
+          "height_meters": 26913
+        },
+        "file_size_mb": 31.7
+      },
+      {
+        "name": "Teaneck",
+        "state": "New Jersey",
+        "country": "USA",
+        "filename": "teaneck_nj_width_4213_height_6346_step_20.csv.gz",
+        "grid": {
+          "width_meters": 4213,
+          "height_meters": 6346
+        },
+        "file_size_mb": 2.4
+      },
+      {
+        "name": "Winthrop",
+        "state": "Washington",
+        "country": "USA",
+        "filename": "winthrop_wa_width_2173_height_2390_step_20.csv.gz",
+        "grid": {
+          "width_meters": 2173,
+          "height_meters": 2390
+        },
+        "file_size_mb": 0.27
+      },
+      {
+        "name": "Zurich",
+        "country": "Switzerland",
+        "filename": "zurich_switzerland_width_13399_height_12724_step_20.csv.gz",
+        "grid": {
+          "width_meters": 13399,
+          "height_meters": 12724
+        },
+        "file_size_mb": 16.2
+      }
+    ]
+  }
