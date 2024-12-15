@@ -1,22 +1,24 @@
+
 /**
  * Configuration settings for the GSV Coverage Visualization application
  */
 const CONFIG = {
-    // GitHub repository information
     repo: {
         owner: 'jonfroehlich',
-        name: 'gsv_metadata_tracker',
+        name: 'gsv-tracker',  // Changed from gsv_metadata_tracker
         branch: 'main'
     },
-
+    
     // API endpoints
     urls: {
-        // Functions to generate URLs for data fetching
-        getCitiesJson() {
-            return `https://raw.githubusercontent.com/${this.repo.owner}/${this.repo.name}/${this.repo.branch}/data/available_cities.json`;
+        // Changed to arrow functions to preserve 'this' context
+        getCitiesJson: () => {
+            const { owner, name, branch } = CONFIG.repo;  // Use CONFIG directly instead of this
+            return `https://raw.githubusercontent.com/${owner}/${name}/${branch}/data/cities.json`;
         },
-        getCityData(filename) {
-            return `https://raw.githubusercontent.com/${this.repo.owner}/${this.repo.name}/${this.repo.branch}/data/${filename}`;
+        getCityData: (filename) => {
+            const { owner, name, branch } = CONFIG.repo;  // Use CONFIG directly instead of this
+            return `https://raw.githubusercontent.com/${owner}/${name}/${branch}/data/${filename}`;
         }
     },
 
@@ -154,8 +156,11 @@ const CONFIG = {
     }
 };
 
+console.log('CONFIG defined as:', CONFIG);
+
 // Freeze the configuration object to prevent modifications
 Object.freeze(CONFIG);
 
 // Export for use in other modules
+console.log('CONFIG frozen and ready to export');
 export default CONFIG;
