@@ -77,11 +77,11 @@ Basic Options:
 - `--log-level`: Set logging level (DEBUG/INFO/WARNING/ERROR/CRITICAL)
 
 Concurrency Control:
-- `--batch-size`: Number of requests to prepare and queue at once (default: 100)
+- `--batch-size`: Number of requests to prepare and queue at once (default: 200)
   - Should be >= connection-limit
   - Higher values use more memory but can be more efficient
-  - API limit is 500 requests/second
-- `--connection-limit`: Maximum concurrent connections to the API (default: 50)
+  - Google Street View Static API limit is 500 requests/second
+- `--connection-limit`: Maximum concurrent connections to the API (default: 100)
   - Controls how many requests are actually in-flight at once
   - Should be <= batch-size
   - Conservative values prevent overwhelming the network/API
