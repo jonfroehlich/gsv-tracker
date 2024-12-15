@@ -1,8 +1,8 @@
-Thanks! This helps provide more details about the CLI options and concurrency parameters. Let me update the README further, particularly the Usage section to better reflect the actual capabilities:
-
 # GSV Tracker
 
 GSV Tracker is a Python tool for analyzing Google Street View coverage and temporal patterns in cities. It creates interactive visualizations showing when and where Street View imagery was captured, using asynchronous operations for efficient data collection.
+
+The project began in 2021 by Professor Jon E. Froehlich and was also part of the [UC Berkeley Data Science Discovery Program](https://cdss.berkeley.edu/discovery/projects) in 2023 with students Joseph Chen, Wenjing Yi, and Jingfeng Yang who were studying underlying biases in Google Street View data.
 
 ## Features
 
