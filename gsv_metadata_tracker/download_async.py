@@ -18,17 +18,7 @@ from .fileutils import generate_base_filename
 
 logger = logging.getLogger(__name__)
 
-METADATA_DTYPES = {
-    'query_lat': float,
-    'query_lon': float,
-    'query_timestamp': str,
-    'pano_lat': float,
-    'pano_lon': float,
-    'pano_id': str,
-    'copyright_info': str,
-    'status': str
-    # capture_date handled by parse_dates
-}
+from config import METADATA_DTYPES
 
 class DownloadError(Exception):
     """Custom exception for download-related errors."""
