@@ -52,6 +52,40 @@ def sanitize_city_name(city_name: str) -> str:
     sanitized = sanitized.lower()
     return sanitized
 
+def parse_filename(filename: str) -> Dict[str, Union[str, float]]:
+    """
+    Parse a GSV metadata filename to extract parameters.
+    Expected format: city_widthm_heightm_stepm.csv.gz
+    
+    Args:
+        filename: Name of the CSV file
+        
+    Returns:
+        Dictionary containing:
+            - city_name: Name of the city
+            - width_meters: Width of the search grid in meters
+            - height_meters: Height of the search grid in meters
+            - step_meters: Step size in meters
+        
+    Raises:
+        ValueError: If filename doesn't match expected format
+    """
+    base = os.path.basename(filename)
+    # Remove the .csv.gz extension
+    base = base.replace('.csv.gz', '')
+    
+    # Parse the components
+    match = re.match(r'(.+)_(\d+)m_(\d+)m_(\d+)m$', base)
+    if not match:
+        raise ValueError(f"Filename {filename} doesn't match expected format: city_widthm_heightm_stepm.csv.gz")
+    
+    return {
+        'city_name': match.group(1),
+        'width_meters': float(match.group(2)),
+        'height_meters': float(match.group(3)),
+        'step_meters': float(match.group(4))
+    }
+
 def generate_base_filename(
     city_name: str,
     grid_width: float,

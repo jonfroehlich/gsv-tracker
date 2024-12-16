@@ -4,7 +4,7 @@ from .download_async import download_gsv_metadata_async
 from .config import load_config
 from .geoutils import get_city_coordinates, get_search_dimensions
 from .vis import display_search_area, create_visualization_map
-from .fileutils import generate_base_filename, open_in_browser
+from .fileutils import generate_base_filename, open_in_browser, parse_filename
 
 # Define what's available when someone does "from gsv_metadata_tracker import *"
 __all__ = [

@@ -14,7 +14,7 @@ def calculate_pano_stats(df: pd.DataFrame, copyright_filter_condition: Optional[
         filter_condition: Optional string to filter copyright info (e.g., 'Google')
     
     Returns:
-        Dictionary containing panorama statistics
+        Dictionary containing panorama statistics with ages in years
     """
     if copyright_filter_condition:
         df = df[df['copyright_info'].str.contains(copyright_filter_condition, na=False)]
@@ -27,24 +27,24 @@ def calculate_pano_stats(df: pd.DataFrame, copyright_filter_condition: Optional[
             "count": 0,
             "oldest_pano_date": None,
             "newest_pano_date": None,
-            "avg_pano_age_days": None,
-            "median_pano_age_days": None,
-            "stdev_pano_age_days": None,
-            "age_percentiles": None
+            "avg_pano_age_years": None,
+            "median_pano_age_years": None,
+            "stdev_pano_age_years": None,
+            "age_percentiles_years": None
         }
 
-    # Calculate ages
+    # Calculate ages in years (using 365.25 days per year to account for leap years)
     now = pd.Timestamp.now()
-    ages = (now - df['capture_date']).dt.total_seconds() / (24 * 3600)  # Convert to days
+    ages = (now - df['capture_date']).dt.total_seconds() / (365.25 * 24 * 3600)  # Convert to years
     
     return {
         "count": len(df),
         "oldest_pano_date": df['capture_date'].min().isoformat(),
         "newest_pano_date": df['capture_date'].max().isoformat(),
-        "avg_pano_age_days": float(ages.mean()),
-        "median_pano_age_days": float(ages.median()),
-        "stdev_pano_age_days": float(ages.std()),
-        "age_percentiles": {
+        "avg_pano_age_years": float(ages.mean()),
+        "median_pano_age_years": float(ages.median()),
+        "stdev_pano_age_years": float(ages.std()),
+        "age_percentiles_years": {
             "p10": float(ages.quantile(0.1)),
             "p25": float(ages.quantile(0.25)),
             "p75": float(ages.quantile(0.75)),
