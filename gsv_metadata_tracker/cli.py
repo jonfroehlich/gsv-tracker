@@ -28,7 +28,7 @@ from typing import Optional
 from .fileutils import get_default_vis_dir
 from . import (
     load_config,
-    get_city_coordinates,
+    get_city_location_data,
     get_search_dimensions,
     create_visualization_map,
     display_search_area,
@@ -182,7 +182,7 @@ async def async_main():
     
     try:
         config = load_config()
-        location = get_city_coordinates(args.city)
+        location = get_city_location_data(args.city)
 
         vis_path = get_default_vis_dir()
         os.makedirs(vis_path, exist_ok=True)

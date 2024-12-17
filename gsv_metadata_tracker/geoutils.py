@@ -1,4 +1,4 @@
-from typing import Optional, Dict, tuple
+from typing import Optional, Dict, Tuple
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
 from geopy.location import Location
@@ -34,7 +34,7 @@ def get_city_location_data(city_name: str) -> Optional[Location]:
         Returns None if city not found or on error
         
     Example:
-        >>> location = lookup_city_location("Paris")
+        >>> location = get_city_location_data("Paris")
         >>> if location:
         >>>     # Access basic location info
         >>>     print(location.latitude, location.longitude)  # 48.8566, 2.3522

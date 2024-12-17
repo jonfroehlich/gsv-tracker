@@ -15,10 +15,9 @@ from filelock import FileLock
 from pathlib import Path
 import backoff
 from .fileutils import generate_base_filename
+from .config import METADATA_DTYPES
 
 logger = logging.getLogger(__name__)
-
-from config import METADATA_DTYPES
 
 class DownloadError(Exception):
     """Custom exception for download-related errors."""
@@ -298,7 +297,7 @@ async def download_gsv_metadata_async(
             return pd.read_csv(file_name_compressed_with_path, 
                                dtype=METADATA_DTYPES,
                                compression='gzip', 
-                               parse_dates=['capture_date'])
+                               parse_dates=['query_timestamp', 'capture_date'])
 
         # Calculate grid dimensions
         width_steps = int(grid_width / step_length)
@@ -416,7 +415,7 @@ async def download_gsv_metadata_async(
             file_name_compressed_with_path,
             compression='gzip',
             dtype=METADATA_DTYPES,
-            parse_dates=['capture_date'],
+            parse_dates=['query_timestamp', 'capture_date'],
             low_memory=False)
         
         end_time = time.time()

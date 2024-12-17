@@ -1,7 +1,7 @@
 import os, re
 import logging
 import zipfile
-from typing import Tuple, Optional
+from typing import Tuple, Dict, Union, Optional # for typing hints
 import pandas as pd
 from pathlib import Path
 import platform
@@ -55,7 +55,7 @@ def sanitize_city_name(city_name: str) -> str:
 def parse_filename(filename: str) -> Dict[str, Union[str, float]]:
     """
     Parse a GSV metadata filename to extract parameters.
-    Expected format: city_widthm_heightm_stepm.csv.gz
+    Expected format: city_state_width_[num]_height_[num]_step_[num].csv.gz
     
     Args:
         filename: Name of the CSV file
@@ -63,6 +63,7 @@ def parse_filename(filename: str) -> Dict[str, Union[str, float]]:
     Returns:
         Dictionary containing:
             - city_name: Name of the city
+            - location_code: State/country code (e.g., 'wa', 'nl', etc.)
             - width_meters: Width of the search grid in meters
             - height_meters: Height of the search grid in meters
             - step_meters: Step size in meters
@@ -74,16 +75,21 @@ def parse_filename(filename: str) -> Dict[str, Union[str, float]]:
     # Remove the .csv.gz extension
     base = base.replace('.csv.gz', '')
     
-    # Parse the components
-    match = re.match(r'(.+)_(\d+)m_(\d+)m_(\d+)m$', base)
+    # Parse the components - matching city_state_width_X_height_Y_step_Z format
+    match = re.match(r'(.+?)_([a-z]+)_width_(\d+)_height_(\d+)_step_(\d+)$', base)
     if not match:
-        raise ValueError(f"Filename {filename} doesn't match expected format: city_widthm_heightm_stepm.csv.gz")
+        raise ValueError(f"Filename {filename} doesn't match expected format: city_state_width_X_height_Y_step_Z.csv.gz")
+    
+    # Handle special cases where location code might be multi-part (e.g., taiwan, switzerland)
+    city_name = match.group(1)
+    location_code = match.group(2)
     
     return {
-        'city_name': match.group(1),
-        'width_meters': float(match.group(2)),
-        'height_meters': float(match.group(3)),
-        'step_meters': float(match.group(4))
+        'city_name': city_name.replace('_', ' '),  # Convert underscores to spaces in city name
+        'location_code': location_code,
+        'width_meters': float(match.group(3)),
+        'height_meters': float(match.group(4)),
+        'step_meters': float(match.group(5))
     }
 
 def generate_base_filename(

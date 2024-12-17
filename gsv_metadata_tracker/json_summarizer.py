@@ -52,7 +52,7 @@ def calculate_pano_stats(df: pd.DataFrame, copyright_filter_condition: Optional[
         }
     }
 
-def save_download_stats(
+def save_json_metadata(
     csv_gz_path: str,
     df: pd.DataFrame,
     city_name: str,
