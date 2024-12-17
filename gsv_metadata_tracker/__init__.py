@@ -5,13 +5,13 @@ from .config import load_config
 from .geoutils import get_city_location_data, get_search_dimensions
 from .vis import display_search_area, create_visualization_map
 from .fileutils import generate_base_filename, get_default_data_dir, open_in_browser, parse_filename, sanitize_city_name
-from .json_summarizer import save_json_metadata
+from .json_summarizer import save_metadata_summary_as_json
 
 # Define what's available when someone does "from gsv_metadata_tracker import *"
 __all__ = [
     'download_gsv_metadata',
     'download_gsv_metadata_async',
-    'save_json_metadata',
+    'save_metadata_summary_as_json',
     'load_config',
     'get_city_location_data',
     'get_search_dimensions',

@@ -1,14 +1,69 @@
-import os, re
+import os, re, glob
 import logging
 import zipfile
-from typing import Tuple, Dict, Union, Optional # for typing hints
+from typing import Tuple, Dict, Union, Optional, List
 import pandas as pd
 from pathlib import Path
 import platform
 import subprocess
 import webbrowser
+from .config import METADATA_DTYPES
+from .paths import get_default_data_dir, get_default_vis_dir
 
 logger = logging.getLogger(__name__)
+
+def get_list_of_city_csv_files(data_dir = None) -> List[str]:
+    if data_dir is None:
+        data_dir = get_default_data_dir()
+
+    csv_files = glob.glob(os.path.join(data_dir, "**/*.csv.gz"), recursive=True)
+    return csv_files
+
+def load_city_csv_file(csv_path: str) -> pd.DataFrame:
+    """
+    Read a CSV file into a DataFrame, automatically detecting if it's gzipped based on file extension.
+    
+    Args:
+        csv_path: Path to the CSV file (can be either .csv or .csv.gz)
+        metadata_dtypes: Dictionary of column names and their corresponding data types
+    
+    Returns:
+        pd.DataFrame: Loaded and processed DataFrame
+    
+    Raises:
+        ValueError: If the file extension is neither .csv nor .csv.gz
+        FileNotFoundError: If the specified file doesn't exist
+    """
+    file_path = Path(csv_path)
+    
+    if not file_path.exists():
+        raise FileNotFoundError(f"File not found: {csv_path}")
+    
+    # Determine compression based on file extension
+    if file_path.suffix == '.gz' or str(file_path).endswith('.csv.gz'):
+        compression = 'gzip'
+    elif file_path.suffix == '.csv':
+        compression = None
+    else:
+        raise ValueError(f"Unsupported file format. Expected .csv or .csv.gz, got: {file_path.suffix}")
+    
+    try:
+        df = pd.read_csv(
+            csv_path,
+            dtype=METADATA_DTYPES,
+            parse_dates=['query_timestamp'],
+            compression=compression
+        )
+        
+        # Handle capture_date separately with specific format
+        df['capture_date'] = pd.to_datetime(df['capture_date'], format='%Y-%m', errors='coerce')
+        
+        return df
+        
+    except pd.errors.EmptyDataError:
+        raise ValueError(f"The file {csv_path} is empty")
+    except pd.errors.ParserError as e:
+        raise ValueError(f"Error parsing file {csv_path}: {str(e)}")
 
 def get_default_data_dir() -> str:
     """

@@ -4,15 +4,16 @@ from pathlib import Path
 from collections import Counter
 import numpy as np
 from tqdm import tqdm
-from typing import List, Dict, Union
+from typing import Tuple, Dict, Union, Optional, List  # Added List import
 import logging
 import pandas as pd
 
 from gsv_metadata_tracker import parse_filename, get_city_location_data
 from gsv_metadata_tracker import get_default_data_dir
-from gsv_metadata_tracker import save_json_metadata
+from gsv_metadata_tracker import save_metadata_summary_as_json
+from gsv_metadata_tracker.fileutils import load_city_csv_file, get_list_of_city_csv_files
 
-from gsv_metadata_tracker.config import METADATA_DTYPES
+logger = logging.getLogger(__name__)
 
 def find_missing_json_files(data_dir: str) -> List[str]:
     """
@@ -24,7 +25,7 @@ def find_missing_json_files(data_dir: str) -> List[str]:
     Returns:
         List of paths to csv.gz files needing JSON metadata
     """
-    csv_files = glob.glob(os.path.join(data_dir, "**/*.csv.gz"), recursive=True)
+    csv_files = get_list_of_city_csv_files()
     
     missing_json = []
     for csv_file in csv_files:
@@ -36,23 +37,21 @@ def find_missing_json_files(data_dir: str) -> List[str]:
 
 def generate_missing_json_files(data_dir: str) -> None:
     """Generate missing JSON metadata files for all csv.gz files in directory."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
-    
-    logger = logging.getLogger(__name__)
     logger.info(f"Scanning {data_dir} for csv.gz files missing JSON metadata...")
     
+    all_csv_files = get_list_of_city_csv_files(data_dir)
     missing_files = find_missing_json_files(data_dir)
     
     if not missing_files:
-        logger.info("No missing metadata files found.")
+        file_text = "file" if len(all_csv_files) == 1 else "files"
+        logger.info(f"Found {len(all_csv_files)} csv.gz {file_text}. All csv.gz files already have a corresponding .json metadata file.")
         return
     
-    logger.info(f"Found {len(missing_files)} files needing metadata.")
+    file_text = "file" if len(missing_files) == 1 else "files"
+    logger.info(f"Found {len(missing_files)} of {len(all_csv_files)} {file_text} needing a .json metadata file.")
     
-    for csv_path in tqdm(missing_files, desc="Generating metadata files"):
+    cnt_generated_json_files = 0
+    for csv_path in tqdm(missing_files, desc="Generating metadata .json files"):
         try:
             params = parse_filename(csv_path)
             city_name = params['city_name']
@@ -60,13 +59,8 @@ def generate_missing_json_files(data_dir: str) -> None:
             search_height = params['height_meters']
             step = params['step_meters']
             
-            df = pd.read_csv(
-                csv_path,
-                dtype=METADATA_DTYPES,
-                parse_dates=['capture_date', 'query_timestamp'],
-                compression='gzip'
-            )
-            
+            df = load_city_csv_file(csv_path)
+
             center_lat = float(df['query_lat'].mean())
             center_lon = float(df['query_lon'].mean())
             
@@ -74,7 +68,7 @@ def generate_missing_json_files(data_dir: str) -> None:
             location = get_city_location_data(city_name)
             country_name = location.raw['address']['country']
 
-            save_json_metadata(
+            save_metadata_summary_as_json(
                 csv_gz_path=csv_path,
                 df=df,
                 city_name=city_name,
@@ -85,12 +79,12 @@ def generate_missing_json_files(data_dir: str) -> None:
             )
             
             logger.debug(f"Generated metadata for {csv_path} (Country: {country_name})")
-            
+            cnt_generated_json_files += 1
         except Exception as e:
             logger.error(f"Error processing {csv_path}: {str(e)}")
             continue
     
-    logger.info("Metadata generation complete.")
+    logger.info(f"Metadata generation completed for {cnt_generated_json_files} file(s).")
 
 def main():
     """Command-line entry point for metadata generation."""
@@ -107,7 +101,22 @@ def main():
         help='Directory containing GSV metadata files (default: project data directory)'
     )
     
+    parser.add_argument(
+        '--log-level',
+        type=str,
+        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+        default='INFO',
+        help='Set the logging level (default: INFO)'
+    )
+    
     args = parser.parse_args()
+    
+    # Configure logging
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
     
     if not os.path.exists(args.data_dir):
         print(f"Error: Directory {args.data_dir} does not exist")
