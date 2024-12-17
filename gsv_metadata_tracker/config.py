@@ -1,7 +1,7 @@
 import os
 import logging
 from typing import Dict, Any
-from .fileutils import get_default_data_dir
+from .paths import get_default_data_dir
 
 logger = logging.getLogger(__name__)
 
