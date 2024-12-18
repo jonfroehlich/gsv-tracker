@@ -1,7 +1,7 @@
 import pandas as pd
 import requests
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 from typing import Dict, Any, List, Tuple, Optional
 from tqdm import tqdm
@@ -158,7 +158,11 @@ async def process_batch_async(
                     await failed_points_queue.put((lat, lon, i, j))
                     continue
                 
-                query_timestamp = datetime.now().astimezone().isoformat()
+                # Get the current UTC datetime
+                now_utc = datetime.now(timezone.utc)
+
+                # Format the datetime as ISO 8601
+                query_timestamp = now_utc.isoformat()
                 
                 status = response['status']
                 result = {
