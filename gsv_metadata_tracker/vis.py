@@ -189,9 +189,7 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
     Returns:
         folium.Map object with the visualization
     """
-    # Debug information
-    logger.info("Total rows: %d", len(df))
-    logger.info("Rows with status 'OK': %d", len(df[df['status'] == 'OK']))
+    logger.debug(f"Creating visualization map for {city_name} with {len(df)} rows")
 
     # Filter for valid data
     valid_rows = df[
@@ -199,15 +197,19 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
         (df['pano_lat'].notna()) &
         (df['pano_lon'].notna())
     ]
-    logger.info("Rows with valid coordinates: %d", len(valid_rows))
+    logger.info(f"Rows with valid pano coordinates: {len(valid_rows)}")
 
     # Filter for Google imagery
     valid_rows = valid_rows[valid_rows['copyright_info'].str.contains('Google', na=False)]
-    logger.info("Rows with Google imagery: %d", len(valid_rows))
+    logger.info(f"Filtered rows with Google imagery: {len(valid_rows)}")
 
-    # Filter for valid dates
+    # Filter for valid dates (same as before)
     valid_rows = valid_rows.dropna(subset=['capture_date'])
-    logger.info("Final valid rows: %d", len(valid_rows))
+    logger.info(f"Filtered rows with valid capture dates: {len(valid_rows)}")
+
+    # Filter for unique pano_ids
+    valid_rows = valid_rows.drop_duplicates(subset='pano_id')
+    logger.info(f"Final valid rows with unique pano_ids: {len(valid_rows)}")
 
     if len(valid_rows) == 0:
         logger.warning("No valid data to visualize")
@@ -228,14 +230,22 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
     area_km2 = (width_meters * height_meters) / 1_000_000  # Convert to km²
     zoom_level = get_best_folium_zoom_level(width_meters, height_meters)
 
+    logger.debug(f"Map center: {map_center}, Bounding box: {bbox_coords}, Area: {area_km2:.1f} km²")
+
     # Calculate temporal statistics
+    logger.debug(f"Calculating temporal statistics for {len(valid_rows)} rows")
+    print(valid_rows['capture_date'].dtypes)
+    print(valid_rows['capture_date'].head())
     now = datetime.now()
+    valid_rows['capture_date'] = pd.to_datetime(valid_rows['capture_date'])
     valid_rows['age_years'] = (now - valid_rows['capture_date']).dt.days / 365.25
     
     avg_age = valid_rows['age_years'].mean()
     age_std = valid_rows['age_years'].std()
     median_age = valid_rows['age_years'].median()
     total_panos = len(valid_rows)
+
+    logger.info(f"Average age: {avg_age:.1f} years, Median age: {median_age:.1f} years, Total panos: {total_panos}")
     
     # Calculate coverage density
     density_per_km2 = total_panos / area_km2

@@ -258,6 +258,7 @@ def generate_city_metadata_summary_as_json(
         step_length: Distance between sample points in meters
         force_recreate_file: forces the recreation of the .json file (defaults False)
     """
+    logger.debug(f"Generating metadata summary for {city_name}, {state_name}, {country_name} from {csv_gz_path}")
 
     # Generate JSON.gz path by replacing .csv.gz extension with .json.gz
     json_filename_with_path = csv_gz_path.rsplit('.csv.gz', 1)[0] + '.json.gz'
@@ -299,7 +300,6 @@ def generate_city_metadata_summary_as_json(
     # Get start and end times from query_timestamp with error checking
     logger.debug(f"\nChecking timestamp formats in {csv_gz_path}...")
 
-    # TODO: consider moving this to the fileutils.load_csv_file function
     # We would store the converted timestamps back in query_timestamp
     # Convert timestamps once and store in the DataFrame
     df['query_timestamp_converted'] = pd.to_datetime(df['query_timestamp'], errors='coerce')
@@ -407,7 +407,8 @@ def generate_aggregate_summary_as_json(json_dir: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing aggregated city summaries
     """
-    
+    logger.debug(f"Generating aggregate summary cities.json file for all city JSON files in {json_dir}")
+
     cities_data = []
     
     # Find all JSON files in directory except the cities.json file
@@ -419,6 +420,7 @@ def generate_aggregate_summary_as_json(json_dir: str) -> Dict[str, Any]:
         file_path = os.path.join(json_dir, json_file)
         
         try:
+            logger.debug(f"Opening {file_path}...")
             with gzip.open(file_path, 'rt', encoding='utf-8') as f:
                 city_data = json.load(f)
                 
@@ -480,7 +482,7 @@ def generate_aggregate_summary_as_json(json_dir: str) -> Dict[str, Any]:
             cities_data.append(city_summary)
             
         except Exception as e:
-            print(f"Error processing {json_file}: {str(e)}")
+            logger.error(f"Error processing {json_file}: {str(e)}")
     
     # Create the final summary
     summary = {
