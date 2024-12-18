@@ -282,35 +282,10 @@ def generate_city_metadata_summary_as_json(
     points_without_panos = len(df[df['status'] == 'ZERO_RESULTS'])
     points_with_errors = len(df[df['status'].isin(['ERROR', 'REQUEST_DENIED', 'INVALID_REQUEST'])])
     
-    # Get start and end times from query_timestamp with error checking
-    print("\nChecking timestamp formats...")
-
-    # Convert timestamps once and store in the DataFrame
-    df['query_timestamp_converted'] = pd.to_datetime(df['query_timestamp'], errors='coerce')
-    problematic_timestamps = df[df['query_timestamp_converted'].isna()]
-
-    if len(problematic_timestamps) > 0:
-        print(f"\nFound {len(problematic_timestamps)} problematic timestamps:")
-        print("\nOriginal problematic values:")
-        for idx, row in problematic_timestamps.iterrows():
-            print(f"Row {idx}: {row['query_timestamp']}")
-    else:
-        print("All timestamps converted successfully!")
-
-    # Print unique timestamp formats to help identify patterns
-    print("\nSample of unique timestamp formats in the data:")
-    unique_formats = df['query_timestamp'].unique()
-    print(unique_formats[:10])  # Show first 10 unique formats
-
     # Use the converted timestamps for all operations
     start_time = df['query_timestamp_converted'].min()
     end_time = df['query_timestamp_converted'].max()
     
-    print(f"\nType of start_time: {type(start_time)}")
-    print(f"Type of end_time: {type(end_time)}")
-    print(f"Start time: {start_time}")
-    print(f"End time: {end_time}")
-
     try:
         duration = end_time - start_time
         duration_seconds = duration.total_seconds()
