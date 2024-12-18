@@ -31,14 +31,14 @@
             z-index: 1000;
             display: flex;
             gap: 20px;
-            min-height: 300px;  /* Explicit minimum height */
         }
         .scatter-plot-container {
             width: 300px;
             height: 300px;
-            position: relative;  /* Add this */
-            background-color: #f8f9fa;  /* Light background to see the container */
-            border: 1px solid #ddd;  /* Border to see the container boundaries */
+            position: relative;
+            background-color: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 4px;
         }
         .legend {
             position: fixed;
@@ -49,6 +49,25 @@
             border-radius: 5px;
             box-shadow: 0 0 10px rgba(0,0,0,0.2);
             z-index: 1000;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+            cursor: pointer;
+            padding: 2px;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+        .legend-item:hover {
+            background-color: rgba(0,0,0,0.05);
+        }
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            display: inline-block;
+            margin-right: 5px;
+            border-radius: 3px;
         }
         #stats {
             position: fixed;
@@ -91,14 +110,18 @@
     <div id="legend" class="legend"></div>
 
     <script>
-        // Initialize the map with a darker style
+        // Global variables
         const map = L.map('map').setView([0, 0], 2);
+        let charts = { pano: null, area: null };
+        let mapRectangles = [];
+
+        // Initialize map
         L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap contributors'
         }).addTo(map);
 
         function getColor(age) {
-            const maxAge = 12; // Adjusted based on your data
+            const maxAge = 12;
             const ratio = Math.min(age / maxAge, 1);
             return `rgb(${255}, ${Math.floor(255 * (1 - ratio))}, ${Math.floor(255 * (1 - ratio))})`;
         }
@@ -126,163 +149,6 @@
             `;
         }
 
-        
-        function createScatterPlots(cities) {
-            console.log('Creating scatter plots with cities:', cities);
-
-            // Log dimensions of containers
-            const panoContainer = document.querySelector('.scatter-plot-container');
-            console.log('Scatter plot container dimensions:', {
-                width: panoContainer.offsetWidth,
-                height: panoContainer.offsetHeight,
-                clientWidth: panoContainer.clientWidth,
-                clientHeight: panoContainer.clientHeight
-            });
-
-            // Prepare data for pano scatter plot with colors
-            const panoData = cities.map(city => {
-                const age = city.google_panos_age_stats.median_age_years;
-                return {
-                    x: city.panorama_counts.unique_google_panos,
-                    y: age,
-                    city: city,
-                    backgroundColor: getColor(age)
-                };
-            });
-            console.log('Pano data points:', panoData);
-
-            // Create pano count vs age scatter plot
-            const panoCtx = document.getElementById('panoScatter').getContext('2d');
-            
-            try {
-                const panoChart = new Chart(panoCtx, {
-                    type: 'scatter',
-                    data: {
-                        datasets: [{
-                            label: 'Cities',
-                            data: panoData,
-                            backgroundColor: panoData.map(d => d.backgroundColor),
-                            pointRadius: 8,
-                            pointHoverRadius: 12,
-                            borderColor: 'rgba(0,0,0,0.2)',  // Add border
-                            borderWidth: 1
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        animation: false,  // Disable animation for debugging
-                        plugins: {
-                            title: {
-                                display: true,
-                                text: 'Pano Count vs Median Age'
-                            },
-                            tooltip: {
-                                enabled: true,  // Ensure tooltips are enabled
-                                callbacks: {
-                                    label: (context) => {
-                                        const cityName = context.raw.city.city || context.raw.city.state;
-                                        return `${cityName}: ${context.raw.x.toLocaleString()} panos, ${context.raw.y.toFixed(1)} years`;
-                                    }
-                                }
-                            }
-                        },
-                        scales: {
-                            x: {
-                                type: 'logarithmic',
-                                position: 'bottom',
-                                title: {
-                                    display: true,
-                                    text: 'Total Panos (log scale)'
-                                },
-                                min: 100
-                            },
-                            y: {
-                                beginAtZero: true,
-                                title: {
-                                    display: true,
-                                    text: 'Median Age (years)'
-                                }
-                            }
-                        }
-                    }
-                });
-            } catch (error) {
-                console.error('Error creating pano scatter plot:', error);
-            }
-
-            // Prepare and create area scatter plot similarly
-            const areaData = cities.map(city => {
-                const age = city.google_panos_age_stats.median_age_years;
-                return {
-                    x: city.search_area_km2,
-                    y: age,
-                    city: city,
-                    backgroundColor: getColor(age)
-                };
-            });
-            console.log('Area data points:', areaData);
-
-            const areaCtx = document.getElementById('areaScatter').getContext('2d');
-            
-            try {
-                const areaChart = new Chart(areaCtx, {
-                    type: 'scatter',
-                    data: {
-                        datasets: [{
-                            label: 'Cities',
-                            data: areaData,
-                            backgroundColor: areaData.map(d => d.backgroundColor),
-                            pointRadius: 8,
-                            pointHoverRadius: 12,
-                            borderColor: 'rgba(0,0,0,0.2)',  // Add border
-                            borderWidth: 1
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        animation: false,  // Disable animation for debugging
-                        plugins: {
-                            title: {
-                                display: true,
-                                text: 'Area vs Median Age'
-                            },
-                            tooltip: {
-                                enabled: true,  // Ensure tooltips are enabled
-                                callbacks: {
-                                    label: (context) => {
-                                        const cityName = context.raw.city.city || context.raw.city.state;
-                                        return `${cityName}: ${context.raw.x.toFixed(1)} km², ${context.raw.y.toFixed(1)} years`;
-                                    }
-                                }
-                            }
-                        },
-                        scales: {
-                            x: {
-                                type: 'logarithmic',
-                                position: 'bottom',
-                                title: {
-                                    display: true,
-                                    text: 'Area (km², log scale)'
-                                },
-                                min: 1
-                            },
-                            y: {
-                                beginAtZero: true,
-                                title: {
-                                    display: true,
-                                    text: 'Median Age (years)'
-                                }
-                            }
-                        }
-                    }
-                });
-            } catch (error) {
-                console.error('Error creating area scatter plot:', error);
-            }
-        }
-
         function createLegend(maxAge) {
             const legend = document.getElementById('legend');
             const grades = [0, maxAge/4, maxAge/2, 3*maxAge/4, maxAge];
@@ -290,12 +156,234 @@
             legend.innerHTML = '<h4>Median Age (years)</h4>';
             
             for (let i = 0; i < grades.length - 1; i++) {
-                legend.innerHTML +=
-                    '<div style="display: flex; align-items: center; margin: 5px 0;">' +
-                    `<i style="background: ${getColor(grades[i])}; width: 20px; height: 20px; display: inline-block; margin-right: 5px;"></i>` +
-                    `${grades[i].toFixed(1)} &ndash; ${grades[i + 1].toFixed(1)}` +
-                    '</div>';
+                const minAge = grades[i];
+                const maxAge = grades[i + 1];
+                const color = getColor(minAge);
+                
+                legend.innerHTML += `
+                    <div class="legend-item" data-min-age="${minAge}" data-max-age="${maxAge}">
+                        <div class="legend-color" style="background: ${color}"></div>
+                        ${minAge.toFixed(1)} &ndash; ${maxAge.toFixed(1)}
+                    </div>
+                `;
             }
+
+            // Add legend click handlers
+            const legendItems = legend.querySelectorAll('.legend-item');
+            legendItems.forEach(item => {
+                item.addEventListener('click', () => {
+                    const minAge = parseFloat(item.dataset.minAge);
+                    const maxAge = parseFloat(item.dataset.maxAge);
+                    highlightCitiesByAgeRange(minAge, maxAge);
+                });
+            });
+        }
+
+        function highlightCitiesByAgeRange(minAge, maxAge) {
+            [charts.pano, charts.area].forEach(chart => {
+                chart.data.datasets[0].pointBackgroundColor = chart.data.datasets[0].data.map(point => {
+                    const age = point.y;
+                    return (age >= minAge && age < maxAge) ? point.backgroundColor : 'rgba(200,200,200,0.2)';
+                });
+                chart.update();
+            });
+
+            mapRectangles.forEach(rectangle => {
+                const age = rectangle.city.google_panos_age_stats.median_age_years;
+                if (age >= minAge && age < maxAge) {
+                    rectangle.setStyle({
+                        fillOpacity: 0.8,
+                        weight: 2
+                    });
+                } else {
+                    rectangle.setStyle({
+                        fillOpacity: 0.2,
+                        weight: 1
+                    });
+                }
+            });
+        }
+
+        function highlightCity(city) {
+            [charts.pano, charts.area].forEach(chart => {
+                chart.data.datasets[0].pointBackgroundColor = chart.data.datasets[0].data.map(point => 
+                    point.city === city ? point.backgroundColor : 'rgba(200,200,200,0.2)'
+                );
+                chart.update();
+            });
+
+            mapRectangles.forEach(rectangle => {
+                if (rectangle.city === city) {
+                    rectangle.setStyle({
+                        fillOpacity: 0.8,
+                        weight: 2
+                    });
+                } else {
+                    rectangle.setStyle({
+                        fillOpacity: 0.2,
+                        weight: 1
+                    });
+                }
+            });
+        }
+
+        function resetHighlights() {
+            [charts.pano, charts.area].forEach(chart => {
+                chart.data.datasets[0].pointBackgroundColor = chart.data.datasets[0].data.map(point => 
+                    point.backgroundColor
+                );
+                chart.update();
+            });
+
+            mapRectangles.forEach(rectangle => {
+                rectangle.setStyle({
+                    fillOpacity: 0.6,
+                    weight: 1
+                });
+            });
+        }
+
+        function createScatterPlots(cities) {
+            // Create data for plots
+            const panoData = cities.map(city => ({
+                x: city.panorama_counts.unique_google_panos,
+                y: city.google_panos_age_stats.median_age_years,
+                city: city,
+                backgroundColor: getColor(city.google_panos_age_stats.median_age_years)
+            }));
+
+            const areaData = cities.map(city => ({
+                x: city.search_area_km2,
+                y: city.google_panos_age_stats.median_age_years,
+                city: city,
+                backgroundColor: getColor(city.google_panos_age_stats.median_age_years)
+            }));
+
+            // Shared chart options
+            const sharedOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: (context) => {
+                                const city = context.raw.city;
+                                const cityName = city.city || city.state;
+                                return [
+                                    `${cityName}, ${city.state}`,
+                                    `Age: ${context.raw.y.toFixed(1)} years`,
+                                    `Coverage: ${city.coverage_rate_percent.toFixed(1)}%`
+                                ];
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Median Age (years)'
+                        }
+                    }
+                },
+                onHover: (event, elements) => {
+                    if (elements.length > 0) {
+                        highlightCity(elements[0].element.$context.raw.city);
+                    } else {
+                        resetHighlights();
+                    }
+                },
+                onClick: (event, elements) => {
+                    if (elements.length > 0) {
+                        const city = elements[0].element.$context.raw.city;
+                        const bounds = [
+                            [city.bounds.min_lat, city.bounds.min_lon],
+                            [city.bounds.max_lat, city.bounds.max_lon]
+                        ];
+                        const latSpan = city.bounds.max_lat - city.bounds.min_lat;
+                        const lonSpan = city.bounds.max_lon - city.bounds.min_lon;
+                        const padding = Math.max(latSpan, lonSpan) * 0.2;
+                        const paddedBounds = [
+                            [bounds[0][0] - padding, bounds[0][1] - padding],
+                            [bounds[1][0] + padding, bounds[1][1] + padding]
+                        ];
+                        map.fitBounds(paddedBounds);
+                    }
+                }
+            };
+
+            // Create pano scatter plot
+            charts.pano = new Chart(document.getElementById('panoScatter'), {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        data: panoData,
+                        backgroundColor: panoData.map(d => d.backgroundColor),
+                        pointRadius: 8,
+                        pointHoverRadius: 12,
+                        borderColor: 'rgba(0,0,0,0.2)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    ...sharedOptions,
+                    plugins: {
+                        ...sharedOptions.plugins,
+                        title: {
+                            display: true,
+                            text: 'Pano Count vs Median Age'
+                        }
+                    },
+                    scales: {
+                        ...sharedOptions.scales,
+                        x: {
+                            type: 'logarithmic',
+                            title: {
+                                display: true,
+                                text: 'Total Panos (log scale)'
+                            },
+                            min: 100
+                        }
+                    }
+                }
+            });
+
+            // Create area scatter plot
+            charts.area = new Chart(document.getElementById('areaScatter'), {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        data: areaData,
+                        backgroundColor: areaData.map(d => d.backgroundColor),
+                        pointRadius: 8,
+                        pointHoverRadius: 12,
+                        borderColor: 'rgba(0,0,0,0.2)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    ...sharedOptions,
+                    plugins: {
+                        ...sharedOptions.plugins,
+                        title: {
+                            display: true,
+                            text: 'Area vs Median Age'
+                        }
+                    },
+                    scales: {
+                        ...sharedOptions.scales,
+                        x: {
+                            type: 'logarithmic',
+                            title: {
+                                display: true,
+                                text: 'Area (km², log scale)'
+                            },
+                            min: 1
+                        }
+                    }
+                }
+            });
         }
 
         async function loadData() {
@@ -309,15 +397,20 @@
                 const data = JSON.parse(decompressed);
                 const cities = data.cities;
 
-                document.getElementById('loading').style.display = 'none';
+                // Update stats overlay
                 document.getElementById('stats').innerHTML = `
                     <strong>GSV City Coverage Analysis</strong><br>
                     ${data.cities_count} cities analyzed | Updated: ${new Date(data.creation_timestamp).toLocaleString()}
                 `;
 
+                // Hide loading message
+                document.getElementById('loading').style.display = 'none';
+
+                // Calculate max age for legend
                 const maxAge = Math.max(...cities.map(city => city.google_panos_age_stats.median_age_years));
                 createLegend(maxAge);
 
+                // Add rectangles to map
                 cities.forEach(city => {
                     const bounds = [
                         [city.bounds.min_lat, city.bounds.min_lon],
@@ -330,25 +423,25 @@
                         fillOpacity: 0.6
                     }).addTo(map);
 
+                    // Store reference to city data in rectangle
+                    rectangle.city = city;
                     rectangle.bindPopup(createTooltip(city));
+                    mapRectangles.push(rectangle);
 
+                    // Add hover effects
                     rectangle.on('mouseover', function (e) {
-                        this.setStyle({
-                            weight: 3,
-                            fillOpacity: 0.8
-                        });
+                        highlightCity(city);
                     });
 
                     rectangle.on('mouseout', function (e) {
-                        this.setStyle({
-                            weight: 1,
-                            fillOpacity: 0.6
-                        });
+                        resetHighlights();
                     });
                 });
 
+                // Create scatter plots
                 createScatterPlots(cities);
 
+                // Fit map to show all cities
                 const allBounds = cities.map(city => [
                     [city.bounds.min_lat, city.bounds.min_lon],
                     [city.bounds.max_lat, city.bounds.max_lon]
@@ -361,7 +454,8 @@
             }
         }
 
-        loadData();
+        // Start loading data when page loads
+        document.addEventListener('DOMContentLoaded', loadData);
     </script>
 </body>
 </html>
