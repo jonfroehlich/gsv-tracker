@@ -7,3 +7,4 @@ data/*.html
 data/*.csv
 backup_data/*
 vis/*.html
+www/index copy.html

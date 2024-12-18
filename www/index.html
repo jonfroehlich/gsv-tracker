@@ -116,8 +116,9 @@
         let mapRectangles = [];
 
         // Initialize map
-        L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '© OpenStreetMap contributors © CARTO',
+            maxZoom: 19
         }).addTo(map);
 
         function getColor(age) {
@@ -303,7 +304,7 @@
                         ];
                         const latSpan = city.bounds.max_lat - city.bounds.min_lat;
                         const lonSpan = city.bounds.max_lon - city.bounds.min_lon;
-                        const padding = Math.max(latSpan, lonSpan) * 0.2;
+                        const padding = Math.max(latSpan, lonSpan) * 5.5;
                         const paddedBounds = [
                             [bounds[0][0] - padding, bounds[0][1] - padding],
                             [bounds[1][0] + padding, bounds[1][1] + padding]
@@ -330,6 +331,9 @@
                     ...sharedOptions,
                     plugins: {
                         ...sharedOptions.plugins,
+                        legend: {
+                            display: false  // Hide legend
+                        },
                         title: {
                             display: true,
                             text: 'Pano Count vs Median Age'
@@ -366,6 +370,9 @@
                     ...sharedOptions,
                     plugins: {
                         ...sharedOptions.plugins,
+                        legend: {
+                            display: false  // Hide legend
+                        },
                         title: {
                             display: true,
                             text: 'Area vs Median Age'
