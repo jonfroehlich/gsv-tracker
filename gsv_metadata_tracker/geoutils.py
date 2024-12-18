@@ -11,14 +11,145 @@ logger = logging.getLogger(__name__)
 
 NOMINATIM_USER_AGENT = "gsv_metadata_tracker"
 
+class EnhancedLocation:
+    """
+    A wrapper class for geopy Location objects that adds convenient access to country and state information.
+    
+    This class uses the delegation pattern to wrap the original Location object while adding new properties
+    for easier access to commonly needed address components. It maintains all original Location functionality
+    through delegation while providing cleaner access to country and state data that would normally require 
+    multiple dictionary lookups.
+
+    https://geopy.readthedocs.io/en/stable/index.html?highlight=location#geopy.location.Location
+
+    Attributes:
+        _location: The wrapped geopy Location object
+        _country: Cached country name extracted from location.raw['address']
+        _state: Cached state/region name extracted from location.raw['address']
+        
+    Properties:
+        country: The country name, or None if not available
+        state: The state/region name, or None if not available
+        
+    All other attributes are delegated to the wrapped Location object, so this class can be used
+    as a drop-in replacement for the original Location class.
+    """
+    def __init__(self, location):
+        """
+        Initialize the enhanced location wrapper.
+
+        Args:
+            location: A geopy Location object to be wrapped
+
+        The constructor extracts and caches country and state information from the location's
+        raw address data if available. For state/region information, it checks multiple possible
+        field names to account for different naming conventions across countries:
+        - state: Used in US, Australia, etc.
+        - county: Used in UK
+        - state_district: Used in some European countries
+        - region: Generic fallback used in various countries
+        """
+        self._location = location
+        self._country = None
+        self._state = None
+        self._city = None
+        
+        if hasattr(location, 'raw'):
+            address_data = location.raw.get('address', {})
+            self._country = address_data.get('country')
+            
+            # Try different possible state field names
+            for field in ['state', 'county', 'state_district', 'region']:
+                if field in address_data:
+                    self._state = address_data.get(field)
+                    break
+
+            # Try different possible city field names
+            for field in ['city', 'town', 'village', 'municipality', 'suburb']:
+                if field in address_data:
+                    self._city = address_data.get(field)
+                    break
+    
+    @property
+    def country(self) -> Optional[str]:
+        """
+        Get the country name.
+        
+        Returns:
+            str or None: The country name if available, None otherwise
+        """
+        return self._country
+        
+    @property
+    def state(self) -> Optional[str]:
+        """
+        Get the state/region name.
+        
+        Returns:
+            str or None: The state or region name if available, None otherwise.
+            This could be a state (US), county (UK), or other regional division
+            depending on the country.
+        """
+        return self._state
+    
+    @property
+    def city(self) -> Optional[str]:
+        """
+        Get the city name.
+        
+        Returns:
+            str or None: The city name if available, None otherwise.
+            This could come from various fields in the raw data:
+            - city: Most common for cities
+            - town: Used for smaller municipalities
+            - village: Used for very small municipalities
+            - municipality: Used in some countries
+            - suburb: Used for city subdivisions in some areas
+        """
+        return self._city
+        
+    def __getattr__(self, name):
+        """
+        Delegate any unknown attribute access to the wrapped Location object.
+        
+        This allows the EnhancedLocation to be used anywhere a Location object
+        would be used, maintaining backward compatibility while adding new features.
+
+        Args:
+            name: The name of the attribute being accessed
+
+        Returns:
+            The value of the attribute from the wrapped Location object
+
+        Raises:
+            AttributeError: If the attribute doesn't exist on the wrapped Location object
+        """
+        return getattr(self._location, name)
+
 @lru_cache(maxsize=128)
-def get_city_location_data(city_name: str) -> Optional[Location]:
+def get_city_location_data(
+    city_name: str, 
+    center_lat: Optional[float] = None, 
+    center_lng: Optional[float] = None
+) -> Optional[EnhancedLocation]:
     """
     Get location information for a city including coordinates, country, and bounding box.
+    If center coordinates are provided, uses them to help disambiguate common city names.
     Uses caching to avoid repeated lookups.
+
+    If you supply center_lat and center_lng, the function will attempt to find the closest
+    matching city. For example:
+
+    # Will find Springfield, Illinois
+    location = get_city_location_data("Springfield", 39.7817, -89.6501)
+
+    # Will find Springfield, Massachusetts
+    location = get_city_location_data("Springfield", 42.1015, -72.5898)
     
     Args:
         city_name: Name of the city to look up
+        center_lat: Optional latitude to help disambiguate city location
+        center_lng: Optional longitude to help disambiguate city location
         
     Returns:
         Location object with these key attributes:
@@ -34,19 +165,20 @@ def get_city_location_data(city_name: str) -> Optional[Location]:
         Returns None if city not found or on error
         
     Example:
+        >>> # Basic usage
         >>> location = get_city_location_data("Paris")
+        >>> 
+        >>> # With disambiguation coordinates (e.g., for Springfield, IL)
+        >>> location = get_city_location_data("Springfield", 39.7817, -89.6501)
         >>> if location:
-        >>>     # Access basic location info
-        >>>     print(location.latitude, location.longitude)  # 48.8566, 2.3522
-        >>>     print(location.address)  # "Paris, Île-de-France, France"
-        >>>     print(location.raw['address']['country'])  # "France"
-        >>>     
-        >>>     # Access bounding box
+        >>>     print(location.latitude, location.longitude)
+        >>>     print(location.address)
+        >>>     print(location.raw['address']['country'])
         >>>     bbox = location.raw['boundingbox']
         >>>     print(f"City bounds: N:{bbox[1]} S:{bbox[0]} E:{bbox[3]} W:{bbox[2]}")
     """
     if not city_name or not city_name.strip():
-        logger.error("City name cannot be empty")
+        logging.error("City name cannot be empty")
         return None
         
     try:
@@ -54,28 +186,63 @@ def get_city_location_data(city_name: str) -> Optional[Location]:
             user_agent=NOMINATIM_USER_AGENT,
             timeout=10
         )
-        location = geolocator.geocode(
-            city_name,
-            language="en",
-            addressdetails=True  # Get detailed address components
-        )
         
-        if location is not None:
-            logger.info(f"Found coordinates for {city_name}: {location.latitude}, {location.longitude}")
-            return location
+        # If center coordinates provided, use them for disambiguation
+        found_loc = None
+        if center_lat is not None and center_lng is not None:
+            # Get multiple location results
+            locations = geolocator.geocode(
+                city_name,
+                language="en",
+                addressdetails=True,
+                exactly_one=False
+            )
+            
+            if locations:
+                # Find closest location to provided coordinates
+                center_point = (center_lat, center_lng)
+                closest_location = min(
+                    locations,
+                    key=lambda loc: geodesic(
+                        center_point, 
+                        (loc.latitude, loc.longitude)
+                    ).kilometers
+                )
+                logging.info(
+                    f"Found closest match for {city_name} near ({center_lat}, {center_lng}): "
+                    f"{closest_location.latitude}, {closest_location.longitude}"
+                )
+                found_loc = closest_location
+
+        if not found_loc:    
+            # If no center coordinates or no results found, fall back to basic search
+            found_loc = geolocator.geocode(
+                city_name,
+                language="en",
+                addressdetails=True
+            )
+        
+        if found_loc is not None:
+            logging.info(f"Found coordinates for {city_name}: {found_loc.latitude}, {found_loc.longitude}")
+            
+            print(found_loc.latitude, found_loc.longitude)
+            print(found_loc.address)
+
+            return EnhancedLocation(found_loc)
         else:
-            logger.warning(f"Could not find coordinates for {city_name}")
+            logging.warning(f"Could not find coordinates for {city_name}")
             return None
             
     except GeocoderTimedOut:
-        logger.error(f"Timeout looking up coordinates for {city_name}")
+        logging.error(f"Timeout looking up coordinates for {city_name}")
         return None
     except GeocoderUnavailable:
-        logger.error(f"Geocoding service unavailable for {city_name}")
+        logging.error(f"Geocoding service unavailable for {city_name}")
         return None
     except Exception as e:
-        logger.error(f"Error looking up coordinates for {city_name}: {str(e)}")
+        logging.error(f"Error looking up coordinates for {city_name}: {str(e)}")
         return None
+
 
 def get_bounding_box(df: pd.DataFrame) -> Dict[str, float]:
     """
