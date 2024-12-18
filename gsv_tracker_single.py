@@ -49,7 +49,7 @@ import os
 from typing import Optional
 from . import (
     load_config,
-    get_city_coordinates,
+    get_city_location_data,
     get_search_dimensions,
     create_visualization_map,
     download_gsv_metadata  # single-threaded version
@@ -173,7 +173,7 @@ def main():
         config = load_config()
         
         # Get coordinates for the specified city
-        location = get_city_coordinates(args.city)
+        location = get_city_location_data(args.city)
         if not location:
             logging.error(f"Could not find coordinates for {args.city}")
             return 1

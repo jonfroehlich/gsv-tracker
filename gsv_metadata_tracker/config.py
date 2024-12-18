@@ -1,9 +1,22 @@
 import os
 import logging
 from typing import Dict, Any
-from .fileutils import get_default_data_dir
+from .paths import get_default_data_dir
 
 logger = logging.getLogger(__name__)
+
+# Standard metadata schema for GSV download files
+METADATA_DTYPES = {
+    'query_lat': float,
+    'query_lon': float,
+    'query_timestamp': str,
+    'pano_lat': float,
+    'pano_lon': float,
+    'pano_id': str,
+    'capture_date': str, # capture_date handled by parse_dates (to force it to datetime)
+    'copyright_info': str,
+    'status': str
+}
 
 def load_config() -> Dict[str, Any]:
     """Load configuration from conda environment variables."""
