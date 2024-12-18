@@ -53,22 +53,30 @@ class EnhancedLocation:
         self._country = None
         self._state = None
         self._city = None
+
+        logger.debug(f"EnhancedLocation created for {location}")
         
         if hasattr(location, 'raw'):
             address_data = location.raw.get('address', {})
+            logger.debug(f"EnhancedLocation address_data {address_data}")
+
             self._country = address_data.get('country')
             
             # Try different possible state field names
             for field in ['state', 'county', 'state_district', 'region']:
                 if field in address_data:
                     self._state = address_data.get(field)
+                    logger.debug(f"EnhancedLocation state {self._state} found with field {field}")
                     break
 
             # Try different possible city field names
             for field in ['city', 'town', 'village', 'municipality', 'suburb']:
                 if field in address_data:
                     self._city = address_data.get(field)
+                    logger.debug(f"EnhancedLocation state {self._city} found with field {field}")
                     break
+            
+            
     
     @property
     def country(self) -> Optional[str]:
