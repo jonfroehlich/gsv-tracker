@@ -1,4 +1,5 @@
 import json
+import gzip
 from datetime import datetime
 import pandas as pd
 import numpy as np
@@ -148,7 +149,7 @@ def calculate_pano_stats(df: pd.DataFrame, copyright_filter_condition: Optional[
     
 def find_missing_json_files(data_dir: str) -> List[str]:
     """
-    Find all csv.gz files that don't have corresponding JSON files.
+    Find all csv.gz files that don't have corresponding JSON.gz files.
     
     Args:
         data_dir: Directory to search for files
@@ -160,7 +161,7 @@ def find_missing_json_files(data_dir: str) -> List[str]:
     
     missing_json = []
     for csv_file in csv_files:
-        json_file = csv_file.rsplit('.csv.gz', 1)[0] + '.json'
+        json_file = csv_file.rsplit('.csv.gz', 1)[0] + '.json.gz'
         if not os.path.exists(json_file):
             missing_json.append(csv_file)
     
@@ -171,18 +172,18 @@ def generate_missing_city_json_files(data_dir: str) -> None:
     logger.info(f"Scanning {data_dir} for csv.gz files missing JSON metadata...")
     
     all_csv_files = get_list_of_city_csv_files(data_dir)
-    missing_files = find_missing_json_files(data_dir)
+    missing_json_files = find_missing_json_files(data_dir)
     
-    if not missing_files:
+    if not missing_json_files:
         file_text = "file" if len(all_csv_files) == 1 else "files"
         logger.info(f"Found {len(all_csv_files)} csv.gz {file_text}. All csv.gz files already have a corresponding .json metadata file.")
         return
     
-    file_text = "file" if len(missing_files) == 1 else "files"
-    logger.info(f"Found {len(missing_files)} of {len(all_csv_files)} {file_text} needing a .json metadata file.")
+    file_text = "file" if len(missing_json_files) == 1 else "files"
+    logger.info(f"Found {len(missing_json_files)} of {len(all_csv_files)} {file_text} needing a .json metadata file.")
     
     cnt_generated_json_files = 0
-    for csv_path in tqdm(missing_files, desc="Generating metadata .json files"):
+    for csv_path in tqdm(missing_json_files, desc="Generating metadata .json files"):
         try:
             params = parse_filename(csv_path)
             city_name = params['city_name']
@@ -229,9 +230,9 @@ def generate_city_metadata_summary_as_json(
     force_recreate_file: bool = False
 ) -> str:
     """
-    Generate and save download statistics and metadata to a JSON file.
+    Generate and save download statistics and metadata to a JSON file (compressed).
 
-    Returns the .json filename with path
+    Returns the .json.gz filename with path
     
     Args:
         csv_gz_path: Full path to the compressed CSV file (including filename)
@@ -245,11 +246,11 @@ def generate_city_metadata_summary_as_json(
         force_recreate_file: forces the recreation of the .json file (defaults False)
     """
 
-    # Generate JSON path by replacing .csv.gz extension with .json
-    json_filename_with_path = csv_gz_path.rsplit('.csv.gz', 1)[0] + '.json'
+    # Generate JSON.gz path by replacing .csv.gz extension with .json.gz
+    json_filename_with_path = csv_gz_path.rsplit('.csv.gz', 1)[0] + '.json.gz'
 
     if os.path.exists(json_filename_with_path) and not force_recreate_file:
-        print(f"JSON file already exists: {json_filename_with_path}; returning...")
+        logger.info(f"JSON.gz file already exists: {json_filename_with_path}; returning...")
         return json_filename_with_path
   
     # Check for any problematic conversions
@@ -282,10 +283,27 @@ def generate_city_metadata_summary_as_json(
     points_without_panos = len(df[df['status'] == 'ZERO_RESULTS'])
     points_with_errors = len(df[df['status'].isin(['ERROR', 'REQUEST_DENIED', 'INVALID_REQUEST'])])
     
+    # Get start and end times from query_timestamp with error checking
+    logger.debug(f"\nChecking timestamp formats in {csv_gz_path}...")
+
+    # TODO: consider moving this to the fileutils.load_csv_file function
+    # We would store the converted timestamps back in query_timestamp
+    # Convert timestamps once and store in the DataFrame
+    df['query_timestamp_converted'] = pd.to_datetime(df['query_timestamp'], errors='coerce')
+    problematic_timestamps = df[df['query_timestamp_converted'].isna()]
+
+    if len(problematic_timestamps) > 0:
+        logger.warning(f"\nFound {len(problematic_timestamps)} problematic timestamps:")
+        logger.warning("\nOriginal problematic values:")
+        for idx, row in problematic_timestamps.iterrows():
+            logger.warning(f"Row {idx}: {row['query_timestamp']}")
+    else:
+        logger.debug(f"All timestamps converted successfully in {csv_gz_path}!")
+
     # Use the converted timestamps for all operations
     start_time = df['query_timestamp_converted'].min()
     end_time = df['query_timestamp_converted'].max()
-    
+
     try:
         duration = end_time - start_time
         duration_seconds = duration.total_seconds()
@@ -357,8 +375,12 @@ def generate_city_metadata_summary_as_json(
         }
     }
     
-    with open(json_filename_with_path, 'w') as f:
+    # Save compressed JSON
+    with gzip.open(json_filename_with_path, 'wt', encoding='utf-8') as f:
         json.dump(metadata, f, indent=2)
+
+    logger.info(f"Saved compressed JSON to: {json_filename_with_path}")
+    return json_filename_with_path
 
     return json_filename_with_path
 
@@ -375,15 +397,16 @@ def generate_aggregate_summary_as_json(json_dir: str) -> Dict[str, Any]:
     
     cities_data = []
     
-    # Find all JSON files in directory
-    json_files = [f for f in os.listdir(json_dir) if f.endswith('.json') and f != 'cities.json']
-    print(f"Found {len(json_files)} JSON files in {json_dir}")
+    # Find all JSON files in directory except the cities.json file
+    json_files = [f for f in os.listdir(json_dir) 
+                 if f.endswith('.json.gz') and f != 'cities.json.gz']
+    logger.info(f"Found {len(json_files)} JSON.gz files in {json_dir}")
 
     for json_file in tqdm(json_files, desc="Processing city files", unit="file"):
         file_path = os.path.join(json_dir, json_file)
         
         try:
-            with open(file_path, 'r') as f:
+            with gzip.open(file_path, 'rt', encoding='utf-8') as f:
                 city_data = json.load(f)
                 
             # Extract relevant information
@@ -453,9 +476,9 @@ def generate_aggregate_summary_as_json(json_dir: str) -> Dict[str, Any]:
         "cities": cities_data
     }
     
-    # Save to cities.json
-    output_path = os.path.join(json_dir, 'cities.json')
-    with open(output_path, 'w') as f:
+    # Save the aggregate summary as compressed JSON
+    output_path = os.path.join(json_dir, 'cities.json.gz')
+    with gzip.open(output_path, 'wt', encoding='utf-8') as f:
         json.dump(summary, f, indent=2)
     
     return summary
