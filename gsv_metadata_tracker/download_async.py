@@ -121,6 +121,38 @@ def get_processed_points(file_path: str) -> set:
     except Exception as e:
         logger.error(f"Error reading existing file: {str(e)}")
         return set()
+    
+def standardize_capture_date(date_str: Optional[str]) -> Optional[str]:
+    """Standardizes a capture date string to ISO 8601 format (YYYY-MM-DD).
+
+    The Google Street View Static API can return capture dates in various formats.
+    This function attempts to parse the input date string using several common formats
+    and converts it to a standard ISO 8601 date string (YYYY-MM-DD).
+
+    Args:
+        date_str: The capture date string from the API response. Can be None.
+
+    Returns:
+        A string representing the date in ISO 8601 format (YYYY-MM-DD), or None if
+        the input is None or if no matching format is found.
+    """
+    if not date_str:  # Handle None or empty strings
+        return None
+
+    formats_to_try = [
+        '%Y-%m-%d',  # Most precise format (YYYY-MM-DD), try first
+        '%Y-%m',      # Year and month (YYYY-MM)
+        '%Y',          # Year only (YYYY)
+    ]
+
+    for fmt in formats_to_try:
+        try:
+            date_obj = datetime.strptime(date_str, fmt).date()  # Parse the date
+            return date_obj.isoformat()  # Convert to ISO 8601 format (YYYY-MM-DD)
+        except ValueError:
+            continue  # If parsing fails, try the next format
+
+    return None  # Return None if no format matches
 
 async def process_batch_async(
     points: List[Tuple[float, float, int, int]],
@@ -178,12 +210,17 @@ async def process_batch_async(
                 }
                 
                 if status == 'OK':
+                    # I have found that capture_date can be formatted in a variety of formats like format='%Y-%m' (most commonly) or format='%Y-%m-%d'.
+                    # So, we should standardize the data format to make it consistent and easier for others to use once archived in a file
+                    capture_date_raw = response.get('date', None)  # Get the raw capture date from the API response
+                    capture_date_standardized = standardize_capture_date(capture_date_raw)
+
                     result.update({
                         'pano_lat': response['location']['lat'],
                         'pano_lon': response['location']['lng'],
                         'pano_id': response['pano_id'],
                         'copyright_info': response.get('copyright', None),
-                        'capture_date': response.get('date', None)
+                        'capture_date': capture_date_standardized
                     })
                     if not result['capture_date']:
                         result['status'] = 'NO_DATE'

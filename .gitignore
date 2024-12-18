@@ -4,5 +4,6 @@
 data/*.lock
 data/*.downloading
 data/*.html
+data/*.csv
 backup_data/*
 vis/*.html

@@ -45,12 +45,17 @@ def main():
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     
+    logger.debug(f"Input parameters: {args}")
+    logger.debug(f"Logging level set to: {args.log_level}")
+    logger.debug(f"Data directory: {args.data_dir}")
+
     if not os.path.exists(args.data_dir):
         print(f"Error: Directory {args.data_dir} does not exist")
         return 1
         
     generate_missing_city_json_files(args.data_dir)
     generate_aggregate_summary_as_json(args.data_dir)
+
     return 0
 
 if __name__ == '__main__':
