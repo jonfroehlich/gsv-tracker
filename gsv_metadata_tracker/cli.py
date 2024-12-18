@@ -26,6 +26,7 @@ import asyncio
 import aiohttp
 from typing import Optional
 from .fileutils import get_default_vis_dir
+from .json_summarizer import generate_city_metadata_summary_as_json, generate_aggregate_summary_as_json
 from . import (
     load_config,
     get_city_location_data,
@@ -182,36 +183,36 @@ async def async_main():
     
     try:
         config = load_config()
-        location = get_city_location_data(args.city)
+        city_loc_data = get_city_location_data(args.city)
 
         vis_path = get_default_vis_dir()
         os.makedirs(vis_path, exist_ok=True)
         
-        if not location:
+        if not city_loc_data:
             logging.error(f"Could not find coordinates for {args.city}")
             sys.exit(1)
 
-        width, height = get_search_dimensions(
+        search_grid_width, search_grid_height = get_search_dimensions(
             args.city,
             args.width,
             args.height,
             args.force_size
         )
 
-        print(f"The search dimensions for {args.city} are {width:.1f}m x {height:.1f}m")
+        print(f"The search dimensions for {args.city} are {search_grid_width:.1f}m x {search_grid_height:.1f}m")
 
         # If checking boundaries, create and save visualization then exit
         if args.check_boundary:
-            base_name = generate_base_filename(args.city, width, height, args.step)
+            base_name = generate_base_filename(args.city, search_grid_width, search_grid_height, args.step)
             boundary_vis_full_path = os.path.join(vis_path, f"{base_name}_search_boundary.html")
             
             # Create preview map using your display_search_area function
             search_area_map = display_search_area(
                 args.city,
-                location.latitude,
-                location.longitude,
-                width,
-                height,
+                city_loc_data.latitude,
+                city_loc_data.longitude,
+                search_grid_width,
+                search_grid_height,
                 args.step
             )
             search_area_map.save(boundary_vis_full_path)
@@ -228,16 +229,16 @@ async def async_main():
             
             return 0
             
-        logging.info(f"Analyzing {args.city} at {location.latitude}, {location.longitude}")
+        logging.info(f"Analyzing {args.city} at {city_loc_data.latitude}, {city_loc_data.longitude}")
         logging.info(f"Using batch_size={args.batch_size}, connection_limit={args.connection_limit}")
         
         # Pass both concurrency parameters to the download function
-        df = await download_gsv_metadata_async(
+        dict_results = await download_gsv_metadata_async(
             city_name=args.city,
-            center_lat=location.latitude,
-            center_lon=location.longitude,
-            grid_width=width,
-            grid_height=height,
+            center_lat=city_loc_data.latitude,
+            center_lon=city_loc_data.longitude,
+            grid_width=search_grid_width,
+            grid_height=search_grid_height,
             step_length=args.step,
             api_key=config['api_key'],
             download_path=config['download_path'],
@@ -245,9 +246,21 @@ async def async_main():
             connection_limit=args.connection_limit,
             request_timeout=args.timeout
         )
+
+        # Create .json summary file
+        df = dict_results["df"]
+        csv_filename_with_path = dict_results["filename_with_path"]
+        generate_city_metadata_summary_as_json(csv_filename_with_path, df,
+                                               city_loc_data.city,
+                                               city_loc_data.state,
+                                               city_loc_data.country,
+                                               search_grid_width, search_grid_height, 
+                                               args.step)
         
+        generate_aggregate_summary_as_json(config['download_path'])
+
         if not args.no_visual:
-            base_name = generate_base_filename(args.city, width, height, args.step)
+            base_name = generate_base_filename(args.city, search_grid_width, search_grid_height, args.step)
             map_path = os.path.join(vis_path, f"{base_name}.html")
             
             map_obj = create_visualization_map(df, args.city)
