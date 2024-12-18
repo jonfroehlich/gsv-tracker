@@ -58,27 +58,22 @@ def load_city_csv_file(csv_path: str) -> pd.DataFrame:
             csv_path,
             dtype=METADATA_DTYPES,
             compression=compression,
-            parse_dates=['query_timestamp', 'capture_date']
         )
         
-        # Handle capture_date with optimized parsing order
-        # def parse_capture_date(date_str):
-        #     if pd.isna(date_str):
-        #         return pd.NaT
-        #     try:
-        #         # Try YYYY-MM format first since it's most common
-        #         return pd.to_datetime(date_str, format='%Y-%m')
-        #     except ValueError:
-        #         try:
-        #             # Fall back to YYYY-MM-DD format
-        #             return pd.to_datetime(date_str, format='%Y-%m-%d')
-        #         except ValueError:
-        #             return pd.NaT
-
-        # df['capture_date'] = df['capture_date'].apply(parse_capture_date)
+        # Convert query_timestamp (ISO 8601 with timezone)
+        df['query_timestamp'] = pd.to_datetime(df['query_timestamp'], format='ISO8601')
+        
+        # Convert capture_date (YYYY-MM-DD)
+        df['capture_date'] = pd.to_datetime(df['capture_date'], format='%Y-%m-%d', errors='coerce')
+    
         
         logger.debug(f"Loaded {len(df)} rows from {csv_path}")
         logger.debug(f"The DataFrame has columns: {df.columns} with dtypes: {df.dtypes}")
+
+        # Print out dtypes to verify
+        logger.debug("\nDataFrame dtypes after conversion:")
+        for col, dtype in df.dtypes.items():
+            logger.debug(f"  {col:15} {dtype}")
 
         return df
         

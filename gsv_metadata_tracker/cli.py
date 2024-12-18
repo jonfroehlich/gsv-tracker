@@ -249,6 +249,7 @@ async def async_main():
 
         # Create .json summary file
         df = dict_results["df"]
+        logging.debug(f"The DataFrame has {len(df)} rows with types {df.dtypes}")
         csv_filename_with_path = dict_results["filename_with_path"]
         generate_city_metadata_summary_as_json(csv_filename_with_path, df,
                                                city_loc_data.city,

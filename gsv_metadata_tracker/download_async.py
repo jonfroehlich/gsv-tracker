@@ -114,8 +114,7 @@ def get_processed_points(file_path: str) -> set:
     try:
         df = pd.read_csv(
             file_path,
-            dtype=METADATA_DTYPES,
-            parse_dates=['capture_date']
+            dtype=METADATA_DTYPES
         )
         return {(row['query_lat'], row['query_lon']) for _, row in df.iterrows()}
     except Exception as e:
@@ -361,8 +360,10 @@ async def download_gsv_metadata_async(
             if (point[0], point[1]) not in processed_points
         ]
      
-        print(f"Found {len(processed_points)} already processed points. {len(remaining_points)} points remaining.")
-        logger.info(f"Found {len(processed_points)} already processed points. {len(remaining_points)} points remaining.")
+        if len(processed_points) > 0:
+            logger.info(f"Found {len(processed_points)} already processed points. {len(remaining_points)} points remaining.")
+        else:
+            logger.info(f"No previous points processed. Processing all points ({len(remaining_points)} total).")
         
         if len(remaining_points) == 0:
             logger.info("All points already processed.")
