@@ -1,107 +1,367 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Interactive visualization of Google Street View coverage across different cities">
-    <meta name="author" content="Jon Froehlich">
-    <meta name="theme-color" content="#ffffff">
-    
-    <title>GSV Coverage Visualization</title>
-    
-    <!-- External Libraries -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" defer></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js" defer></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js" defer></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" defer></script>
-    
-    <!-- Application CSS -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css" rel="stylesheet">
-    <link href="css/styles.css" rel="stylesheet">
+    <title>GSV City Explorer</title>
+    <meta charset="utf-8">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+        }
+        .chart-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            z-index: 1000;
+            display: flex;
+            gap: 20px;
+            min-height: 300px;  /* Explicit minimum height */
+        }
+        .scatter-plot-container {
+            width: 300px;
+            height: 300px;
+            position: relative;  /* Add this */
+            background-color: #f8f9fa;  /* Light background to see the container */
+            border: 1px solid #ddd;  /* Border to see the container boundaries */
+        }
+        .legend {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            z-index: 1000;
+        }
+        #stats {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 10px 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            z-index: 1000;
+            text-align: center;
+        }
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            z-index: 2000;
+            text-align: center;
+        }
+    </style>
 </head>
 <body>
-    <div id="app">
-        <header>
-            <h1>GSV Coverage Visualization</h1>
-            <p class="description">Explore Google Street View coverage patterns and temporal distributions across different cities.</p>
-        </header>
-
-        <main>
-            <div id="controls">
-                <div class="select-container">
-                    <label for="citySelect">Select a city:</label>
-                    <select id="citySelect" aria-label="Select a city to visualize">
-                        <option value="">Choose a city...</option>
-                    </select>
-                </div>
-                <div class="button-container">
-                    <button id="loadButton" disabled>
-                        Load Visualization
-                    </button>
-                </div>
-            </div>
-
-            <div id="map" aria-label="Map showing Google Street View coverage"></div>
-            
-            <div id="stats" class="stats-panel" style="display: none;">
-                <!-- Stats will be dynamically inserted here -->
-            </div>
-        </main>
-
-        <footer>
-            <p>
-                Created by <a href="https://jonfroehlich.github.io/" target="_blank" rel="noopener">Jon E. Froehlich</a>
-                | <a href="https://github.com/jonfroehlich/gsv_metadata_tracker" target="_blank" rel="noopener">View on GitHub</a>
-            </p>
-        </footer>
-    </div>
-
-    <!-- Loading overlay -->
-    <div id="loading" class="loading" style="display: none;">
-        <div class="loading-content">
-            <div class="spinner"></div>
-            <span>Loading...</span>
+    <div id="map"></div>
+    <div id="loading" class="loading">Loading city data...</div>
+    <div id="stats"></div>
+    <div class="chart-container">
+        <div class="scatter-plot-container">
+            <canvas id="panoScatter"></canvas>
+        </div>
+        <div class="scatter-plot-container">
+            <canvas id="areaScatter"></canvas>
         </div>
     </div>
+    <div id="legend" class="legend"></div>
 
-    <!-- Error message container -->
-    <div id="error-container" class="error-container" style="display: none;"></div>
+    <script>
+        // Initialize the map with a darker style
+        const map = L.map('map').setView([0, 0], 2);
+        L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
 
-    <!-- Application JavaScript -->
-    <script type="module">
-        import { eventMediator } from './js/events.js';
-        import CONFIG from './js/config.js';
-        import DataLoader from './js/dataLoader.js';
-        import MapVisualizer from './js/map.js';
-        import HistogramVisualizer from './js/histogram.js';
-        import App from './js/main.js';
+        function getColor(age) {
+            const maxAge = 12; // Adjusted based on your data
+            const ratio = Math.min(age / maxAge, 1);
+            return `rgb(${255}, ${Math.floor(255 * (1 - ratio))}, ${Math.floor(255 * (1 - ratio))})`;
+        }
 
-        let app; // Declare outside to ensure single instance
+        function createTooltip(city) {
+            const cityName = city.city || city.state;
+            return `
+                <div style="min-width: 250px">
+                    <h3>${cityName}, ${city.state}, ${city.country}</h3>
+                    <p><strong>Coverage Statistics:</strong></p>
+                    <ul style="padding-left: 20px; margin: 5px 0;">
+                        <li>Area: ${city.search_area_km2.toFixed(1)} km²</li>
+                        <li>Coverage Rate: ${city.coverage_rate_percent.toFixed(1)}%</li>
+                        <li>Total Panoramas: ${city.panorama_counts.unique_panos.toLocaleString()}</li>
+                        <li>Google Panoramas: ${city.panorama_counts.unique_google_panos.toLocaleString()}</li>
+                    </ul>
+                    <p><strong>Age Statistics:</strong></p>
+                    <ul style="padding-left: 20px; margin: 5px 0;">
+                        <li>Median Age: ${city.google_panos_age_stats.median_age_years.toFixed(1)} years</li>
+                        <li>Average Age: ${city.google_panos_age_stats.avg_age_years.toFixed(1)} years</li>
+                        <li>Newest: ${new Date(city.google_panos_age_stats.newest_date).toLocaleDateString()}</li>
+                        <li>Oldest: ${new Date(city.google_panos_age_stats.oldest_date).toLocaleDateString()}</li>
+                    </ul>
+                </div>
+            `;
+        }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            // Check if we've already initialized
-            if (!app) {
-                console.log('Initializing app for the first time');
-                app = new App();
-                app.initialize().catch(error => {
-                    console.error('Failed to initialize application:', error);
-                    document.getElementById('error-container').innerHTML = `
-                        <div class="error-message">
-                            Failed to initialize application. Please refresh the page.
-                        </div>
-                    `;
-                    document.getElementById('error-container').style.display = 'block';
+        
+        function createScatterPlots(cities) {
+            console.log('Creating scatter plots with cities:', cities);
+
+            // Log dimensions of containers
+            const panoContainer = document.querySelector('.scatter-plot-container');
+            console.log('Scatter plot container dimensions:', {
+                width: panoContainer.offsetWidth,
+                height: panoContainer.offsetHeight,
+                clientWidth: panoContainer.clientWidth,
+                clientHeight: panoContainer.clientHeight
+            });
+
+            // Prepare data for pano scatter plot with colors
+            const panoData = cities.map(city => {
+                const age = city.google_panos_age_stats.median_age_years;
+                return {
+                    x: city.panorama_counts.unique_google_panos,
+                    y: age,
+                    city: city,
+                    backgroundColor: getColor(age)
+                };
+            });
+            console.log('Pano data points:', panoData);
+
+            // Create pano count vs age scatter plot
+            const panoCtx = document.getElementById('panoScatter').getContext('2d');
+            
+            try {
+                const panoChart = new Chart(panoCtx, {
+                    type: 'scatter',
+                    data: {
+                        datasets: [{
+                            label: 'Cities',
+                            data: panoData,
+                            backgroundColor: panoData.map(d => d.backgroundColor),
+                            pointRadius: 8,
+                            pointHoverRadius: 12,
+                            borderColor: 'rgba(0,0,0,0.2)',  // Add border
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: false,  // Disable animation for debugging
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Pano Count vs Median Age'
+                            },
+                            tooltip: {
+                                enabled: true,  // Ensure tooltips are enabled
+                                callbacks: {
+                                    label: (context) => {
+                                        const cityName = context.raw.city.city || context.raw.city.state;
+                                        return `${cityName}: ${context.raw.x.toLocaleString()} panos, ${context.raw.y.toFixed(1)} years`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                type: 'logarithmic',
+                                position: 'bottom',
+                                title: {
+                                    display: true,
+                                    text: 'Total Panos (log scale)'
+                                },
+                                min: 100
+                            },
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Median Age (years)'
+                                }
+                            }
+                        }
+                    }
                 });
-
-                // Make load button work
-                document.getElementById('loadButton').addEventListener('click', () => {
-                    app.loadSelectedCity();
-                });
-            } else {
-                console.log('App already initialized, skipping');
+            } catch (error) {
+                console.error('Error creating pano scatter plot:', error);
             }
-        });
+
+            // Prepare and create area scatter plot similarly
+            const areaData = cities.map(city => {
+                const age = city.google_panos_age_stats.median_age_years;
+                return {
+                    x: city.search_area_km2,
+                    y: age,
+                    city: city,
+                    backgroundColor: getColor(age)
+                };
+            });
+            console.log('Area data points:', areaData);
+
+            const areaCtx = document.getElementById('areaScatter').getContext('2d');
+            
+            try {
+                const areaChart = new Chart(areaCtx, {
+                    type: 'scatter',
+                    data: {
+                        datasets: [{
+                            label: 'Cities',
+                            data: areaData,
+                            backgroundColor: areaData.map(d => d.backgroundColor),
+                            pointRadius: 8,
+                            pointHoverRadius: 12,
+                            borderColor: 'rgba(0,0,0,0.2)',  // Add border
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: false,  // Disable animation for debugging
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Area vs Median Age'
+                            },
+                            tooltip: {
+                                enabled: true,  // Ensure tooltips are enabled
+                                callbacks: {
+                                    label: (context) => {
+                                        const cityName = context.raw.city.city || context.raw.city.state;
+                                        return `${cityName}: ${context.raw.x.toFixed(1)} km², ${context.raw.y.toFixed(1)} years`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                type: 'logarithmic',
+                                position: 'bottom',
+                                title: {
+                                    display: true,
+                                    text: 'Area (km², log scale)'
+                                },
+                                min: 1
+                            },
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Median Age (years)'
+                                }
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Error creating area scatter plot:', error);
+            }
+        }
+
+        function createLegend(maxAge) {
+            const legend = document.getElementById('legend');
+            const grades = [0, maxAge/4, maxAge/2, 3*maxAge/4, maxAge];
+            
+            legend.innerHTML = '<h4>Median Age (years)</h4>';
+            
+            for (let i = 0; i < grades.length - 1; i++) {
+                legend.innerHTML +=
+                    '<div style="display: flex; align-items: center; margin: 5px 0;">' +
+                    `<i style="background: ${getColor(grades[i])}; width: 20px; height: 20px; display: inline-block; margin-right: 5px;"></i>` +
+                    `${grades[i].toFixed(1)} &ndash; ${grades[i + 1].toFixed(1)}` +
+                    '</div>';
+            }
+        }
+
+        async function loadData() {
+            try {
+                const rawUrl = 'https://raw.githubusercontent.com/jonfroehlich/gsv-tracker/main/data/cities.json.gz';
+                const response = await fetch(rawUrl);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                
+                const compressed = await response.arrayBuffer();
+                const decompressed = pako.inflate(new Uint8Array(compressed), { to: 'string' });
+                const data = JSON.parse(decompressed);
+                const cities = data.cities;
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('stats').innerHTML = `
+                    <strong>GSV City Coverage Analysis</strong><br>
+                    ${data.cities_count} cities analyzed | Updated: ${new Date(data.creation_timestamp).toLocaleString()}
+                `;
+
+                const maxAge = Math.max(...cities.map(city => city.google_panos_age_stats.median_age_years));
+                createLegend(maxAge);
+
+                cities.forEach(city => {
+                    const bounds = [
+                        [city.bounds.min_lat, city.bounds.min_lon],
+                        [city.bounds.max_lat, city.bounds.max_lon]
+                    ];
+
+                    const rectangle = L.rectangle(bounds, {
+                        color: getColor(city.google_panos_age_stats.median_age_years),
+                        weight: 1,
+                        fillOpacity: 0.6
+                    }).addTo(map);
+
+                    rectangle.bindPopup(createTooltip(city));
+
+                    rectangle.on('mouseover', function (e) {
+                        this.setStyle({
+                            weight: 3,
+                            fillOpacity: 0.8
+                        });
+                    });
+
+                    rectangle.on('mouseout', function (e) {
+                        this.setStyle({
+                            weight: 1,
+                            fillOpacity: 0.6
+                        });
+                    });
+                });
+
+                createScatterPlots(cities);
+
+                const allBounds = cities.map(city => [
+                    [city.bounds.min_lat, city.bounds.min_lon],
+                    [city.bounds.max_lat, city.bounds.max_lon]
+                ]);
+                map.fitBounds(allBounds);
+
+            } catch (error) {
+                console.error('Error loading data:', error);
+                document.getElementById('loading').innerHTML = 'Error loading city data. Please check the console for details.';
+            }
+        }
+
+        loadData();
     </script>
 </body>
 </html>
