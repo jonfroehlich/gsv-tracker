@@ -3,7 +3,13 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 import os
-from typing import Optional, Dict, Any
+from tqdm import tqdm
+from typing import Optional, Dict, Any, List
+import logging
+from .fileutils import load_city_csv_file, get_list_of_city_csv_files, parse_filename
+from .geoutils import get_city_location_data
+
+logger = logging.getLogger(__name__)
 
 # Define constants for age statistics structure
 EMPTY_AGE_STATS = {
@@ -139,28 +145,112 @@ def calculate_pano_stats(df: pd.DataFrame, copyright_filter_condition: Optional[
                 "age_percentiles_years": EMPTY_PERCENTILES
             }
         }
+    
+def find_missing_json_files(data_dir: str) -> List[str]:
+    """
+    Find all csv.gz files that don't have corresponding JSON files.
+    
+    Args:
+        data_dir: Directory to search for files
+        
+    Returns:
+        List of paths to csv.gz files needing JSON metadata
+    """
+    csv_files = get_list_of_city_csv_files()
+    
+    missing_json = []
+    for csv_file in csv_files:
+        json_file = csv_file.rsplit('.csv.gz', 1)[0] + '.json'
+        if not os.path.exists(json_file):
+            missing_json.append(csv_file)
+    
+    return missing_json
 
-def save_metadata_summary_as_json(
+def generate_missing_city_json_files(data_dir: str) -> None:
+    """Generate missing JSON metadata files for all csv.gz files in directory."""
+    logger.info(f"Scanning {data_dir} for csv.gz files missing JSON metadata...")
+    
+    all_csv_files = get_list_of_city_csv_files(data_dir)
+    missing_files = find_missing_json_files(data_dir)
+    
+    if not missing_files:
+        file_text = "file" if len(all_csv_files) == 1 else "files"
+        logger.info(f"Found {len(all_csv_files)} csv.gz {file_text}. All csv.gz files already have a corresponding .json metadata file.")
+        return
+    
+    file_text = "file" if len(missing_files) == 1 else "files"
+    logger.info(f"Found {len(missing_files)} of {len(all_csv_files)} {file_text} needing a .json metadata file.")
+    
+    cnt_generated_json_files = 0
+    for csv_path in tqdm(missing_files, desc="Generating metadata .json files"):
+        try:
+            params = parse_filename(csv_path)
+            city_name = params['city_name']
+            search_width = params['width_meters']
+            search_height = params['height_meters']
+            step = params['step_meters']
+            
+            df = load_city_csv_file(csv_path)
+
+            center_lat = float(df['query_lat'].mean())
+            center_lon = float(df['query_lon'].mean())
+            
+            # country_name = infer_country(city_name, center_lat, center_lon)
+            city_loc_data = get_city_location_data(city_name)
+
+            generate_city_metadata_summary_as_json(
+                csv_gz_path=csv_path,
+                df=df,
+                city_name=city_loc_data.city,
+                state_name=city_loc_data.state,
+                country_name=city_loc_data.country,
+                grid_width=search_width,
+                grid_height=search_height,
+                step_length=step
+            )
+            
+            logger.debug(f"Generated .json metadata for {csv_path} at {city_loc_data.city}, {city_loc_data.state}, {city_loc_data.country}")
+            cnt_generated_json_files += 1
+        except Exception as e:
+            logger.error(f"Error processing {csv_path}: {str(e)}")
+            continue
+    
+    logger.info(f"Metadata generation completed for {cnt_generated_json_files} file(s).")
+
+def generate_city_metadata_summary_as_json(
     csv_gz_path: str,
     df: pd.DataFrame,
     city_name: str,
+    state_name: str,
     country_name: str,
     grid_width: float,
     grid_height: float,
-    step_length: float
-) -> None:
+    step_length: float,
+    force_recreate_file: bool = False
+) -> str:
     """
-    Save download statistics and metadata to a JSON file.
+    Generate and save download statistics and metadata to a JSON file.
+
+    Returns the .json filename with path
     
     Args:
         csv_gz_path: Full path to the compressed CSV file (including filename)
         df: DataFrame containing the GSV data
         city_name: Name of the city
+        state_name: Name of the state (if one exists)
         country_name: Name of the country
         grid_width: Width of search grid in meters
         grid_height: Height of search grid in meters
         step_length: Distance between sample points in meters
+        force_recreate_file: forces the recreation of the .json file (defaults False)
     """
+
+    # Generate JSON path by replacing .csv.gz extension with .json
+    json_filename_with_path = csv_gz_path.rsplit('.csv.gz', 1)[0] + '.json'
+
+    if os.path.exists(json_filename_with_path) and not force_recreate_file:
+        print(f"JSON file already exists: {json_filename_with_path}; returning...")
+        return json_filename_with_path
   
     # Check for any problematic conversions
     missing_dates = df[(df['status'] == 'OK') & (df['capture_date'].isna())]
@@ -256,6 +346,7 @@ def save_metadata_summary_as_json(
         },
         "city": {
             "name": city_name,
+            "state": state_name,
             "country": country_name,
             "center": {
                 "latitude": center_lat,
@@ -291,8 +382,105 @@ def save_metadata_summary_as_json(
         }
     }
     
-    # Generate JSON path by replacing .csv.gz extension with .json
-    json_path = csv_gz_path.rsplit('.csv.gz', 1)[0] + '.json'
-    
-    with open(json_path, 'w') as f:
+    with open(json_filename_with_path, 'w') as f:
         json.dump(metadata, f, indent=2)
+
+    return json_filename_with_path
+
+def generate_aggregate_summary_as_json(json_dir: str) -> Dict[str, Any]:
+    """
+    Generate and save a summary of all city JSON files in the specified directory.
+    
+    Args:
+        json_path: Path to directory containing city JSON files
+        
+    Returns:
+        Dictionary containing aggregated city summaries
+    """
+    
+    cities_data = []
+    
+    # Find all JSON files in directory
+    json_files = [f for f in os.listdir(json_dir) if f.endswith('.json') and f != 'cities.json']
+    print(f"Found {len(json_files)} JSON files in {json_dir}")
+
+    for json_file in tqdm(json_files, desc="Processing city files", unit="file"):
+        file_path = os.path.join(json_dir, json_file)
+        
+        try:
+            with open(file_path, 'r') as f:
+                city_data = json.load(f)
+                
+            # Extract relevant information
+            city_summary = {
+                # Basic information
+                "city": city_data["city"]["name"],
+                "state": city_data["city"]["state"],
+                "country": city_data["city"]["country"],
+                
+                # Location information
+                "center": {
+                    "latitude": city_data["city"]["center"]["latitude"],
+                    "longitude": city_data["city"]["center"]["longitude"]
+                },
+                "bounds": city_data["city"]["bounds"],
+                
+                # File information
+                "data_file": {
+                    "filename": city_data["data_file"]["filename"],
+                    "size_bytes": city_data["data_file"]["size_bytes"]
+                },
+                
+                # Coverage information
+                "search_area_km2": city_data["search_grid"]["area_km2"],
+                "coverage_rate_percent": city_data["coverage"]["coverage_rate"],
+                
+                # Panorama counts
+                "panorama_counts": {
+                    "unique_panos": city_data["all_panos"]["duplicate_stats"]["total_unique_panos"],
+                    "unique_google_panos": city_data["google_panos"]["duplicate_stats"]["total_unique_panos"]
+                },
+                
+                # Age statistics for unique panoramas
+                "all_panos_age_stats": {
+                    "avg_age_years": city_data["all_panos"]["age_stats"]["avg_pano_age_years"],
+                    "median_age_years": city_data["all_panos"]["age_stats"]["median_pano_age_years"],
+                    "oldest_date": city_data["all_panos"]["age_stats"]["oldest_pano_date"],
+                    "newest_date": city_data["all_panos"]["age_stats"]["newest_pano_date"],
+                    "stdev_age_years": city_data["all_panos"]["age_stats"]["stdev_pano_age_years"],
+                },
+
+                "google_panos_age_stats": {
+                    "avg_age_years": city_data["google_panos"]["age_stats"]["avg_pano_age_years"],
+                    "median_age_years": city_data["google_panos"]["age_stats"]["median_pano_age_years"],
+                    "oldest_date": city_data["google_panos"]["age_stats"]["oldest_pano_date"],
+                    "newest_date": city_data["google_panos"]["age_stats"]["newest_pano_date"],
+                    "stdev_age_years": city_data["google_panos"]["age_stats"]["stdev_pano_age_years"],
+                },
+                
+                # Collection metadata
+                "collection_info": {
+                    "start_time": city_data["download"]["start_time"],
+                    "end_time": city_data["download"]["end_time"],
+                    "duration_seconds": city_data["download"]["duration_seconds"]
+                },
+            }
+            
+            cities_data.append(city_summary)
+            
+        except Exception as e:
+            print(f"Error processing {json_file}: {str(e)}")
+    
+    # Create the final summary
+    summary = {
+        "cities_count": len(cities_data),
+        "creation_timestamp": pd.Timestamp.now().isoformat(),
+        "cities": cities_data
+    }
+    
+    # Save to cities.json
+    output_path = os.path.join(json_dir, 'cities.json')
+    with open(output_path, 'w') as f:
+        json.dump(summary, f, indent=2)
+    
+    return summary
