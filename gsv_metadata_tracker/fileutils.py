@@ -22,10 +22,11 @@ def get_list_of_city_csv_files(data_dir = None) -> List[str]:
 def load_city_csv_file(csv_path: str) -> pd.DataFrame:
     """
     Read a CSV file into a DataFrame, automatically detecting if it's gzipped based on file extension.
+    Handles YYYY-MM format (most common) and YYYY-MM-DD format for capture_date.
+    Uses modern pandas datetime parsing methods.
     
     Args:
         csv_path: Path to the CSV file (can be either .csv or .csv.gz)
-        metadata_dtypes: Dictionary of column names and their corresponding data types
     
     Returns:
         pd.DataFrame: Loaded and processed DataFrame
@@ -48,15 +49,29 @@ def load_city_csv_file(csv_path: str) -> pd.DataFrame:
         raise ValueError(f"Unsupported file format. Expected .csv or .csv.gz, got: {file_path.suffix}")
     
     try:
+        # Read CSV with query_timestamp as object type first
         df = pd.read_csv(
             csv_path,
-            dtype=METADATA_DTYPES,
-            parse_dates=['query_timestamp'],
-            compression=compression
+            dtype={METADATA_DTYPES},
+            compression=compression,
+            parse_dates=['query_timestamp']
         )
         
-        # Handle capture_date separately with specific format
-        df['capture_date'] = pd.to_datetime(df['capture_date'], format='%Y-%m', errors='coerce')
+        # Handle capture_date with optimized parsing order
+        def parse_capture_date(date_str):
+            if pd.isna(date_str):
+                return pd.NaT
+            try:
+                # Try YYYY-MM format first since it's most common
+                return pd.to_datetime(date_str, format='%Y-%m')
+            except ValueError:
+                try:
+                    # Fall back to YYYY-MM-DD format
+                    return pd.to_datetime(date_str, format='%Y-%m-%d')
+                except ValueError:
+                    return pd.NaT
+
+        df['capture_date'] = df['capture_date'].apply(parse_capture_date)
         
         return df
         
