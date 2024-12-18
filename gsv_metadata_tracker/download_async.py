@@ -14,21 +14,13 @@ import aiohttp
 from filelock import FileLock
 from pathlib import Path
 import backoff
-from .fileutils import generate_base_filename
+
+from .geoutils import get_city_location_data
+from .fileutils import generate_base_filename, load_city_csv_file
+from .json_summarizer import generate_aggregate_summary_as_json
+from .config import METADATA_DTYPES
 
 logger = logging.getLogger(__name__)
-
-METADATA_DTYPES = {
-    'query_lat': float,
-    'query_lon': float,
-    'query_timestamp': str,
-    'pano_lat': float,
-    'pano_lon': float,
-    'pano_id': str,
-    'copyright_info': str,
-    'status': str
-    # capture_date handled by parse_dates
-}
 
 class DownloadError(Exception):
     """Custom exception for download-related errors."""
@@ -258,7 +250,7 @@ async def download_gsv_metadata_async(
     connection_limit: int = 50,
     request_timeout: float = 30.0,
     max_retries: int = 3
-) -> pd.DataFrame:
+) -> Dict[str, Any]:
     """
     Fetch GSV metadata for a city using async/await pattern with safe intermediate file saving.
     
@@ -302,13 +294,14 @@ async def download_gsv_metadata_async(
     failed_points_file = os.path.join(download_path, f"{base_filename}_failed_points.csv")
 
     try:
-        # Check if compressed file exists
+        # Check if compressed file exists. If it does, read it in and return the df
         if os.path.exists(file_name_compressed_with_path):
             logger.info(f"Found completed compressed file: {file_name_compressed_with_path}")
-            return pd.read_csv(file_name_compressed_with_path, 
-                               dtype=METADATA_DTYPES,
-                               compression='gzip', 
-                               parse_dates=['capture_date'])
+            df = load_city_csv_file(file_name_compressed_with_path)
+            return {
+                "df": df,
+                "filename_with_path": file_name_compressed_with_path
+            }
 
         # Calculate grid dimensions
         width_steps = int(grid_width / step_length)
@@ -422,19 +415,17 @@ async def download_gsv_metadata_async(
         os.remove(file_name_with_path)
         
         # Read the final compressed file
-        df = pd.read_csv(
-            file_name_compressed_with_path,
-            compression='gzip',
-            dtype=METADATA_DTYPES,
-            parse_dates=['capture_date'],
-            low_memory=False)
-        
+        df = load_city_csv_file(file_name_compressed_with_path)
+ 
         end_time = time.time()
         elapsed_time = end_time - start_time
         logger.info(f"Downloaded {len(df)} rows in {elapsed_time:.2f} seconds")
         logger.info(f"Data compressed and saved to {file_name_compressed_with_path}")
         
-        return df
+        return {
+                "df": df,
+                "filename_with_path": file_name_compressed_with_path
+            }
         
     except Exception as e:
         raise DownloadError(f"Download failed: {str(e)}")

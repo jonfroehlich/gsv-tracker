@@ -1,14 +1,69 @@
-import os, re
+import os, re, glob
 import logging
 import zipfile
-from typing import Tuple, Optional
+from typing import Tuple, Dict, Union, Optional, List
 import pandas as pd
 from pathlib import Path
 import platform
 import subprocess
 import webbrowser
+from .config import METADATA_DTYPES
+from .paths import get_default_data_dir, get_default_vis_dir
 
 logger = logging.getLogger(__name__)
+
+def get_list_of_city_csv_files(data_dir = None) -> List[str]:
+    if data_dir is None:
+        data_dir = get_default_data_dir()
+
+    csv_files = glob.glob(os.path.join(data_dir, "**/*.csv.gz"), recursive=True)
+    return csv_files
+
+def load_city_csv_file(csv_path: str) -> pd.DataFrame:
+    """
+    Read a CSV file into a DataFrame, automatically detecting if it's gzipped based on file extension.
+    
+    Args:
+        csv_path: Path to the CSV file (can be either .csv or .csv.gz)
+        metadata_dtypes: Dictionary of column names and their corresponding data types
+    
+    Returns:
+        pd.DataFrame: Loaded and processed DataFrame
+    
+    Raises:
+        ValueError: If the file extension is neither .csv nor .csv.gz
+        FileNotFoundError: If the specified file doesn't exist
+    """
+    file_path = Path(csv_path)
+    
+    if not file_path.exists():
+        raise FileNotFoundError(f"File not found: {csv_path}")
+    
+    # Determine compression based on file extension
+    if file_path.suffix == '.gz' or str(file_path).endswith('.csv.gz'):
+        compression = 'gzip'
+    elif file_path.suffix == '.csv':
+        compression = None
+    else:
+        raise ValueError(f"Unsupported file format. Expected .csv or .csv.gz, got: {file_path.suffix}")
+    
+    try:
+        df = pd.read_csv(
+            csv_path,
+            dtype=METADATA_DTYPES,
+            parse_dates=['query_timestamp'],
+            compression=compression
+        )
+        
+        # Handle capture_date separately with specific format
+        df['capture_date'] = pd.to_datetime(df['capture_date'], format='%Y-%m', errors='coerce')
+        
+        return df
+        
+    except pd.errors.EmptyDataError:
+        raise ValueError(f"The file {csv_path} is empty")
+    except pd.errors.ParserError as e:
+        raise ValueError(f"Error parsing file {csv_path}: {str(e)}")
 
 def get_default_data_dir() -> str:
     """
@@ -51,6 +106,46 @@ def sanitize_city_name(city_name: str) -> str:
     # Convert to lowercase
     sanitized = sanitized.lower()
     return sanitized
+
+def parse_filename(filename: str) -> Dict[str, Union[str, float]]:
+    """
+    Parse a GSV metadata filename to extract parameters.
+    Expected format: city_state_width_[num]_height_[num]_step_[num].csv.gz
+    
+    Args:
+        filename: Name of the CSV file
+        
+    Returns:
+        Dictionary containing:
+            - city_name: Name of the city
+            - location_code: State/country code (e.g., 'wa', 'nl', etc.)
+            - width_meters: Width of the search grid in meters
+            - height_meters: Height of the search grid in meters
+            - step_meters: Step size in meters
+        
+    Raises:
+        ValueError: If filename doesn't match expected format
+    """
+    base = os.path.basename(filename)
+    # Remove the .csv.gz extension
+    base = base.replace('.csv.gz', '')
+    
+    # Parse the components - matching city_state_width_X_height_Y_step_Z format
+    match = re.match(r'(.+?)_([a-z]+)_width_(\d+)_height_(\d+)_step_(\d+)$', base)
+    if not match:
+        raise ValueError(f"Filename {filename} doesn't match expected format: city_state_width_X_height_Y_step_Z.csv.gz")
+    
+    # Handle special cases where location code might be multi-part (e.g., taiwan, switzerland)
+    city_name = match.group(1)
+    location_code = match.group(2)
+    
+    return {
+        'city_name': city_name.replace('_', ' '),  # Convert underscores to spaces in city name
+        'location_code': location_code,
+        'width_meters': float(match.group(3)),
+        'height_meters': float(match.group(4)),
+        'step_meters': float(match.group(5))
+    }
 
 def generate_base_filename(
     city_name: str,
