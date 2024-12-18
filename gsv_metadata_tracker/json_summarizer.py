@@ -195,8 +195,8 @@ def generate_missing_city_json_files(data_dir: str) -> None:
             center_lat = float(df['query_lat'].mean())
             center_lon = float(df['query_lon'].mean())
             
-            # country_name = infer_country(city_name, center_lat, center_lon)
-            city_loc_data = get_city_location_data(city_name)
+            # Reverse geocode city name with lat,lng as hints
+            city_loc_data = get_city_location_data(city_name, center_lat, center_lon)
 
             generate_city_metadata_summary_as_json(
                 csv_gz_path=csv_path,
