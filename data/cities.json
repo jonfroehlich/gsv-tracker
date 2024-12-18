@@ -1,225 +1,49 @@
 {
-  "cities_count": 5,
-  "creation_timestamp": "2024-12-17T20:48:34.885867",
+  "cities_count": 1,
+  "creation_timestamp": "2024-12-18T05:12:24.192657",
   "cities": [
     {
-      "city": "Fall City",
-      "state": "Washington",
-      "country": "United States",
+      "city": "Victoria",
+      "state": "British Columbia",
+      "country": "Canada",
       "center": {
-        "latitude": 47.56595825969846,
-        "longitude": -121.88862561021882
+        "latitude": 48.42822618088731,
+        "longitude": -123.3650881247696
       },
       "bounds": {
-        "min_lat": 47.5542643534541,
-        "max_lat": 47.57783094110101,
-        "min_lon": -121.90775465324278,
-        "max_lon": -121.86947314675722
+        "min_lat": 48.40439078129798,
+        "max_lat": 48.45205944662699,
+        "min_lon": -123.4028056330482,
+        "max_lon": -123.32737074285856
       },
       "data_file": {
-        "filename": "fall_city_wa_width_2895_height_2630_step_20.csv.gz",
-        "size_bytes": 415477
+        "filename": "victoria_bc_width_5598_height_5302_step_20.csv.gz",
+        "size_bytes": 3259340
       },
-      "search_area_km2": 7.61385,
-      "coverage_rate_percent": 37.178556615512235,
+      "search_area_km2": 29.680596,
+      "coverage_rate_percent": 82.11197636949517,
       "panorama_counts": {
-        "unique_panos": 2242,
-        "unique_google_panos": 2175
+        "unique_panos": 27677,
+        "unique_google_panos": 23562
       },
       "all_panos_age_stats": {
-        "avg_age_years": 3.180529998611176,
-        "median_age_years": 1.7162682932916,
-        "oldest_date": "2008-08-01T00:00:00",
-        "newest_date": "2023-08-01T00:00:00",
-        "stdev_age_years": 4.018874875040629
-      },
-      "google_panos_age_stats": {
-        "avg_age_years": 3.1365633206956987,
-        "median_age_years": 1.7162682936712232,
-        "oldest_date": "2008-08-01T00:00:00",
-        "newest_date": "2023-04-01T00:00:00",
-        "stdev_age_years": 4.0466485554283285
-      },
-      "collection_info": {
-        "start_time": "2024-12-13T09:09:30.756213-08:00",
-        "end_time": "2024-12-13T09:31:39.807698-08:00",
-        "duration_seconds": 1329.051485
-      }
-    },
-    {
-      "city": "La Conner",
-      "state": "Washington",
-      "country": "United States",
-      "center": {
-        "latitude": 48.39188637887181,
-        "longitude": -122.494248
-      },
-      "bounds": {
-        "min_lat": 48.3825334561191,
-        "max_lat": 48.40123918357461,
-        "min_lon": -122.5031615157661,
-        "max_lon": -122.4853344842339
-      },
-      "data_file": {
-        "filename": "la_conner_wa_width_1333_height_2092_step_20.csv.gz",
-        "size_bytes": 144535
-      },
-      "search_area_km2": 2.788636,
-      "coverage_rate_percent": 42.41648898365316,
-      "panorama_counts": {
-        "unique_panos": 1155,
-        "unique_google_panos": 1039
-      },
-      "all_panos_age_stats": {
-        "avg_age_years": 1.562507633386957,
-        "median_age_years": 0.29532361959103354,
-        "oldest_date": "2008-08-01T00:00:00",
-        "newest_date": "2024-10-01T00:00:00",
-        "stdev_age_years": 2.435944032134509
-      },
-      "google_panos_age_stats": {
-        "avg_age_years": 1.0957615705234154,
-        "median_age_years": 0.29532361980077704,
-        "oldest_date": "2008-08-01T00:00:00",
-        "newest_date": "2024-09-01T00:00:00",
-        "stdev_age_years": 1.9299623440691542
-      },
-      "collection_info": {
-        "start_time": "2024-12-13T04:45:19-08:00",
-        "end_time": "2024-12-13T05:11:25-08:00",
-        "duration_seconds": 1566.0
-      }
-    },
-    {
-      "city": "Alden",
-      "state": "Iowa",
-      "country": "United States",
-      "center": {
-        "latitude": 43.67024804705989,
-        "longitude": -93.57619610000002
-      },
-      "bounds": {
-        "min_lat": 43.662957412642,
-        "max_lat": 43.6775385391512,
-        "min_lon": -93.5861168196036,
-        "max_lon": -93.56627538039642
-      },
-      "data_file": {
-        "filename": "alden_mn_width_1614_height_1623_step_20.csv.gz",
-        "size_bytes": 139787
-      },
-      "search_area_km2": 2.619522,
-      "coverage_rate_percent": 37.02198133092442,
-      "panorama_counts": {
-        "unique_panos": 843,
-        "unique_google_panos": 843
-      },
-      "all_panos_age_stats": {
-        "avg_age_years": 2.216739423458574,
-        "median_age_years": 1.2973769237326032,
+        "avg_age_years": 6.0935510581949215,
+        "median_age_years": 6.63440642314273,
         "oldest_date": "2009-06-01T00:00:00",
-        "newest_date": "2024-10-01T00:00:00",
-        "stdev_age_years": 1.7143596760808102
+        "newest_date": "2024-12-01T00:00:00",
+        "stdev_age_years": 3.7073601188689747
       },
       "google_panos_age_stats": {
-        "avg_age_years": 2.216739423712428,
-        "median_age_years": 1.2973769239864565,
+        "avg_age_years": 6.444788121910939,
+        "median_age_years": 7.3818396894734395,
         "oldest_date": "2009-06-01T00:00:00",
-        "newest_date": "2024-10-01T00:00:00",
-        "stdev_age_years": 1.7143596760808104
+        "newest_date": "2023-09-01T00:00:00",
+        "stdev_age_years": 3.7071290954906364
       },
       "collection_info": {
-        "start_time": "2024-12-17T20:26:39.808364-06:00",
-        "end_time": "2024-12-17T20:27:53.446794-06:00",
-        "duration_seconds": 73.63843
-      }
-    },
-    {
-      "city": "Coupeville",
-      "state": "Washington",
-      "country": "United States",
-      "center": {
-        "latitude": 48.218098723063456,
-        "longitude": -122.685807
-      },
-      "bounds": {
-        "min_lat": 48.20739510117352,
-        "max_lat": 48.2288015195964,
-        "min_lon": -122.70976561288494,
-        "max_lon": -122.66184838711506
-      },
-      "data_file": {
-        "filename": "coupeville_wa_width_3562_height_2391_step_20.csv.gz",
-        "size_bytes": 446372
-      },
-      "search_area_km2": 8.516742,
-      "coverage_rate_percent": 32.220670391061454,
-      "panorama_counts": {
-        "unique_panos": 2183,
-        "unique_google_panos": 2120
-      },
-      "all_panos_age_stats": {
-        "avg_age_years": 0.5546446157004493,
-        "median_age_years": 0.21318834371134054,
-        "oldest_date": "2008-08-01T00:00:00",
-        "newest_date": "2024-11-01T00:00:00",
-        "stdev_age_years": 1.5731660880278138
-      },
-      "google_panos_age_stats": {
-        "avg_age_years": 0.41115303611363785,
-        "median_age_years": 0.2131883440572794,
-        "oldest_date": "2008-08-01T00:00:00",
-        "newest_date": "2024-11-01T00:00:00",
-        "stdev_age_years": 1.273246417019248
-      },
-      "collection_info": {
-        "start_time": "2024-12-13T09:36:32.290782-08:00",
-        "end_time": "2024-12-13T09:45:43.983636-08:00",
-        "duration_seconds": 551.692854
-      }
-    },
-    {
-      "city": "Winthrop",
-      "state": "Massachusetts",
-      "country": "United States",
-      "center": {
-        "latitude": 48.47783295353258,
-        "longitude": -120.18619500000001
-      },
-      "bounds": {
-        "min_lat": 48.467130858601294,
-        "max_lat": 48.48853473805023,
-        "min_lon": -120.20080576992488,
-        "max_lon": -120.17158423007513
-      },
-      "data_file": {
-        "filename": "winthrop_wa_width_2173_height_2390_step_20.csv.gz",
-        "size_bytes": 268047
-      },
-      "search_area_km2": 5.19347,
-      "coverage_rate_percent": 25.237003058103973,
-      "panorama_counts": {
-        "unique_panos": 1497,
-        "unique_google_panos": 366
-      },
-      "all_panos_age_stats": {
-        "avg_age_years": null,
-        "median_age_years": null,
-        "oldest_date": null,
-        "newest_date": null,
-        "stdev_age_years": null
-      },
-      "google_panos_age_stats": {
-        "avg_age_years": null,
-        "median_age_years": null,
-        "oldest_date": null,
-        "newest_date": null,
-        "stdev_age_years": null
-      },
-      "collection_info": {
-        "start_time": "2024-12-12T17:34:03-08:00",
-        "end_time": "2024-12-12T18:15:48-08:00",
-        "duration_seconds": 2505.0
+        "start_time": "2024-12-16T07:33:29.911815-06:00",
+        "end_time": "2024-12-16T07:38:27.114586-06:00",
+        "duration_seconds": 297.202771
       }
     }
   ]
