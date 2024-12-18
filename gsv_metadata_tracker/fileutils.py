@@ -35,6 +35,8 @@ def load_city_csv_file(csv_path: str) -> pd.DataFrame:
         ValueError: If the file extension is neither .csv nor .csv.gz
         FileNotFoundError: If the specified file doesn't exist
     """
+    logger.debug(f"Loading CSV file: {csv_path}")
+
     file_path = Path(csv_path)
     
     if not file_path.exists():
@@ -49,30 +51,35 @@ def load_city_csv_file(csv_path: str) -> pd.DataFrame:
         raise ValueError(f"Unsupported file format. Expected .csv or .csv.gz, got: {file_path.suffix}")
     
     try:
+        logger.debug(f"Reading CSV file with compression: {compression}")
+
         # Read CSV with query_timestamp as object type first
         df = pd.read_csv(
             csv_path,
-            dtype={METADATA_DTYPES},
+            dtype=METADATA_DTYPES,
             compression=compression,
-            parse_dates=['query_timestamp']
+            parse_dates=['query_timestamp', 'capture_date']
         )
         
         # Handle capture_date with optimized parsing order
-        def parse_capture_date(date_str):
-            if pd.isna(date_str):
-                return pd.NaT
-            try:
-                # Try YYYY-MM format first since it's most common
-                return pd.to_datetime(date_str, format='%Y-%m')
-            except ValueError:
-                try:
-                    # Fall back to YYYY-MM-DD format
-                    return pd.to_datetime(date_str, format='%Y-%m-%d')
-                except ValueError:
-                    return pd.NaT
+        # def parse_capture_date(date_str):
+        #     if pd.isna(date_str):
+        #         return pd.NaT
+        #     try:
+        #         # Try YYYY-MM format first since it's most common
+        #         return pd.to_datetime(date_str, format='%Y-%m')
+        #     except ValueError:
+        #         try:
+        #             # Fall back to YYYY-MM-DD format
+        #             return pd.to_datetime(date_str, format='%Y-%m-%d')
+        #         except ValueError:
+        #             return pd.NaT
 
-        df['capture_date'] = df['capture_date'].apply(parse_capture_date)
+        # df['capture_date'] = df['capture_date'].apply(parse_capture_date)
         
+        logger.debug(f"Loaded {len(df)} rows from {csv_path}")
+        logger.debug(f"The DataFrame has columns: {df.columns} with dtypes: {df.dtypes}")
+
         return df
         
     except pd.errors.EmptyDataError:
