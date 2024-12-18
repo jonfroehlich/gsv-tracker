@@ -90,10 +90,13 @@ def calculate_pano_stats(df: pd.DataFrame, copyright_filter_condition: Optional[
         Dictionary containing panorama statistics including status breakdown and age statistics
         for successful panoramas
     """
+    logger.debug(f"Calculating panorama statistics for {len(df)} entries; the copyright filter is '{copyright_filter_condition}'")
+
     # Apply copyright filter if specified
     filtered_df = df[df['copyright_info'].str.contains(copyright_filter_condition, na=False)] if copyright_filter_condition else df
     
     # Get status breakdown for all entries
+    logger.debug(f"Calculating status breakdown for {len(filtered_df)} entries...")
     status_counts = filtered_df['status'].value_counts().to_dict()
     total_entries = len(filtered_df)
     
@@ -105,12 +108,15 @@ def calculate_pano_stats(df: pd.DataFrame, copyright_filter_condition: Optional[
         }
         for status, count in status_counts.items()
     }
+    logger.debug(f"Status breakdown: {status_breakdown}")
 
     # Filter to successful panoramas
     ok_panos = filtered_df[filtered_df['status'] == 'OK']
+    logger.debug(f"Filtered to {len(ok_panos)} panoramas with status 'OK'")
     
     # Calculate duplicate pano stats
     pano_id_counts = ok_panos['pano_id'].value_counts()
+    logger.debug(f"Found {len(pano_id_counts)} unique pano ids across {len(ok_panos)} entries")
     duplicate_stats = {
         "total_unique_panos": len(pano_id_counts),
         "total_pano_references": len(ok_panos),
@@ -119,13 +125,16 @@ def calculate_pano_stats(df: pd.DataFrame, copyright_filter_condition: Optional[
         "panos_with_multiple_refs": int((pano_id_counts > 1).sum()),
         "average_references_per_pano": float(len(ok_panos) / len(pano_id_counts)) if len(pano_id_counts) > 0 else 0
     }
+    logger.debug(f"Duplicate pano stats: {duplicate_stats}")
 
     try:
         # Get unique panoramas by taking the first occurrence of each pano_id
         unique_panos = ok_panos.drop_duplicates(subset=['pano_id'])
         
         # Calculate age stats for unique panoramas
+        logger.debug(f"Calculating age statistics for {len(unique_panos)} unique panoramas...")
         age_stats = calculate_age_stats(unique_panos, pd.Timestamp.now())
+        logger.debug(f"Age statistics: {age_stats}")
         
         return {
             "total_entries": total_entries,
@@ -190,6 +199,8 @@ def generate_missing_city_json_files(data_dir: str) -> None:
             search_width = params['width_meters']
             search_height = params['height_meters']
             step = params['step_meters']
+
+            logger.debug(f"Parsed filename into city: {city_name}, width: {search_width}, height: {search_height}, step: {step}")
             
             df = load_city_csv_file(csv_path)
 
@@ -198,6 +209,8 @@ def generate_missing_city_json_files(data_dir: str) -> None:
             
             # Reverse geocode city name with lat,lng as hints
             city_loc_data = get_city_location_data(city_name, center_lat, center_lon)
+
+            logger.debug(f"Generating .json metadata for {csv_path} at {city_loc_data.city}, {city_loc_data.state}, {city_loc_data.country}")
 
             generate_city_metadata_summary_as_json(
                 csv_gz_path=csv_path,
