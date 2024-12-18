@@ -1,0 +1,127 @@
+{
+  "data_file": {
+    "filename": "la_conner_wa_width_1333_height_2092_step_20.csv.gz",
+    "format": "csv.gz",
+    "rows": 7035,
+    "size_bytes": 144535
+  },
+  "city": {
+    "name": "La Conner",
+    "state": "Washington",
+    "country": "United States",
+    "center": {
+      "latitude": 48.39188637887181,
+      "longitude": -122.494248
+    },
+    "bounds": {
+      "min_lat": 48.3825334561191,
+      "max_lat": 48.40123918357461,
+      "min_lon": -122.5031615157661,
+      "max_lon": -122.4853344842339
+    }
+  },
+  "search_grid": {
+    "width_meters": 1333.0,
+    "height_meters": 2092.0,
+    "step_length_meters": 20.0,
+    "diagonal_meters": 2480.5952914572745,
+    "total_search_points": 7035,
+    "area_km2": 2.788636
+  },
+  "download": {
+    "start_time": "2024-12-13T04:45:19-08:00",
+    "end_time": "2024-12-13T05:11:25-08:00",
+    "duration_seconds": 1566.0
+  },
+  "coverage": {
+    "points_with_panos": 2984,
+    "points_without_panos": 4050,
+    "points_with_errors": 0,
+    "coverage_rate": 42.41648898365316,
+    "pano_distance_stats": {
+      "min_meters": 0.5406653039491464,
+      "max_meters": 160.94537282593186,
+      "avg_meters": 35.79105947903522,
+      "median_meters": 29.790381470138133,
+      "stdev_meters": 27.61508631745795
+    }
+  },
+  "all_panos": {
+    "total_entries": 7035,
+    "status_breakdown": {
+      "ZERO_RESULTS": {
+        "count": 4050,
+        "percentage": 57.56929637526652
+      },
+      "OK": {
+        "count": 2984,
+        "percentage": 42.41648898365316
+      },
+      "UNKNOWN_ERROR": {
+        "count": 1,
+        "percentage": 0.014214641080312722
+      }
+    },
+    "duplicate_stats": {
+      "total_unique_panos": 1155,
+      "total_pano_references": 2984,
+      "duplicate_reference_count": 1829,
+      "most_referenced_count": 19,
+      "panos_with_multiple_refs": 809,
+      "average_references_per_pano": 2.5835497835497834
+    },
+    "age_stats": {
+      "count": 1155,
+      "valid_dates_count": 1155,
+      "invalid_dates_count": 0,
+      "oldest_pano_date": "2008-08-01T00:00:00",
+      "newest_pano_date": "2024-10-01T00:00:00",
+      "avg_pano_age_years": 1.562507633386957,
+      "median_pano_age_years": 0.29532361959103354,
+      "stdev_pano_age_years": 2.435944032134509,
+      "age_percentiles_years": {
+        "p10": 0.29532361959103354,
+        "p25": 0.29532361959103354,
+        "p75": 0.5472058920071868,
+        "p90": 5.549259280097536
+      }
+    }
+  },
+  "google_panos": {
+    "total_entries": 2666,
+    "status_breakdown": {
+      "OK": {
+        "count": 2666,
+        "percentage": 100.0
+      }
+    },
+    "duplicate_stats": {
+      "total_unique_panos": 1039,
+      "total_pano_references": 2666,
+      "duplicate_reference_count": 1627,
+      "most_referenced_count": 18,
+      "panos_with_multiple_refs": 754,
+      "average_references_per_pano": 2.5659287776708375
+    },
+    "age_stats": {
+      "count": 1039,
+      "valid_dates_count": 1039,
+      "invalid_dates_count": 0,
+      "oldest_pano_date": "2008-08-01T00:00:00",
+      "newest_pano_date": "2024-09-01T00:00:00",
+      "avg_pano_age_years": 1.0957615705234154,
+      "median_pano_age_years": 0.29532361980077704,
+      "stdev_pano_age_years": 1.9299623440691542,
+      "age_percentiles_years": {
+        "p10": 0.29532361980077704,
+        "p25": 0.29532361980077704,
+        "p75": 0.29532361980077704,
+        "p90": 5.549259280307279
+      }
+    }
+  },
+  "timestamps": {
+    "json_file_created": "2024-12-17T20:48:24.666664",
+    "timezone": "CST"
+  }
+}

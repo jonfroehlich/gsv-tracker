@@ -1,277 +1,226 @@
 {
-    "version": "1.0",
-    "last_updated": "2024-12-15",
-    "cities": [
-      {
-        "name": "Albert Lea",
-        "state": "Minnesota",
-        "country": "USA",
-        "filename": "albert_lea_mn_width_9689_height_10878_step_20.csv.gz",
-        "grid": {
-          "width_meters": 9689,
-          "height_meters": 10878
-        },
-        "file_size_mb": 6.4
+  "cities_count": 5,
+  "creation_timestamp": "2024-12-17T20:48:34.885867",
+  "cities": [
+    {
+      "city": "Fall City",
+      "state": "Washington",
+      "country": "United States",
+      "center": {
+        "latitude": 47.56595825969846,
+        "longitude": -121.88862561021882
       },
-      {
-        "name": "Alden",
-        "state": "Minnesota",
-        "country": "USA",
-        "filename": "alden_mn_width_1614_height_1623_step_20.csv.gz",
-        "grid": {
-          "width_meters": 1614,
-          "height_meters": 1623
-        },
-        "file_size_mb": 0.14
+      "bounds": {
+        "min_lat": 47.5542643534541,
+        "max_lat": 47.57783094110101,
+        "min_lon": -121.90775465324278,
+        "max_lon": -121.86947314675722
       },
-      {
-        "name": "Ames",
-        "state": "Iowa",
-        "country": "USA",
-        "filename": "ames_ia_width_14683_height_11442_step_20.csv.gz",
-        "grid": {
-          "width_meters": 14683,
-          "height_meters": 11442
-        },
-        "file_size_mb": 11.8
-      },
-      {
-        "name": "Amsterdam",
-        "country": "Netherlands",
-        "filename": "amsterdam_nl_width_23873_height_17012_step_20.csv.gz",
-        "grid": {
-          "width_meters": 23873,
-          "height_meters": 17012
-        },
-        "file_size_mb": 37.1
-      },
-      {
-        "name": "Anacortes",
-        "state": "Washington",
-        "country": "USA",
-        "filename": "anacortes_wa_width_13031_height_8278_step_20.csv.gz",
-        "grid": {
-          "width_meters": 13031,
-          "height_meters": 8278
-        },
-        "file_size_mb": 5.6
-      },
-      {
-        "name": "Auckland",
-        "country": "New Zealand",
-        "filename": "auckland_nz_width_28538_height_35511_step_20.csv.gz",
-        "grid": {
-          "width_meters": 28538,
-          "height_meters": 35511
-        },
-        "file_size_mb": 76.0
-      },
-      {
-        "name": "Bellingham",
-        "state": "Washington",
-        "country": "USA",
-        "filename": "bellingham_wa_width_9761_height_14390_step_20.csv.gz",
-        "grid": {
-          "width_meters": 9761,
-          "height_meters": 14390
-        },
-        "file_size_mb": 10.2
-      },
-      {
-        "name": "Burnaby",
-        "state": "British Columbia",
-        "country": "Canada",
-        "filename": "burnaby_bc_width_9573_height_13288_step_20.csv.gz",
-        "grid": {
-          "width_meters": 9573,
-          "height_meters": 13288
-        },
-        "file_size_mb": 12.6
-      },
-      {
-        "name": "Columbia",
-        "state": "South Carolina",
-        "country": "USA",
-        "filename": "columbia_sc_width_43139_height_20892_step_20.csv.gz",
-        "grid": {
-          "width_meters": 43139,
-          "height_meters": 20892
-        },
-        "file_size_mb": 71.1
-      },
-      {
-        "name": "Coupeville",
-        "state": "Washington",
-        "country": "USA",
-        "filename": "coupeville_wa_width_3562_height_2391_step_20.csv.gz",
-        "grid": {
-          "width_meters": 3562,
-          "height_meters": 2391
-        },
-        "file_size_mb": 0.45
-      },
-      {
-        "name": "Fall City",
-        "state": "Washington",
-        "country": "USA",
+      "data_file": {
         "filename": "fall_city_wa_width_2895_height_2630_step_20.csv.gz",
-        "grid": {
-          "width_meters": 2895,
-          "height_meters": 2630
-        },
-        "file_size_mb": 0.42
+        "size_bytes": 415477
       },
-      {
-        "name": "Kirkland",
-        "state": "Washington",
-        "country": "USA",
-        "filename": "kirkland_wa_width_8447_height_10935_step_20.csv.gz",
-        "grid": {
-          "width_meters": 8447,
-          "height_meters": 10935
-        },
-        "file_size_mb": 8.0
+      "search_area_km2": 7.61385,
+      "coverage_rate_percent": 37.178556615512235,
+      "panorama_counts": {
+        "unique_panos": 2242,
+        "unique_google_panos": 2175
       },
-      {
-        "name": "La Conner",
-        "state": "Washington",
-        "country": "USA",
-        "filename": "la_conner_wa_width_1333_height_2092_step_20.csv.gz",
-        "grid": {
-          "width_meters": 1333,
-          "height_meters": 2092
-        },
-        "file_size_mb": 0.14
+      "all_panos_age_stats": {
+        "avg_age_years": 3.180529998611176,
+        "median_age_years": 1.7162682932916,
+        "oldest_date": "2008-08-01T00:00:00",
+        "newest_date": "2023-08-01T00:00:00",
+        "stdev_age_years": 4.018874875040629
       },
-      {
-        "name": "La Piedad",
-        "country": "Mexico",
-        "filename": "la_piedad_mx_width_24430_height_21235_step_20.csv.gz",
-        "grid": {
-          "width_meters": 24430,
-          "height_meters": 21235
-        },
-        "file_size_mb": 27.4
+      "google_panos_age_stats": {
+        "avg_age_years": 3.1365633206956987,
+        "median_age_years": 1.7162682936712232,
+        "oldest_date": "2008-08-01T00:00:00",
+        "newest_date": "2023-04-01T00:00:00",
+        "stdev_age_years": 4.0466485554283285
       },
-      {
-        "name": "Madison",
-        "state": "Wisconsin",
-        "country": "USA",
-        "filename": "madison_wi_width_27651_height_19304_step_20.csv.gz",
-        "grid": {
-          "width_meters": 27651,
-          "height_meters": 19304
-        },
-        "file_size_mb": 40.7
-      },
-      {
-        "name": "Neah Bay",
-        "state": "Washington",
-        "country": "USA",
-        "filename": "neah_bay_wa_width_4524_height_4448_step_20.csv.gz",
-        "grid": {
-          "width_meters": 4524,
-          "height_meters": 4448
-        },
-        "file_size_mb": 1.1
-      },
-      {
-        "name": "Oradell",
-        "state": "New Jersey",
-        "country": "USA",
-        "filename": "oradell_nj_width_4102_height_3387_step_20.csv.gz",
-        "grid": {
-          "width_meters": 4102,
-          "height_meters": 3387
-        },
-        "file_size_mb": 1.0
-      },
-      {
-        "name": "Pittsburgh",
-        "state": "Pennsylvania",
-        "country": "USA",
-        "filename": "pittsburgh_pa_width_19498_height_15510_step_20.csv.gz",
-        "grid": {
-          "width_meters": 19498,
-          "height_meters": 15510
-        },
-        "file_size_mb": 32.4
-      },
-      {
-        "name": "Poulsbo",
-        "state": "Washington",
-        "country": "USA",
-        "filename": "poulsbo_wa_width_4991_height_6807_step_20.csv.gz",
-        "grid": {
-          "width_meters": 4991,
-          "height_meters": 6807
-        },
-        "file_size_mb": 1.8
-      },
-      {
-        "name": "Seattle",
-        "state": "Washington",
-        "country": "USA",
-        "filename": "seattle_wa_width_17689_height_28145_step_20.csv.gz",
-        "grid": {
-          "width_meters": 17689,
-          "height_meters": 28145
-        },
-        "file_size_mb": 41.4
-      },
-      {
-        "name": "Spokane",
-        "state": "Washington",
-        "country": "USA",
-        "filename": "spokane_wa_width_22539_height_19125_step_20.csv.gz",
-        "grid": {
-          "width_meters": 22539,
-          "height_meters": 19125
-        },
-        "file_size_mb": 33.5
-      },
-      {
-        "name": "St. Louis",
-        "state": "Missouri",
-        "country": "USA",
-        "filename": "st_louis_mo_width_13619_height_26913_step_20.csv.gz",
-        "grid": {
-          "width_meters": 13619,
-          "height_meters": 26913
-        },
-        "file_size_mb": 31.7
-      },
-      {
-        "name": "Teaneck",
-        "state": "New Jersey",
-        "country": "USA",
-        "filename": "teaneck_nj_width_4213_height_6346_step_20.csv.gz",
-        "grid": {
-          "width_meters": 4213,
-          "height_meters": 6346
-        },
-        "file_size_mb": 2.4
-      },
-      {
-        "name": "Winthrop",
-        "state": "Washington",
-        "country": "USA",
-        "filename": "winthrop_wa_width_2173_height_2390_step_20.csv.gz",
-        "grid": {
-          "width_meters": 2173,
-          "height_meters": 2390
-        },
-        "file_size_mb": 0.27
-      },
-      {
-        "name": "Zurich",
-        "country": "Switzerland",
-        "filename": "zurich_switzerland_width_13399_height_12724_step_20.csv.gz",
-        "grid": {
-          "width_meters": 13399,
-          "height_meters": 12724
-        },
-        "file_size_mb": 16.2
+      "collection_info": {
+        "start_time": "2024-12-13T09:09:30.756213-08:00",
+        "end_time": "2024-12-13T09:31:39.807698-08:00",
+        "duration_seconds": 1329.051485
       }
-    ]
-  }
+    },
+    {
+      "city": "La Conner",
+      "state": "Washington",
+      "country": "United States",
+      "center": {
+        "latitude": 48.39188637887181,
+        "longitude": -122.494248
+      },
+      "bounds": {
+        "min_lat": 48.3825334561191,
+        "max_lat": 48.40123918357461,
+        "min_lon": -122.5031615157661,
+        "max_lon": -122.4853344842339
+      },
+      "data_file": {
+        "filename": "la_conner_wa_width_1333_height_2092_step_20.csv.gz",
+        "size_bytes": 144535
+      },
+      "search_area_km2": 2.788636,
+      "coverage_rate_percent": 42.41648898365316,
+      "panorama_counts": {
+        "unique_panos": 1155,
+        "unique_google_panos": 1039
+      },
+      "all_panos_age_stats": {
+        "avg_age_years": 1.562507633386957,
+        "median_age_years": 0.29532361959103354,
+        "oldest_date": "2008-08-01T00:00:00",
+        "newest_date": "2024-10-01T00:00:00",
+        "stdev_age_years": 2.435944032134509
+      },
+      "google_panos_age_stats": {
+        "avg_age_years": 1.0957615705234154,
+        "median_age_years": 0.29532361980077704,
+        "oldest_date": "2008-08-01T00:00:00",
+        "newest_date": "2024-09-01T00:00:00",
+        "stdev_age_years": 1.9299623440691542
+      },
+      "collection_info": {
+        "start_time": "2024-12-13T04:45:19-08:00",
+        "end_time": "2024-12-13T05:11:25-08:00",
+        "duration_seconds": 1566.0
+      }
+    },
+    {
+      "city": "Alden",
+      "state": "Iowa",
+      "country": "United States",
+      "center": {
+        "latitude": 43.67024804705989,
+        "longitude": -93.57619610000002
+      },
+      "bounds": {
+        "min_lat": 43.662957412642,
+        "max_lat": 43.6775385391512,
+        "min_lon": -93.5861168196036,
+        "max_lon": -93.56627538039642
+      },
+      "data_file": {
+        "filename": "alden_mn_width_1614_height_1623_step_20.csv.gz",
+        "size_bytes": 139787
+      },
+      "search_area_km2": 2.619522,
+      "coverage_rate_percent": 37.02198133092442,
+      "panorama_counts": {
+        "unique_panos": 843,
+        "unique_google_panos": 843
+      },
+      "all_panos_age_stats": {
+        "avg_age_years": 2.216739423458574,
+        "median_age_years": 1.2973769237326032,
+        "oldest_date": "2009-06-01T00:00:00",
+        "newest_date": "2024-10-01T00:00:00",
+        "stdev_age_years": 1.7143596760808102
+      },
+      "google_panos_age_stats": {
+        "avg_age_years": 2.216739423712428,
+        "median_age_years": 1.2973769239864565,
+        "oldest_date": "2009-06-01T00:00:00",
+        "newest_date": "2024-10-01T00:00:00",
+        "stdev_age_years": 1.7143596760808104
+      },
+      "collection_info": {
+        "start_time": "2024-12-17T20:26:39.808364-06:00",
+        "end_time": "2024-12-17T20:27:53.446794-06:00",
+        "duration_seconds": 73.63843
+      }
+    },
+    {
+      "city": "Coupeville",
+      "state": "Washington",
+      "country": "United States",
+      "center": {
+        "latitude": 48.218098723063456,
+        "longitude": -122.685807
+      },
+      "bounds": {
+        "min_lat": 48.20739510117352,
+        "max_lat": 48.2288015195964,
+        "min_lon": -122.70976561288494,
+        "max_lon": -122.66184838711506
+      },
+      "data_file": {
+        "filename": "coupeville_wa_width_3562_height_2391_step_20.csv.gz",
+        "size_bytes": 446372
+      },
+      "search_area_km2": 8.516742,
+      "coverage_rate_percent": 32.220670391061454,
+      "panorama_counts": {
+        "unique_panos": 2183,
+        "unique_google_panos": 2120
+      },
+      "all_panos_age_stats": {
+        "avg_age_years": 0.5546446157004493,
+        "median_age_years": 0.21318834371134054,
+        "oldest_date": "2008-08-01T00:00:00",
+        "newest_date": "2024-11-01T00:00:00",
+        "stdev_age_years": 1.5731660880278138
+      },
+      "google_panos_age_stats": {
+        "avg_age_years": 0.41115303611363785,
+        "median_age_years": 0.2131883440572794,
+        "oldest_date": "2008-08-01T00:00:00",
+        "newest_date": "2024-11-01T00:00:00",
+        "stdev_age_years": 1.273246417019248
+      },
+      "collection_info": {
+        "start_time": "2024-12-13T09:36:32.290782-08:00",
+        "end_time": "2024-12-13T09:45:43.983636-08:00",
+        "duration_seconds": 551.692854
+      }
+    },
+    {
+      "city": "Winthrop",
+      "state": "Massachusetts",
+      "country": "United States",
+      "center": {
+        "latitude": 48.47783295353258,
+        "longitude": -120.18619500000001
+      },
+      "bounds": {
+        "min_lat": 48.467130858601294,
+        "max_lat": 48.48853473805023,
+        "min_lon": -120.20080576992488,
+        "max_lon": -120.17158423007513
+      },
+      "data_file": {
+        "filename": "winthrop_wa_width_2173_height_2390_step_20.csv.gz",
+        "size_bytes": 268047
+      },
+      "search_area_km2": 5.19347,
+      "coverage_rate_percent": 25.237003058103973,
+      "panorama_counts": {
+        "unique_panos": 1497,
+        "unique_google_panos": 366
+      },
+      "all_panos_age_stats": {
+        "avg_age_years": null,
+        "median_age_years": null,
+        "oldest_date": null,
+        "newest_date": null,
+        "stdev_age_years": null
+      },
+      "google_panos_age_stats": {
+        "avg_age_years": null,
+        "median_age_years": null,
+        "oldest_date": null,
+        "newest_date": null,
+        "stdev_age_years": null
+      },
+      "collection_info": {
+        "start_time": "2024-12-12T17:34:03-08:00",
+        "end_time": "2024-12-12T18:15:48-08:00",
+        "duration_seconds": 2505.0
+      }
+    }
+  ]
+}
