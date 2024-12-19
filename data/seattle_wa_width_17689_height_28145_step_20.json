@@ -1,0 +1,176 @@
+{
+  "data_file": {
+    "filename": "seattle_wa_width_17689_height_28145_step_20.csv.gz",
+    "format": "csv.gz",
+    "rows": 1246080,
+    "size_bytes": 41438731
+  },
+  "city": {
+    "name": "Seattle",
+    "state": "Washington",
+    "country": "United States",
+    "center": {
+      "latitude": 47.60372156457593,
+      "longitude": -122.33006200000003
+    },
+    "bounds": {
+      "min_lat": 47.477132213345456,
+      "max_lat": 47.73028932313386,
+      "min_lon": -122.44790738153692,
+      "max_lon": -122.21221661846307
+    }
+  },
+  "search_grid": {
+    "width_meters": 17689.0,
+    "height_meters": 28145.0,
+    "step_length_meters": 20.0,
+    "diagonal_meters": 33242.168190417426,
+    "total_search_points": 1246080,
+    "area_km2": 497.856905
+  },
+  "download": {
+    "start_time": "2024-12-19T03:56:42.900962+00:00",
+    "end_time": "2024-12-19T07:10:12.032774+00:00",
+    "duration_seconds": 11609.131812
+  },
+  "coverage": {
+    "points_with_panos": 676385,
+    "points_without_panos": 569048,
+    "points_with_errors": 0,
+    "coverage_rate": 54.281025295326145,
+    "pano_distance_stats": {
+      "min_meters": 0.010069162150647225,
+      "max_meters": 18879311.4202141,
+      "avg_meters": 262.68453563768566,
+      "median_meters": 21.026208145781947,
+      "stdev_meters": 65104.23261497062
+    }
+  },
+  "all_panos": {
+    "total_entries": 1246080,
+    "status_breakdown": {
+      "OK": {
+        "count": 676385,
+        "percentage": 54.281025295326145
+      },
+      "ZERO_RESULTS": {
+        "count": 569048,
+        "percentage": 45.667051874679
+      },
+      "NO_DATE": {
+        "count": 640,
+        "percentage": 0.05136106831022085
+      },
+      "UNKNOWN_ERROR": {
+        "count": 7,
+        "percentage": 0.0005617616846430406
+      }
+    },
+    "duplicate_stats": {
+      "total_unique_panos": 300240,
+      "total_pano_references": 676385,
+      "duplicate_reference_count": 376145,
+      "most_referenced_count": 41,
+      "panos_with_multiple_refs": 179905,
+      "average_references_per_pano": 2.252814415134559
+    },
+    "age_stats": {
+      "count": 300240,
+      "valid_dates_count": 300240,
+      "invalid_dates_count": 0,
+      "oldest_pano_date": "1970-08-01T00:00:00",
+      "newest_pano_date": "2024-12-01T00:00:00",
+      "avg_pano_age_years": 4.5134011383288355,
+      "median_pano_age_years": 3.4699361977556276,
+      "stdev_pano_age_years": 3.2205465656638883,
+      "age_percentiles_years": {
+        "p10": 0.5513872586728078,
+        "p25": 2.051729490021199,
+        "p75": 5.720449544778215,
+        "p90": 8.636260633073903
+      }
+    },
+    "histogram_of_capture_dates_by_year": {
+      "1970": 2,
+      "2007": 2704,
+      "2008": 3910,
+      "2009": 6392,
+      "2010": 1345,
+      "2011": 12649,
+      "2012": 2463,
+      "2013": 603,
+      "2014": 8005,
+      "2015": 6165,
+      "2016": 24476,
+      "2017": 12969,
+      "2018": 54494,
+      "2019": 190558,
+      "2020": 2858,
+      "2021": 106534,
+      "2022": 78887,
+      "2023": 89242,
+      "2024": 72129
+    }
+  },
+  "google_panos": {
+    "total_entries": 641535,
+    "status_breakdown": {
+      "OK": {
+        "count": 640895,
+        "percentage": 99.90023926987615
+      },
+      "NO_DATE": {
+        "count": 640,
+        "percentage": 0.09976073012384358
+      }
+    },
+    "duplicate_stats": {
+      "total_unique_panos": 283793,
+      "total_pano_references": 640895,
+      "duplicate_reference_count": 357102,
+      "most_referenced_count": 36,
+      "panos_with_multiple_refs": 174374,
+      "average_references_per_pano": 2.258318563178091
+    },
+    "age_stats": {
+      "count": 283793,
+      "valid_dates_count": 283793,
+      "invalid_dates_count": 0,
+      "oldest_pano_date": "2007-08-01T00:00:00",
+      "newest_pano_date": "2024-11-01T00:00:00",
+      "avg_pano_age_years": 4.474728368190452,
+      "median_pano_age_years": 3.4699362224619423,
+      "stdev_pano_age_years": 3.2422016536542917,
+      "age_percentiles_years": {
+        "p10": 0.5513872833791226,
+        "p25": 2.0517295147275143,
+        "p75": 5.638314045870567,
+        "p90": 8.636260657780218
+      }
+    },
+    "histogram_of_capture_dates_by_year": {
+      "2007": 2700,
+      "2008": 3910,
+      "2009": 6392,
+      "2010": 1345,
+      "2011": 12649,
+      "2012": 2379,
+      "2013": 1,
+      "2014": 7098,
+      "2015": 4717,
+      "2016": 20990,
+      "2017": 7337,
+      "2018": 47998,
+      "2019": 187496,
+      "2020": 10,
+      "2021": 102931,
+      "2022": 76180,
+      "2023": 86809,
+      "2024": 69953
+    }
+  },
+  "timestamps": {
+    "json_file_created": "2024-12-19T09:27:39.745727",
+    "timezone": "PST"
+  }
+}
