@@ -20,67 +20,78 @@
             bottom: 0;
             width: 100%;
         }
+
         .chart-container {
             position: fixed;
             bottom: 20px;
             right: 20px;
-            background: rgba(255, 255, 255, 0.95);
-            padding: 20px;
+            background: rgba(255, 255, 255, 0.65);
+            padding: 10px;
             border-radius: 8px;
             box-shadow: 0 0 10px rgba(0,0,0,0.2);
             z-index: 1000;
             display: flex;
-            gap: 20px;
+            gap: 10px;
         }
+
         .scatter-plot-container {
             width: 300px;
             height: 300px;
             position: relative;
-            background-color: #f8f9fa;
-            border: 1px solid #ddd;
             border-radius: 4px;
+            background-color: rgba(255, 255, 255, 0.65);
+            /* background-color: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 4px; */
         }
+
         .legend {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: white;
+            position: fixed;  /* Add this */
+            top: 20px;       /* Add this */
+            right: 20px;     /* Add this */
+            max-height: 80vh;
+            overflow-y: auto;
             padding: 10px;
-            border-radius: 5px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.2);
-            z-index: 1000;
+            background: rgba(255, 255, 255, 0.7);
+            border-radius: 5px;     /* Add this */
+            z-index: 1000;   /* Add this */
         }
+
+        .legend h4 {
+            margin: 3px 0 7px 0;  /* top right bottom left */
+        }
+
         .legend-item {
+            padding: 2px 4px;
+            font-size: 0.9em;
             display: flex;
             align-items: center;
-            margin: 5px 0;
             cursor: pointer;
-            padding: 2px;
-            border-radius: 4px;
-            transition: background-color 0.2s;
         }
+
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            margin-right: 6px;
+        }
+
         .legend-item:hover {
             background-color: rgba(0,0,0,0.05);
         }
-        .legend-color {
-            width: 20px;
-            height: 20px;
-            display: inline-block;
-            margin-right: 5px;
-            border-radius: 3px;
-        }
+        
         #stats {
             position: fixed;
             top: 20px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(255, 255, 255, 0.95);
+            background: rgba(255, 255, 255, 0.75);
             padding: 10px 20px;
             border-radius: 5px;
             box-shadow: 0 0 10px rgba(0,0,0,0.2);
             z-index: 1000;
             text-align: center;
         }
+
         .loading {
             position: fixed;
             top: 50%;
@@ -122,9 +133,30 @@
         }).addTo(map);
 
         function getColor(age) {
+            // Attempts to mimic the YlOrRd color scheme from Python branca
+
             const maxAge = 12;
             const ratio = Math.min(age / maxAge, 1);
-            return `rgb(${255}, ${Math.floor(255 * (1 - ratio))}, ${Math.floor(255 * (1 - ratio))})`;
+            
+            // YlOrRd color scheme interpolation
+            // Start: rgb(255, 255, 178) - light yellow
+            // Middle: rgb(253, 141, 60) - orange
+            // End: rgb(189, 0, 38) - dark red
+            
+            if (ratio < 0.5) {
+                // Interpolate between yellow and orange
+                const r = 255 - (ratio * 2 * (255 - 253));
+                const g = 255 - (ratio * 2 * (255 - 141));
+                const b = 178 - (ratio * 2 * (178 - 60));
+                return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+            } else {
+                // Interpolate between orange and red
+                const adjustedRatio = (ratio - 0.5) * 2;
+                const r = 253 - (adjustedRatio * (253 - 189));
+                const g = 141 - (adjustedRatio * 141);
+                const b = 60 - (adjustedRatio * (60 - 38));
+                return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+            }
         }
 
         function createTooltip(city) {
@@ -135,14 +167,13 @@
                     <p><strong>Coverage Statistics:</strong></p>
                     <ul style="padding-left: 20px; margin: 5px 0;">
                         <li>Area: ${city.search_area_km2.toFixed(1)} km²</li>
-                        <li>Coverage Rate: ${city.coverage_rate_percent.toFixed(1)}%</li>
                         <li>Total Panoramas: ${city.panorama_counts.unique_panos.toLocaleString()}</li>
                         <li>Google Panoramas: ${city.panorama_counts.unique_google_panos.toLocaleString()}</li>
                     </ul>
                     <p><strong>Age Statistics:</strong></p>
                     <ul style="padding-left: 20px; margin: 5px 0;">
                         <li>Median Age: ${city.google_panos_age_stats.median_age_years.toFixed(1)} years</li>
-                        <li>Average Age: ${city.google_panos_age_stats.avg_age_years.toFixed(1)} years</li>
+                        <li>Average Age: ${city.google_panos_age_stats.avg_age_years.toFixed(1)} years (SD=${city.google_panos_age_stats.stdev_age_years.toFixed(1)})</li>
                         <li>Newest: ${new Date(city.google_panos_age_stats.newest_date).toLocaleDateString()}</li>
                         <li>Oldest: ${new Date(city.google_panos_age_stats.oldest_date).toLocaleDateString()}</li>
                     </ul>
@@ -150,21 +181,36 @@
             `;
         }
 
-        function createLegend(maxAge) {
+        function createLegend(maxAge, cities) {  // Add cities parameter
             const legend = document.getElementById('legend');
-            const grades = [0, maxAge/4, maxAge/2, 3*maxAge/4, maxAge];
-            
             legend.innerHTML = '<h4>Median Age (years)</h4>';
             
-            for (let i = 0; i < grades.length - 1; i++) {
-                const minAge = grades[i];
-                const maxAge = grades[i + 1];
-                const color = getColor(minAge);
+            // Create an entry for each year from 0 to maxAge (rounded up)
+            const maxYears = Math.ceil(maxAge);
+            
+            // Count cities for each age
+            const ageCounts = new Array(maxYears + 1).fill(0);
+            cities.forEach(city => {
+                const age = Math.floor(city.google_panos_age_stats.median_age_years);
+                if (age <= maxYears) {
+                    ageCounts[age]++;
+                }
+            });
+            
+            // Create legend entries
+            for (let age = 0; age <= maxYears; age++) {
+                const color = getColor(age);
+                const cityCount = ageCounts[age];
+                
+                // Only show "(X cities)" if there are any cities for that age
+                const citiesText = cityCount > 0 ? 
+                    ` (${cityCount} ${cityCount === 1 ? 'city' : 'cities'})` : 
+                    ' (no cities)';
                 
                 legend.innerHTML += `
-                    <div class="legend-item" data-min-age="${minAge}" data-max-age="${maxAge}">
+                    <div class="legend-item" data-age="${age}">
                         <div class="legend-color" style="background: ${color}"></div>
-                        ${minAge.toFixed(1)} &ndash; ${maxAge.toFixed(1)}
+                        ${age} year${age !== 1 ? 's' : ''}${citiesText}
                     </div>
                 `;
             }
@@ -173,11 +219,89 @@
             const legendItems = legend.querySelectorAll('.legend-item');
             legendItems.forEach(item => {
                 item.addEventListener('click', () => {
-                    const minAge = parseFloat(item.dataset.minAge);
-                    const maxAge = parseFloat(item.dataset.maxAge);
-                    highlightCitiesByAgeRange(minAge, maxAge);
+                    const targetAge = parseInt(item.dataset.age);
+                    highlightCitiesByExactAge(targetAge);
                 });
             });
+        }
+
+        function highlightCitiesByExactAge(targetAge, zoomToHighlightedCities=false) {
+            const tolerance = 0.5; // Half-year tolerance for matching
+
+            [charts.pano, charts.area].forEach(chart => {
+                // First, update the background colors
+                chart.data.datasets[0].pointBackgroundColor = chart.data.datasets[0].data.map(point => {
+                    const age = Math.floor(point.y);
+                    return (Math.abs(age - targetAge) <= tolerance) ? 
+                        point.backgroundColor : point.backgroundColor.replace('rgb', 'rgba').replace(')', ',0.3)');
+                });
+
+                // Then update point sizes and borders
+                chart.data.datasets[0].pointRadius = chart.data.datasets[0].data.map(point => {
+                    const age = Math.floor(point.y);
+                    return (Math.abs(age - targetAge) <= tolerance) ? 6 : 3; // Bigger for highlighted
+                });
+
+                chart.data.datasets[0].borderWidth = chart.data.datasets[0].data.map(point => {
+                    const age = Math.floor(point.y);
+                    return (Math.abs(age - targetAge) <= tolerance) ? 2 : 0; // No border for non-highlighted
+                });
+
+                chart.data.datasets[0].borderColor = chart.data.datasets[0].data.map(point => {
+                    const age = Math.floor(point.y);
+                    return (Math.abs(age - targetAge) <= tolerance) ? 
+                        'rgba(0,0,0,0.8)' : 'rgba(0,0,0,0)';
+                });
+
+                chart.update();
+            });
+
+            // For tracking highlighted cities' bounds
+            let highlightedCities = [];
+
+            // Set styles for highlighted vs. unhighlighted city rectangles
+            mapRectangles.forEach(rectangle => {
+                const age = Math.floor(rectangle.city.google_panos_age_stats.median_age_years);
+                if (Math.abs(age - targetAge) <= tolerance) {
+                    rectangle.setStyle({
+                        fillOpacity: 0.8,
+                        weight: 2
+                    });
+                    highlightedCities.push(rectangle.city); 
+                } else {
+                    rectangle.setStyle({
+                        fillOpacity: 0.2,
+                        weight: 0.25
+                    });
+                }
+            });
+
+            // If we have highlighted cities, zoom to fit them
+            if (highlightedCities.length > 0 && zoomToHighlightedCities) {
+                // Create bounds array for all highlighted cities
+                const bounds = highlightedCities.map(city => [
+                    [city.bounds.min_lat, city.bounds.min_lon],
+                    [city.bounds.max_lat, city.bounds.max_lon]
+                ]);
+
+                // Find the overall min/max bounds
+                const minLat = Math.min(...highlightedCities.map(c => c.bounds.min_lat));
+                const maxLat = Math.max(...highlightedCities.map(c => c.bounds.max_lat));
+                const minLon = Math.min(...highlightedCities.map(c => c.bounds.min_lon));
+                const maxLon = Math.max(...highlightedCities.map(c => c.bounds.max_lon));
+
+                // Add some padding
+                const latPadding = (maxLat - minLat) * 0.2;
+                const lonPadding = (maxLon - minLon) * 0.2;
+
+                // Create padded bounds
+                const paddedBounds = [
+                    [minLat - latPadding, minLon - lonPadding],
+                    [maxLat + latPadding, maxLon + lonPadding]
+                ];
+
+                map.fitBounds(paddedBounds);
+            }
         }
 
         function highlightCitiesByAgeRange(minAge, maxAge) {
@@ -208,8 +332,21 @@
         function highlightCity(city) {
             [charts.pano, charts.area].forEach(chart => {
                 chart.data.datasets[0].pointBackgroundColor = chart.data.datasets[0].data.map(point => 
-                    point.city === city ? point.backgroundColor : 'rgba(200,200,200,0.2)'
+                    point.city === city ? point.backgroundColor : point.backgroundColor.replace('rgb', 'rgba').replace(')', ',0.3)')
                 );
+                
+                chart.data.datasets[0].pointRadius = chart.data.datasets[0].data.map(point =>
+                    point.city === city ? 6 : 3
+                );
+
+                chart.data.datasets[0].borderWidth = chart.data.datasets[0].data.map(point =>
+                    point.city === city ? 2 : 0
+                );
+
+                chart.data.datasets[0].borderColor = chart.data.datasets[0].data.map(point =>
+                    point.city === city ? 'rgba(0,0,0,0.8)' : 'rgba(0,0,0,0)'
+                );
+
                 chart.update();
             });
 
@@ -233,6 +370,9 @@
                 chart.data.datasets[0].pointBackgroundColor = chart.data.datasets[0].data.map(point => 
                     point.backgroundColor
                 );
+                chart.data.datasets[0].pointRadius = chart.data.datasets[0].data.map(() => 4); // Default size
+                chart.data.datasets[0].borderWidth = chart.data.datasets[0].data.map(() => 1); // Default border
+                chart.data.datasets[0].borderColor = chart.data.datasets[0].data.map(() => 'rgba(0,0,0,0.2)'); // Default border color
                 chart.update();
             });
 
@@ -273,7 +413,6 @@
                                 return [
                                     `${cityName}, ${city.state}`,
                                     `Age: ${context.raw.y.toFixed(1)} years`,
-                                    `Coverage: ${city.coverage_rate_percent.toFixed(1)}%`
                                 ];
                             }
                         }
@@ -415,7 +554,7 @@
 
                 // Calculate max age for legend
                 const maxAge = Math.max(...cities.map(city => city.google_panos_age_stats.median_age_years));
-                createLegend(maxAge);
+                createLegend(maxAge, cities);
 
                 // Add rectangles to map
                 cities.forEach(city => {
