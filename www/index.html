@@ -39,7 +39,7 @@
             height: 300px;
             position: relative;
             border-radius: 4px;
-            background-color: rgba(255, 255, 255, 0.65);
+            background-color: rgba(255, 255, 255, 0.75);
             /* background-color: #f8f9fa;
             border: 1px solid #ddd;
             border-radius: 4px; */
@@ -164,13 +164,13 @@
             return `
                 <div style="min-width: 250px">
                     <h3>${cityName}, ${city.state}, ${city.country}</h3>
-                    <p><strong>Coverage Statistics:</strong></p>
+                    <strong>Coverage Statistics:</strong>
                     <ul style="padding-left: 20px; margin: 5px 0;">
                         <li>Area: ${city.search_area_km2.toFixed(1)} km²</li>
                         <li>Total Panoramas: ${city.panorama_counts.unique_panos.toLocaleString()}</li>
-                        <li>Google Panoramas: ${city.panorama_counts.unique_google_panos.toLocaleString()}</li>
+                        <li>Google Panoramas: ${city.panorama_counts.unique_google_panos.toLocaleString()} (${((city.panorama_counts.unique_google_panos / city.panorama_counts.unique_panos) * 100).toFixed(1)}%)</li>
                     </ul>
-                    <p><strong>Age Statistics:</strong></p>
+                    <div style="margin-top: 12px"><strong>Age Statistics:</strong></div>
                     <ul style="padding-left: 20px; margin: 5px 0;">
                         <li>Median Age: ${city.google_panos_age_stats.median_age_years.toFixed(1)} years</li>
                         <li>Average Age: ${city.google_panos_age_stats.avg_age_years.toFixed(1)} years (SD=${city.google_panos_age_stats.stdev_age_years.toFixed(1)})</li>
