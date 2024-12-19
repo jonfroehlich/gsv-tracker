@@ -231,6 +231,61 @@ def generate_missing_city_json_files(data_dir: str) -> None:
     
     logger.info(f"Metadata generation completed for {cnt_generated_json_files} file(s).")
 
+def calculate_histogram_of_capture_dates_by_year(df_input: pd.DataFrame, google_only: bool = False) -> dict:
+    """
+    Calculate histogram of pano counts by year.
+    
+    Args:
+        df_input: DataFrame containing the GSV data
+        google_only: If True, only count Google panos
+    
+    Returns:
+        Dictionary with years as keys and counts as values
+    """
+    # Filter for successful panos
+    df_filtered = df_input[df_input['status'] == 'OK'].copy()
+    
+    # Apply Google filter if requested
+    if google_only:
+        df_filtered = df_filtered[df_filtered['copyright_info'].str.contains('Google', na=False)]
+    
+    # Convert capture_date to datetime and extract year
+    df_filtered['capture_year'] = pd.to_datetime(df_filtered['capture_date']).dt.year
+    
+    # Create year histogram
+    year_counts = df_filtered['capture_year'].value_counts().sort_index()
+    
+    # Convert to dictionary with years as strings
+    return {str(year): int(count) for year, count in year_counts.items()}
+
+def merge_capture_date_histograms(cities_data: List[Dict]) -> Dict[str, Dict[str, int]]:
+    """
+    Merge yearly histograms from multiple cities.
+    
+    Args:
+        cities_data: List of city data dictionaries
+        
+    Returns:
+        Dictionary containing merged histograms for all panos and google panos
+    """
+    all_panos_histogram = {}
+    google_panos_histogram = {}
+    
+    for city_data in cities_data:
+        # Merge all panos histogram
+        for year, count in city_data["all_panos"]["histogram_of_capture_dates_by_year"].items():
+            all_panos_histogram[year] = all_panos_histogram.get(year, 0) + count
+            
+        # Merge google panos histogram
+        for year, count in city_data["google_panos"]["histogram_of_capture_dates_by_year"].items():
+            google_panos_histogram[year] = google_panos_histogram.get(year, 0) + count
+    
+    # Sort the histograms by year
+    return {
+        "all_panos_histogram": dict(sorted(all_panos_histogram.items())),
+        "google_panos_histogram": dict(sorted(google_panos_histogram.items()))
+    }
+
 def generate_city_metadata_summary_as_json(
     csv_gz_path: str,
     df: pd.DataFrame,
@@ -380,8 +435,14 @@ def generate_city_metadata_summary_as_json(
             "coverage_rate": (points_with_panos / total_points) * 100 if total_points > 0 else 0,
             "pano_distance_stats": distance_stats
         },
-        "all_panos": calculate_pano_stats(df),
-        "google_panos": calculate_pano_stats(df, copyright_filter_condition='Google'),
+        "all_panos": {
+            **calculate_pano_stats(df),
+            "histogram_of_capture_dates_by_year": calculate_histogram_of_capture_dates_by_year(df)
+        },
+        "google_panos": {
+            **calculate_pano_stats(df, copyright_filter_condition='Google'),
+            "histogram_of_capture_dates_by_year": calculate_histogram_of_capture_dates_by_year(df, google_only=True)
+        },
         "timestamps": {
             "json_file_created": datetime.now().isoformat(),
             "timezone": datetime.now().astimezone().tzinfo.tzname(None)
@@ -393,8 +454,6 @@ def generate_city_metadata_summary_as_json(
         json.dump(metadata, f, indent=2)
 
     logger.info(f"Saved compressed JSON to: {json_filename_with_path}")
-    return json_filename_with_path
-
     return json_filename_with_path
 
 def generate_aggregate_summary_as_json(json_dir: str) -> Dict[str, Any]:
@@ -410,6 +469,7 @@ def generate_aggregate_summary_as_json(json_dir: str) -> Dict[str, Any]:
     logger.debug(f"Generating aggregate summary cities.json file for all city JSON files in {json_dir}")
 
     cities_data = []
+    raw_city_data = []  # Store complete city data for histogram merging
     
     # Find all JSON files in directory except the cities.json file
     json_files = [f for f in os.listdir(json_dir) 
@@ -423,7 +483,9 @@ def generate_aggregate_summary_as_json(json_dir: str) -> Dict[str, Any]:
             logger.debug(f"Opening {file_path}...")
             with gzip.open(file_path, 'rt', encoding='utf-8') as f:
                 city_data = json.load(f)
-                
+            
+            raw_city_data.append(city_data)  # Store complete data for histogram merging
+
             # Extract relevant information
             city_summary = {
                 # Basic information
@@ -477,17 +539,27 @@ def generate_aggregate_summary_as_json(json_dir: str) -> Dict[str, Any]:
                     "end_time": city_data["download"]["end_time"],
                     "duration_seconds": city_data["download"]["duration_seconds"]
                 },
+
+                # Add city-specific histograms
+                "histogram_of_capture_dates_by_year": {
+                    "all_panos": city_data["all_panos"]["histogram_of_capture_dates_by_year"],
+                    "google_panos": city_data["google_panos"]["histogram_of_capture_dates_by_year"]
+                }
             }
             
             cities_data.append(city_summary)
             
         except Exception as e:
             logger.error(f"Error processing {json_file}: {str(e)}")
+
+    # Merge histograms from all cities
+    merged_histograms = merge_capture_date_histograms(raw_city_data)
     
     # Create the final summary
     summary = {
         "cities_count": len(cities_data),
         "creation_timestamp": pd.Timestamp.now().isoformat(),
+        "histogram_of_capture_dates": merged_histograms,
         "cities": cities_data
     }
     
