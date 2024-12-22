@@ -95,29 +95,33 @@
                 const currentYear = new Date().getFullYear();
                 const age = currentYear - year;
                 const color = getColor(age);
-                const isActive = activeYears.has(year) || activeYears.size === 0;
+                const isActive = activeYears.has(year);
+                const count = markersByYear[year].length;
                 div.innerHTML += `<i style="background:${color}" class="${isActive ? '' : 'inactive'}" 
-                                   onclick="toggleYear(${year})"></i>${year}<br>`;
+                                   onclick="toggleYear(${year})"></i>${year} (${count})<br>`;
             });
         }
 
         function toggleYear(year) {
-            if (activeYears.has(year)) {
-                activeYears.delete(year);
-            } else {
-                activeYears.add(year);
-            }
+            const wasActive = activeYears.has(year);
             
-            // If no years are selected, show all
+            // Clear all active years first
+            activeYears.clear();
+            
+            // Show all markers initially
             Object.entries(markersByYear).forEach(([markerYear, markers]) => {
-                markers.forEach(marker => {
-                    if (activeYears.size === 0 || activeYears.has(parseInt(markerYear))) {
-                        marker.addTo(map);
-                    } else {
-                        marker.remove();
+                markers.forEach(marker => marker.addTo(map));
+            });
+            
+            // If we weren't already showing this year exclusively, show only this year
+            if (!wasActive) {
+                activeYears.add(year);
+                Object.entries(markersByYear).forEach(([markerYear, markers]) => {
+                    if (parseInt(markerYear) !== year) {
+                        markers.forEach(marker => marker.remove());
                     }
                 });
-            });
+            }
             
             updateLegend(Object.keys(markersByYear).map(Number));
         }
