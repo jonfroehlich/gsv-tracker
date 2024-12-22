@@ -1,18 +1,14 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>GSV City Details</title>
+    <title>Street View Panorama Ages</title>
     <meta charset="utf-8">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
     <style>
         body {
             margin: 0;
             padding: 0;
-            overflow: hidden;
-            font-family: Arial, sans-serif;
         }
         #map {
             position: absolute;
@@ -20,104 +16,48 @@
             bottom: 0;
             width: 100%;
         }
-
-        .chart-container {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: rgba(255, 255, 255, 0.95);
-            padding: 10px;
-            border-radius: 8px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.2);
-            z-index: 1000;
-            width: 600px;
-            height: 200px;
-            overflow-x: auto;
-        }
-
-        .loading {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(255, 255, 255, 0.95);
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.2);
-            z-index: 2000;
-            text-align: center;
-        }
-
         .legend {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            max-height: 80vh;
-            overflow-y: auto;
-            padding: 10px;
-            background: rgba(255, 255, 255, 0.95);
+            padding: 6px 8px;
+            background: white;
+            background: rgba(255,255,255,0.8);
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
             border-radius: 5px;
-            z-index: 1000;
+            line-height: 24px;
         }
-
-        .legend h4 {
-            margin: 3px 0 7px 0;
-        }
-
-        .legend-item {
-            padding: 2px 4px;
-            font-size: 0.9em;
-            display: flex;
-            align-items: center;
+        .legend i {
+            width: 18px;
+            height: 18px;
+            float: left;
+            margin-right: 8px;
+            opacity: 0.7;
             cursor: pointer;
-            user-select: none;
         }
-
-        .legend-item:hover {
-            background-color: rgba(0,0,0,0.05);
-        }
-
-        .legend-color {
-            width: 16px;
-            height: 16px;
-            margin-right: 6px;
-            border-radius: 50%;
+        .legend i.inactive {
+            opacity: 0.2;
         }
     </style>
 </head>
 <body>
     <div id="map"></div>
-    <div id="loading" class="loading">Loading city data...</div>
-    <div id="legend" class="legend"></div>
-    <div class="chart-container">
-        <canvas id="temporalChart"></canvas>
-    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
     <script>
-        // Global variables
-        const map = L.map('map').setView([0, 0], 2);
-        let chart = null;
-        let markers = [];
-        let cityData = null;
-        let cityDetails = null;
-
-        // Initialize map
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '© OpenStreetMap contributors © CARTO',
-            maxZoom: 19
-        }).addTo(map);
-
         function getColor(age) {
-            // Same color scheme as main page
+            // Attempts to mimic the YlOrRd color scheme from Python branca
             const maxAge = 12;
             const ratio = Math.min(age / maxAge, 1);
             
             if (ratio < 0.5) {
+                // Interpolate between yellow and orange
                 const r = 255 - (ratio * 2 * (255 - 253));
                 const g = 255 - (ratio * 2 * (255 - 141));
                 const b = 178 - (ratio * 2 * (178 - 60));
                 return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
             } else {
+                // Interpolate between orange and red
                 const adjustedRatio = (ratio - 0.5) * 2;
                 const r = 253 - (adjustedRatio * (253 - 189));
                 const g = 141 - (adjustedRatio * 141);
@@ -126,239 +66,137 @@
             }
         }
 
-        function getCaptureYear(date) {
-            return new Date(date).getFullYear();
-        }
+        // Initialize the map
+        const map = L.map('map').setView([0, 0], 13);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '© OpenStreetMap contributors © CARTO',
+            maxZoom: 19
+        }).addTo(map);
 
-        function updateMarkerOpacity(selectedDate = null, selectedYear = null) {
-            markers.forEach(marker => {
-                if (selectedDate) {
-                    marker.setStyle({
-                        fillOpacity: marker.captureDate === selectedDate ? 1.0 : 0.2,
-                        opacity: marker.captureDate === selectedDate ? 1.0 : 0.2
-                    });
-                } else if (selectedYear) {
-                    const markerYear = getCaptureYear(marker.captureDate);
-                    marker.setStyle({
-                        fillOpacity: markerYear === selectedYear ? 1.0 : 0.2,
-                        opacity: markerYear === selectedYear ? 1.0 : 0.2
-                    });
-                } else {
-                    marker.setStyle({
-                        fillOpacity: 0.8,
-                        opacity: 0.8
-                    });
-                }
+        // Store markers by year for filtering
+        let markersByYear = {};
+        let activeYears = new Set();
+
+        // Create legend
+        const legend = L.control({position: 'topright'});
+        legend.onAdd = function (map) {
+            const div = L.DomUtil.create('div', 'legend');
+            div.innerHTML = '<h4>Panorama Years</h4>';
+            return div;
+        };
+        legend.addTo(map);
+
+        function updateLegend(years) {
+            const div = document.querySelector('.legend');
+            div.innerHTML = '<h4>Panorama Years</h4>';
+            
+            const sortedYears = Array.from(years).sort((a, b) => b - a);
+            sortedYears.forEach(year => {
+                const currentYear = new Date().getFullYear();
+                const age = currentYear - year;
+                const color = getColor(age);
+                const isActive = activeYears.has(year) || activeYears.size === 0;
+                div.innerHTML += `<i style="background:${color}" class="${isActive ? '' : 'inactive'}" 
+                                   onclick="toggleYear(${year})"></i>${year}<br>`;
             });
         }
 
-        function updateChartHighlight(selectedDate = null, selectedYear = null) {
-            if (!chart) return;
-
-            chart.data.datasets[0].backgroundColor = chart.data.labels.map(label => {
-                if (selectedDate) {
-                    return label === selectedDate ? getColor(2024 - getCaptureYear(label)) : 'rgba(169,169,169,0.2)';
-                } else if (selectedYear) {
-                    return getCaptureYear(label) === selectedYear ? getColor(2024 - selectedYear) : 'rgba(169,169,169,0.2)';
-                } else {
-                    return getColor(2024 - getCaptureYear(label));
-                }
-            });
-            chart.update();
-        }
-
-        function createLegend(yearCounts) {
-            const legend = document.getElementById('legend');
-            legend.innerHTML = '<h4>Capture Year</h4>';
-
-            const years = Object.keys(yearCounts).map(Number).sort((a, b) => b - a);
-            const currentYear = new Date().getFullYear();
-
-            years.forEach(year => {
-                const color = getColor(currentYear - year);
-                legend.innerHTML += `
-                    <div class="legend-item" data-year="${year}">
-                        <div class="legend-color" style="background: ${color}"></div>
-                        ${year} (${yearCounts[year].toLocaleString()} panos)
-                    </div>
-                `;
-            });
-
-            // Add click handlers
-            const legendItems = legend.querySelectorAll('.legend-item');
-            legendItems.forEach(item => {
-                item.addEventListener('click', () => {
-                    const year = parseInt(item.dataset.year);
-                    updateMarkerOpacity(null, year);
-                    updateChartHighlight(null, year);
-                });
-            });
-        }
-
-        async function loadCityData() {
-            try {
-                // Get filename from URL parameters
-                const urlParams = new URLSearchParams(window.location.search);
-                const filename = urlParams.get('file');
-                if (!filename) throw new Error('No filename specified in URL');
-
-                const rawUrl = 'https://raw.githubusercontent.com/jonfroehlich/gsv-tracker/main/data/';
-                const dataUrl = `${rawUrl}${filename}`;
-
-                console.log('Loading data:', dataUrl);
-
-                // Load CSV data
-                const csvResponse = await fetch(dataUrl);
-                if (!csvResponse.ok) throw new Error(`HTTP error! status: ${csvResponse.status}`);
-                const csvCompressed = await csvResponse.arrayBuffer();
-                const csvText = new TextDecoder().decode(pako.inflate(new Uint8Array(csvCompressed)));
-                
-                // Parse CSV
-                const lines = csvText.split('\n');
-                const headers = lines[0].split(',');
-                const data = lines.slice(1).filter(line => line.trim()).map(line => {
-                    const values = line.split(',');
-                    return headers.reduce((obj, header, i) => {
-                        obj[header] = values[i];
-                        return obj;
-                    }, {});
-                });
-
-                // Load JSON metadata
-                // const jsonResponse = await fetch(`${filename}.json.gz`);
-                // if (!jsonResponse.ok) throw new Error(`HTTP error! status: ${jsonResponse.status}`);
-                // const jsonCompressed = await jsonResponse.arrayBuffer();
-                // const jsonText = new TextDecoder().decode(pako.inflate(new Uint8Array(jsonCompressed)));
-                // const metadata = JSON.parse(jsonText);
-
-                // Filter for Google panos only
-                const googlePanos = data.filter(row => row.copyright_info?.includes('Google'));
-
-                // Create year counts
-                const yearCounts = {};
-                googlePanos.forEach(pano => {
-                    const year = getCaptureYear(pano.capture_date);
-                    yearCounts[year] = (yearCounts[year] || 0) + 1;
-                });
-
-                // Create temporal histogram data
-                const histogramData = {};
-                googlePanos.forEach(pano => {
-                    histogramData[pano.capture_date] = (histogramData[pano.capture_date] || 0) + 1;
-                });
-
-                // Create markers
-                googlePanos.forEach(pano => {
-                    const marker = L.circleMarker([pano.lat, pano.lng], {
-                        radius: 3,
-                        fillColor: getColor(2024 - getCaptureYear(pano.capture_date)),
-                        color: getColor(2024 - getCaptureYear(pano.capture_date)),
-                        weight: 1,
-                        opacity: 0.8,
-                        fillOpacity: 0.8
-                    }).addTo(map);
-
-                    marker.captureDate = pano.capture_date;
-
-                    marker.on('click', () => {
-                        updateMarkerOpacity(pano.capture_date);
-                        updateChartHighlight(pano.capture_date);
-                    });
-
-                    markers.push(marker);
-                });
-
-                // Create legend
-                createLegend(yearCounts);
-
-                // Create temporal chart
-                const ctx = document.getElementById('temporalChart').getContext('2d');
-                const dates = Object.keys(histogramData).sort();
-                chart = new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: dates,
-                        datasets: [{
-                            data: dates.map(date => histogramData[date]),
-                            backgroundColor: dates.map(date => getColor(2024 - getCaptureYear(date))),
-                            barPercentage: 1.0,
-                            categoryPercentage: 1.0
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: {
-                                display: false
-                            },
-                            tooltip: {
-                                callbacks: {
-                                    title: (tooltipItems) => {
-                                        const date = new Date(tooltipItems[0].label);
-                                        return date.toLocaleDateString();
-                                    },
-                                    label: (context) => {
-                                        return `${context.parsed.y.toLocaleString()} panos`;
-                                    }
-                                }
-                            }
-                        },
-                        scales: {
-                            x: {
-                                type: 'time',
-                                time: {
-                                    unit: 'month',
-                                    displayFormats: {
-                                        month: 'MMM yyyy'
-                                    }
-                                },
-                                grid: {
-                                    display: false
-                                }
-                            },
-                            y: {
-                                beginAtZero: true,
-                                title: {
-                                    display: true,
-                                    text: 'Number of Panoramas'
-                                }
-                            }
-                        },
-                        onClick: (event, elements) => {
-                            if (elements.length > 0) {
-                                const date = dates[elements[0].index];
-                                updateMarkerOpacity(date);
-                                updateChartHighlight(date);
-                            } else {
-                                updateMarkerOpacity();
-                                updateChartHighlight();
-                            }
-                        }
+        function toggleYear(year) {
+            if (activeYears.has(year)) {
+                activeYears.delete(year);
+            } else {
+                activeYears.add(year);
+            }
+            
+            // If no years are selected, show all
+            Object.entries(markersByYear).forEach(([markerYear, markers]) => {
+                markers.forEach(marker => {
+                    if (activeYears.size === 0 || activeYears.has(parseInt(markerYear))) {
+                        marker.addTo(map);
+                    } else {
+                        marker.remove();
                     }
                 });
-
-                // Fit map to markers
-                const group = L.featureGroup(markers);
-                map.fitBounds(group.getBounds());
-
-                // Hide loading message
-                document.getElementById('loading').style.display = 'none';
-
-            } catch (error) {
-                console.error('Error loading data:', error);
-                document.getElementById('loading').innerHTML = 'Error loading city data. Please check the console for details.';
-            }
+            });
+            
+            updateLegend(Object.keys(markersByYear).map(Number));
         }
 
-        // Start loading data when page loads
-        document.addEventListener('DOMContentLoaded', loadCityData);
+        // Get the CSV file from URL parameter
+        const urlParams = new URLSearchParams(window.location.search);
+        const csvFile = urlParams.get('file');
+        const rawUrl = 'https://raw.githubusercontent.com/jonfroehlich/gsv-tracker/main/data/';
+        const dataUrl = rawUrl + csvFile;
 
-        // Add map click handler to reset selection
-        map.on('click', () => {
-            updateMarkerOpacity();
-            updateChartHighlight();
-        });
+        if (!csvFile) {
+            alert('Please provide a CSV file using the "file" URL parameter');
+        } else {
+            // Fetch and process the CSV file
+            fetch(dataUrl)
+                .then(response => response.arrayBuffer())
+                .then(arrayBuffer => {
+                    // Decompress gzipped data
+                    const decompressed = pako.inflate(new Uint8Array(arrayBuffer), { to: 'string' });
+                    
+                    // Parse CSV
+                    Papa.parse(decompressed, {
+                        header: true,
+                        dynamicTyping: true,
+                        complete: function(results) {
+                            let validPoints = [];
+                            const years = new Set();
+                            
+                            results.data.forEach(row => {
+                                if (row.status === 'OK' && 
+                                    row.copyright_info === '© Google' && 
+                                    row.capture_date &&
+                                    row.pano_lat != null &&
+                                    row.pano_lon != null) {
+                                    
+                                    const captureDate = new Date(row.capture_date);
+                                    const year = captureDate.getFullYear();
+                                    const currentYear = new Date().getFullYear();
+                                    const age = currentYear - year;
+                                    
+                                    const marker = L.circleMarker([row.pano_lat, row.pano_lon], {
+                                        radius: 4,
+                                        fillColor: getColor(age),
+                                        color: '#000',
+                                        weight: 1,
+                                        opacity: 1,
+                                        fillOpacity: 0.8
+                                    });
+                                    
+                                    marker.bindPopup(`Capture Date: ${row.capture_date}<br>Pano ID: ${row.pano_id}`);
+                                    marker.addTo(map);
+                                    
+                                    // Store marker by year
+                                    if (!markersByYear[year]) {
+                                        markersByYear[year] = [];
+                                    }
+                                    markersByYear[year].push(marker);
+                                    years.add(year);
+                                    
+                                    validPoints.push([row.pano_lat, row.pano_lon]);
+                                }
+                            });
+                            
+                            // Update legend with available years
+                            updateLegend(years);
+                            
+                            // Fit map to bounds if we have valid points
+                            if (validPoints.length > 0) {
+                                const bounds = L.latLngBounds(validPoints);
+                                map.fitBounds(bounds);
+                            }
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('Error loading or parsing file:', error);
+                    alert('Error loading or parsing the CSV file. Please check the console for details.');
+                });
+        }
     </script>
 </body>
 </html>
