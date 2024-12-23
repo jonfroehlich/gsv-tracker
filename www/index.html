@@ -270,8 +270,15 @@
                 </ul>
             `;
 
+            // Get the h3 element inside the containerDiv
+            const cityHeader = containerDiv.querySelector('h3');
+
             // Insert the view link at the top of the container
-            containerDiv.insertBefore(viewLink, containerDiv.firstChild);
+            containerDiv.insertBefore(viewLink, cityHeader.nextSibling);
+
+            // Insert a line break after the link
+            const br = document.createElement('br');
+            containerDiv.insertBefore(br, viewLink.nextSibling);
             
             // Create chart container
             const chartContainer = document.createElement('div');
