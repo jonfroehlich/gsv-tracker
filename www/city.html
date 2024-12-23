@@ -10,6 +10,7 @@
             margin: 0;
             padding: 0;
         }
+
         #map {
             position: absolute;
             top: 0;
@@ -23,6 +24,9 @@
             background: rgba(255,255,255,0.8);
             box-shadow: 0 0 15px rgba(0,0,0,0.2);
             border-radius: 5px;
+        }
+
+        .legend .year-item {
             line-height: 24px;
         }
         
@@ -41,6 +45,18 @@
 
         .legend .active-item {
             font-weight: bold;
+        }
+
+        .legend h4 {
+            margin: 0;
+            line-height: 1.2; 
+        }
+
+        .legend .subtitle {
+            color: #666;
+            margin-top: 2px;
+            margin-bottom: 8px;
+            line-height: 1.2; 
         }
 
         .legend i.active {
@@ -68,7 +84,7 @@
             background: rgba(255,255,255,0.9);
             color: #000;
         }
-        
+
         /* Progress bar styles */
         #progress-container {
             position: absolute;
@@ -123,7 +139,6 @@
 
     <script>
         function getColor(age) {
-            // Attempts to mimic the YlOrRd color scheme from Python branca
             const maxAge = 12;
             const ratio = Math.min(age / maxAge, 1);
             
@@ -178,14 +193,20 @@
         const legend = L.control({position: 'topright'});
         legend.onAdd = function (map) {
             const div = L.DomUtil.create('div', 'legend');
-            div.innerHTML = '<h4>Panorama Years</h4>';
             return div;
         };
         legend.addTo(map);
 
+        let cityNameGlobal = '';
+        let stateNameGlobal = '';
+        let totalPanosGlobal = 0;
+
         function updateLegend(years) {
             const div = document.querySelector('.legend');
-            div.innerHTML = '<h4>Panorama Years</h4>';
+            div.innerHTML = `
+                <h4>${cityNameGlobal}, ${stateNameGlobal}</h4>
+                <div class="subtitle">Total Panos: ${totalPanosGlobal.toLocaleString()}</div>
+            `;
             
             const sortedYears = Array.from(years).sort((a, b) => b - a);
             sortedYears.forEach(year => {
@@ -195,14 +216,13 @@
                 const isActive = activeYears.has(year);
                 const count = markersByYear[year].length;
                 
-                // Create the legend item with appropriate classes
                 const itemClass = isActive ? 'active-item' : '';
                 const iconClass = isActive ? 'active' : '';
                 
                 div.innerHTML += `
-                    <div class="${itemClass}">
+                    <div class="year-item ${itemClass}">
                         <i style="background:${color}" class="${iconClass}" onclick="toggleYear(${year})"></i>
-                        ${year} (${count})
+                        ${year} (${count.toLocaleString()})
                     </div>`;
             });
         }
@@ -210,15 +230,12 @@
         function toggleYear(year) {
             const wasActive = activeYears.has(year);
             
-            // Clear all active years first
             activeYears.clear();
             
-            // Show all markers initially
             Object.entries(markersByYear).forEach(([markerYear, markers]) => {
                 markers.forEach(marker => marker.addTo(map));
             });
             
-            // If we weren't already showing this year exclusively, show only this year
             if (!wasActive) {
                 activeYears.add(year);
                 Object.entries(markersByYear).forEach(([markerYear, markers]) => {
@@ -231,6 +248,7 @@
             updateLegend(Object.keys(markersByYear).map(Number));
         }
 
+        // Get the CSV file from URL parameter
         const urlParams = new URLSearchParams(window.location.search);
         const csvFile = urlParams.get('file');
         const rawUrl = 'https://raw.githubusercontent.com/jonfroehlich/gsv-tracker/main/data/';
@@ -248,10 +266,14 @@
                 const jsonText = pako.inflate(new Uint8Array(jsonBuffer), { to: 'string' });
                 const stats = JSON.parse(jsonText);
                 const totalBytes = stats.data_file.size_bytes;
-
+                
                 // Get city and state from JSON metadata
                 const cityName = stats.city.name;
                 const stateName = stats.city.state;
+                
+                // Store globally for legend
+                cityNameGlobal = cityName;
+                stateNameGlobal = stateName;
                 
                 // Format file size to MB with one decimal place
                 const fileSizeMB = (totalBytes / (1024 * 1024)).toFixed(1);
@@ -279,7 +301,6 @@
                     // Update progress
                     const progress = (receivedBytes / totalBytes) * 100;
                     progressFill.style.width = progress + '%';
-                    // progressText.textContent = `Loading data... ${Math.round(progress)}%`;
                     progressText.textContent = `Downloading ${fileSizeMB} MB for ${cityName}, ${stateName}... ${Math.round(progress)}%`;
                 }
 
@@ -342,10 +363,11 @@
                             }
                         });
                         
-                        // Update legend with available years
+                        // Update total pano count
+                        totalPanosGlobal = processedPanos.size;
+                        
                         updateLegend(years);
                         
-                        // Fit map to bounds if we have valid points
                         if (validPoints.length > 0) {
                             const bounds = L.latLngBounds(validPoints);
                             map.fitBounds(bounds);
