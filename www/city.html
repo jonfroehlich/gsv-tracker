@@ -266,7 +266,7 @@
                 const jsonText = pako.inflate(new Uint8Array(jsonBuffer), { to: 'string' });
                 const stats = JSON.parse(jsonText);
                 const totalBytes = stats.data_file.size_bytes;
-                
+
                 // Get city and state from JSON metadata
                 const cityName = stats.city.name;
                 const stateName = stats.city.state;
@@ -274,6 +274,57 @@
                 // Store globally for legend
                 cityNameGlobal = cityName;
                 stateNameGlobal = stateName;
+
+                // Add region outline
+                const bounds = stats.city.bounds;
+                const regionCoords = [
+                    [bounds.min_lat, bounds.min_lon],
+                    [bounds.min_lat, bounds.max_lon],
+                    [bounds.max_lat, bounds.max_lon],
+                    [bounds.max_lat, bounds.min_lon]
+                ];
+
+                // Format dates
+                const oldestDate = new Date(stats.google_panos.age_stats.oldest_pano_date);
+                const newestDate = new Date(stats.google_panos.age_stats.newest_pano_date);
+
+                // Create hover text
+                const hoverInfo = `
+                    <div style="font-family: sans-serif;">
+                        <strong>${cityName}, ${stateName}</strong><br>
+                        <br>
+                        Total panoramas: ${stats.all_panos.duplicate_stats.total_unique_panos.toLocaleString()}<br>
+                        Google panoramas: ${stats.google_panos.duplicate_stats.total_unique_panos.toLocaleString()}<br>
+                        <br>
+                        Search grid area: ${stats.search_grid.area_km2.toFixed(1)} km²<br>
+                        Total search points: ${stats.search_grid.total_search_points.toLocaleString()}<br>
+                        Grid step size: ${stats.search_grid.step_length_meters} meters<br>
+                        <br>
+                        Oldest pano: ${oldestDate.toLocaleDateString()}<br>
+                        Newest pano: ${newestDate.toLocaleDateString()}<br>
+                        Median age: ${stats.google_panos.age_stats.median_pano_age_years.toFixed(1)} years<br>
+                        Average age: ${stats.google_panos.age_stats.avg_pano_age_years.toFixed(1)} years 
+                        (SD=${stats.google_panos.age_stats.stdev_pano_age_years.toFixed(1)} years)
+                    </div>
+                `;
+
+                // Add the polygon to the map
+                const regionPolygon = L.polygon(regionCoords, {
+                    color: 'cyan',
+                    weight: 2,
+                    opacity: 0.8,
+                    fillColor: 'cyan',
+                    fill: false,
+                    fillOpacity: 0.1
+                }).addTo(map);
+
+                // Add hover popup
+                regionPolygon.bindTooltip(hoverInfo, {
+                    sticky: true, // Tooltip follows mouse
+                    opacity: 0.9,
+                    direction: 'auto'
+                });
+                
                 
                 // Format file size to MB with one decimal place
                 const fileSizeMB = (totalBytes / (1024 * 1024)).toFixed(1);
