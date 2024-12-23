@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Street View Panorama Ages</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+        }
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+        }
+
+        .legend {
+            padding: 6px 8px;
+            background: white;
+            background: rgba(255,255,255,0.8);
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            border-radius: 5px;
+            line-height: 24px;
+        }
+        
+        .legend i {
+            width: 18px;
+            height: 18px;
+            float: left;
+            margin-right: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+        }
+
+        .legend i.inactive {
+            opacity: 0.2;
+        }
+
+        .legend .active-item {
+            font-weight: bold;
+        }
+
+        .legend i.active {
+            border: 1px solid black;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+    <script>
+        function getColor(age) {
+            // Attempts to mimic the YlOrRd color scheme from Python branca
+            const maxAge = 12;
+            const ratio = Math.min(age / maxAge, 1);
+            
+            if (ratio < 0.5) {
+                // Interpolate between yellow and orange
+                const r = 255 - (ratio * 2 * (255 - 253));
+                const g = 255 - (ratio * 2 * (255 - 141));
+                const b = 178 - (ratio * 2 * (178 - 60));
+                return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+            } else {
+                // Interpolate between orange and red
+                const adjustedRatio = (ratio - 0.5) * 2;
+                const r = 253 - (adjustedRatio * (253 - 189));
+                const g = 141 - (adjustedRatio * 141);
+                const b = 60 - (adjustedRatio * (60 - 38));
+                return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+            }
+        }
+
+        // Initialize the map
+        const map = L.map('map').setView([0, 0], 13);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '© OpenStreetMap contributors © CARTO',
+            maxZoom: 19
+        }).addTo(map);
+
+        // Add map click handler to reset selection
+        map.on('click', function(e) {
+            if (e.originalEvent.target === map._container) {
+                activeYears.clear();
+                Object.entries(markersByYear).forEach(([markerYear, markers]) => {
+                    markers.forEach(marker => marker.addTo(map));
+                });
+                updateLegend(Object.keys(markersByYear).map(Number));
+            }
+        });
+
+        // Store markers by year for filtering
+        let markersByYear = {};
+        let activeYears = new Set();
+
+        // Create legend
+        const legend = L.control({position: 'topright'});
+        legend.onAdd = function (map) {
+            const div = L.DomUtil.create('div', 'legend');
+            div.innerHTML = '<h4>Panorama Years</h4>';
+            return div;
+        };
+        legend.addTo(map);
+
+        function updateLegend(years) {
+            const div = document.querySelector('.legend');
+            div.innerHTML = '<h4>Panorama Years</h4>';
+            
+            const sortedYears = Array.from(years).sort((a, b) => b - a);
+            sortedYears.forEach(year => {
+                const currentYear = new Date().getFullYear();
+                const age = currentYear - year;
+                const color = getColor(age);
+                const isActive = activeYears.has(year);
+                const count = markersByYear[year].length;
+                
+                // Create the legend item with appropriate classes
+                const itemClass = isActive ? 'active-item' : '';
+                const iconClass = isActive ? 'active' : '';
+                
+                div.innerHTML += `
+                    <div class="${itemClass}">
+                        <i style="background:${color}" class="${iconClass}" onclick="toggleYear(${year})"></i>
+                        ${year} (${count})
+                    </div>`;
+            });
+        }
+
+        function toggleYear(year) {
+            const wasActive = activeYears.has(year);
+            
+            // Clear all active years first
+            activeYears.clear();
+            
+            // Show all markers initially
+            Object.entries(markersByYear).forEach(([markerYear, markers]) => {
+                markers.forEach(marker => marker.addTo(map));
+            });
+            
+            // If we weren't already showing this year exclusively, show only this year
+            if (!wasActive) {
+                activeYears.add(year);
+                Object.entries(markersByYear).forEach(([markerYear, markers]) => {
+                    if (parseInt(markerYear) !== year) {
+                        markers.forEach(marker => marker.remove());
+                    }
+                });
+            }
+            
+            updateLegend(Object.keys(markersByYear).map(Number));
+        }
+
+        // Get the CSV file from URL parameter
+        const urlParams = new URLSearchParams(window.location.search);
+        const csvFile = urlParams.get('file');
+        const rawUrl = 'https://raw.githubusercontent.com/jonfroehlich/gsv-tracker/main/data/';
+        const dataUrl = rawUrl + csvFile;
+
+        if (!csvFile) {
+            alert('Please provide a CSV file using the "file" URL parameter');
+        } else {
+            // Fetch and process the CSV file
+            fetch(dataUrl)
+                .then(response => response.arrayBuffer())
+                .then(arrayBuffer => {
+                    // Decompress gzipped data
+                    const decompressed = pako.inflate(new Uint8Array(arrayBuffer), { to: 'string' });
+                    
+                    // Parse CSV
+                    Papa.parse(decompressed, {
+                        header: true,
+                        dynamicTyping: true,
+                        complete: function(results) {
+                            let validPoints = [];
+                            const years = new Set();
+                            
+                            results.data.forEach(row => {
+                                if (row.status === 'OK' && 
+                                    row.copyright_info === '© Google' && 
+                                    row.capture_date &&
+                                    row.pano_lat != null &&
+                                    row.pano_lon != null) {
+                                    
+                                    const captureDate = new Date(row.capture_date);
+                                    const year = captureDate.getFullYear();
+                                    const currentYear = new Date().getFullYear();
+                                    const age = currentYear - year;
+                                    
+                                    const marker = L.circleMarker([row.pano_lat, row.pano_lon], {
+                                        radius: 3,
+                                        fillColor: getColor(age),
+                                        color: '#000',
+                                        weight: 0,
+                                        opacity: 1,
+                                        fillOpacity: 0.8
+                                    });
+                                    
+                                    marker.bindPopup(`Capture Date: ${row.capture_date}<br>Pano ID: ${row.pano_id}`);
+                                    marker.addTo(map);
+                                    
+                                    // Store marker by year
+                                    if (!markersByYear[year]) {
+                                        markersByYear[year] = [];
+                                    }
+                                    markersByYear[year].push(marker);
+                                    years.add(year);
+                                    
+                                    validPoints.push([row.pano_lat, row.pano_lon]);
+                                }
+                            });
+                            
+                            // Update legend with available years
+                            updateLegend(years);
+                            
+                            // Fit map to bounds if we have valid points
+                            if (validPoints.length > 0) {
+                                const bounds = L.latLngBounds(validPoints);
+                                map.fitBounds(bounds);
+                            }
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('Error loading or parsing file:', error);
+                    alert('Error loading or parsing the CSV file. Please check the console for details.');
+                });
+        }
+    </script>
+</body>
+</html>
