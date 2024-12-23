@@ -8,3 +8,4 @@ data/*.csv
 backup_data/*
 vis/*.html
 www/index copy.html
+data/sammamish_wa_width_9582_height_11549_step_20.json
