@@ -31,22 +31,20 @@
             height: 18px;
             float: left;
             margin-right: 8px;
-            /* Default styling */
-            background-color: #ddd; /* Set a default background color */
             cursor: pointer;
-            border: 1px solid transparent; /* Add a transparent border */
-            transition: all 0.2s ease-in-out; /* Add transition for smooth effect */
+            transition: all 0.2s ease-in-out;
         }
 
         .legend i.inactive {
             opacity: 0.2;
         }
 
-        .legend i:active, .legend i.active {
-            /* Styles for active legend items */
-            background-color: #ddd; /* Set the same background color for active state */
-            border: 1px solid black; /* Change border to black */
-            font-weight: bold; /* Make text bold */
+        .legend .active-item {
+            font-weight: bold;
+        }
+
+        .legend i.active {
+            border: 1px solid black;
         }
     </style>
 </head>
@@ -122,11 +120,15 @@
                 const isActive = activeYears.has(year);
                 const count = markersByYear[year].length;
                 
-                // Set the class based on active state
-                const legendClass = isActive ? '' : 'inactive';
+                // Create the legend item with appropriate classes
+                const itemClass = isActive ? 'active-item' : '';
+                const iconClass = isActive ? 'active' : '';
                 
-                div.innerHTML += `<i style="background:${color}" class="${legendClass}" 
-                                    onclick="toggleYear(${year})"></i>${year} (${count})<br>`;
+                div.innerHTML += `
+                    <div class="${itemClass}">
+                        <i style="background:${color}" class="${iconClass}" onclick="toggleYear(${year})"></i>
+                        ${year} (${count})
+                    </div>`;
             });
         }
 
@@ -196,7 +198,7 @@
                                         color: '#000',
                                         weight: 0,
                                         opacity: 1,
-                                        fillOpacity: 0.8 // Set translucency
+                                        fillOpacity: 0.8
                                     });
                                     
                                     marker.bindPopup(`Capture Date: ${row.capture_date}<br>Pano ID: ${row.pano_id}`);
