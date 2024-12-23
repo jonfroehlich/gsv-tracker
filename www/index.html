@@ -237,22 +237,7 @@
             const containerDiv = document.createElement('div');
             containerDiv.style.minWidth = '250px';
             
-            // Create the view link
-            const cityFileName = city.data_file.filename;
-            const viewLink = document.createElement('a');
-            viewLink.href = `city.html?file=${encodeURIComponent(cityFileName)}`;
-            viewLink.target = '_blank';
-            viewLink.className = 'view-details-link';
-            viewLink.style.display = 'inline-block';
-            viewLink.style.padding = '8px 16px';
-            viewLink.style.backgroundColor = '#4CAF50';
-            viewLink.style.color = 'white';
-            viewLink.style.textDecoration = 'none';
-            viewLink.style.borderRadius = '4px';
-            viewLink.style.marginBottom = '12px';
-            viewLink.innerHTML = 'View Detailed Analysis';
-            
-            // Create basic info HTML
+            // Add basic info HTML first
             containerDiv.innerHTML = `
                 <h3>${cityName}, ${city.state}, ${city.country}</h3>
                 <strong>Coverage Statistics:</strong>
@@ -269,16 +254,6 @@
                     <li>Oldest: ${new Date(city.google_panos_age_stats.oldest_date).toLocaleDateString()}</li>
                 </ul>
             `;
-
-            // Get the h3 element inside the containerDiv
-            const cityHeader = containerDiv.querySelector('h3');
-
-            // Insert the view link at the top of the container
-            containerDiv.insertBefore(viewLink, cityHeader.nextSibling);
-
-            // Insert a line break after the link
-            const br = document.createElement('br');
-            containerDiv.insertBefore(br, viewLink.nextSibling);
             
             // Create chart container
             const chartContainer = document.createElement('div');
@@ -296,6 +271,31 @@
             
             // Add chart container to main container
             containerDiv.appendChild(chartContainer);
+            
+            // Create button container with right alignment
+            const buttonContainer = document.createElement('div');
+            buttonContainer.style.textAlign = 'right';
+            buttonContainer.style.marginTop = '12px';
+            
+            // Create the view link
+            const cityFileName = city.data_file.filename;
+            const viewLink = document.createElement('a');
+            viewLink.href = `city.html?file=${encodeURIComponent(cityFileName)}`;
+            viewLink.target = '_blank';
+            viewLink.className = 'view-details-link';
+            viewLink.style.display = 'inline-block';
+            viewLink.style.padding = '8px 16px';
+            viewLink.style.backgroundColor = '#4CAF50';
+            viewLink.style.color = 'white';
+            viewLink.style.textDecoration = 'none';
+            viewLink.style.borderRadius = '4px';
+            viewLink.innerHTML = 'View Detailed Analysis';
+            
+            // Add the link to the button container
+            buttonContainer.appendChild(viewLink);
+            
+            // Add button container to main container
+            containerDiv.appendChild(buttonContainer);
             
             return containerDiv;
         }

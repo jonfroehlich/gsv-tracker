@@ -46,10 +46,76 @@
         .legend i.active {
             border: 1px solid black;
         }
+
+        /* Back link styles */
+        #back-link {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 8px 12px;
+            background: white;
+            background: rgba(255,255,255,0.8);
+            border-radius: 4px;
+            z-index: 1000;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            text-decoration: none;
+            color: #333;
+            font-family: sans-serif;
+            font-size: 14px;
+        }
+
+        #back-link:hover {
+            background: rgba(255,255,255,0.9);
+            color: #000;
+        }
+        
+        /* Progress bar styles */
+        #progress-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 300px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            z-index: 1000;
+            display: none;
+        }
+
+        #progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        #progress-fill {
+            height: 100%;
+            background-color: #4CAF50;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        #progress-text {
+            text-align: center;
+            font-family: sans-serif;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
     <div id="map"></div>
+    <a href="/" id="back-link">← Back to Overview Map</a>
+    <div id="progress-container">
+        <div id="progress-bar">
+            <div id="progress-fill"></div>
+        </div>
+        <div id="progress-text">Initializing download...</div>
+    </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
@@ -77,8 +143,17 @@
             }
         }
 
-        // Initialize the map
-        const map = L.map('map').setView([0, 0], 13);
+        // Initialize the map with zoom control disabled, so we can
+        // add it and set its position to the bottomleft
+        const map = L.map('map', {
+            zoomControl: false  // Disable default zoom control
+        }).setView([0, 0], 13);
+
+        // Add zoom control to bottom left
+        L.control.zoom({
+            position: 'bottomleft'
+        }).addTo(map);
+
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
             attribution: '© OpenStreetMap contributors © CARTO',
             maxZoom: 19
@@ -156,81 +231,136 @@
             updateLegend(Object.keys(markersByYear).map(Number));
         }
 
-        // Get the CSV file from URL parameter
         const urlParams = new URLSearchParams(window.location.search);
         const csvFile = urlParams.get('file');
         const rawUrl = 'https://raw.githubusercontent.com/jonfroehlich/gsv-tracker/main/data/';
-        const dataUrl = rawUrl + csvFile;
+        
+        async function loadData() {
+            if (!csvFile) {
+                alert('Please provide a CSV file using the "file" URL parameter');
+                return;
+            }
 
-        if (!csvFile) {
-            alert('Please provide a CSV file using the "file" URL parameter');
-        } else {
-            // Fetch and process the CSV file
-            fetch(dataUrl)
-                .then(response => response.arrayBuffer())
-                .then(arrayBuffer => {
-                    // Decompress gzipped data
-                    const decompressed = pako.inflate(new Uint8Array(arrayBuffer), { to: 'string' });
+            try {
+                // First fetch the JSON stats file
+                const jsonResponse = await fetch(rawUrl + csvFile.replace('.csv.gz', '.json.gz'));
+                const jsonBuffer = await jsonResponse.arrayBuffer();
+                const jsonText = pako.inflate(new Uint8Array(jsonBuffer), { to: 'string' });
+                const stats = JSON.parse(jsonText);
+                const totalBytes = stats.data_file.size_bytes;
+
+                // Get city and state from JSON metadata
+                const cityName = stats.city.name;
+                const stateName = stats.city.state;
+                
+                // Format file size to MB with one decimal place
+                const fileSizeMB = (totalBytes / (1024 * 1024)).toFixed(1);
+
+                // Show progress container
+                const progressContainer = document.getElementById('progress-container');
+                const progressFill = document.getElementById('progress-fill');
+                const progressText = document.getElementById('progress-text');
+                progressContainer.style.display = 'block';
+
+                // Fetch the CSV file with progress tracking
+                const response = await fetch(rawUrl + csvFile);
+                const reader = response.body.getReader();
+                const chunks = [];
+                let receivedBytes = 0;
+
+                while(true) {
+                    const {done, value} = await reader.read();
                     
-                    // Parse CSV
-                    Papa.parse(decompressed, {
-                        header: true,
-                        dynamicTyping: true,
-                        complete: function(results) {
-                            let validPoints = [];
-                            const years = new Set();
-                            
-                            results.data.forEach(row => {
-                                if (row.status === 'OK' && 
-                                    row.copyright_info === '© Google' && 
-                                    row.capture_date &&
-                                    row.pano_lat != null &&
-                                    row.pano_lon != null) {
-                                    
-                                    const captureDate = new Date(row.capture_date);
-                                    const year = captureDate.getFullYear();
-                                    const currentYear = new Date().getFullYear();
-                                    const age = currentYear - year;
-                                    
-                                    const marker = L.circleMarker([row.pano_lat, row.pano_lon], {
-                                        radius: 3,
-                                        fillColor: getColor(age),
-                                        color: '#000',
-                                        weight: 0,
-                                        opacity: 1,
-                                        fillOpacity: 0.8
-                                    });
-                                    
-                                    marker.bindPopup(`Capture Date: ${row.capture_date}<br>Pano ID: ${row.pano_id}`);
-                                    marker.addTo(map);
-                                    
-                                    // Store marker by year
-                                    if (!markersByYear[year]) {
-                                        markersByYear[year] = [];
-                                    }
-                                    markersByYear[year].push(marker);
-                                    years.add(year);
-                                    
-                                    validPoints.push([row.pano_lat, row.pano_lon]);
+                    if (done) break;
+                    
+                    chunks.push(value);
+                    receivedBytes += value.length;
+                    
+                    // Update progress
+                    const progress = (receivedBytes / totalBytes) * 100;
+                    progressFill.style.width = progress + '%';
+                    // progressText.textContent = `Loading data... ${Math.round(progress)}%`;
+                    progressText.textContent = `Downloading ${fileSizeMB} MB for ${cityName}, ${stateName}... ${Math.round(progress)}%`;
+                }
+
+                // Concatenate chunks
+                const allChunks = new Uint8Array(receivedBytes);
+                let position = 0;
+                for(const chunk of chunks) {
+                    allChunks.set(chunk, position);
+                    position += chunk.length;
+                }
+
+                // Hide progress container
+                progressContainer.style.display = 'none';
+
+                // Decompress and parse
+                const decompressed = pako.inflate(allChunks, { to: 'string' });
+                Papa.parse(decompressed, {
+                    header: true,
+                    dynamicTyping: true,
+                    complete: function(results) {
+                        let validPoints = [];
+                        const years = new Set();
+                        const processedPanos = new Set();
+                        
+                        results.data.forEach(row => {
+                            if (row.status === 'OK' && 
+                                row.copyright_info === '© Google' && 
+                                row.capture_date &&
+                                row.pano_lat != null &&
+                                row.pano_lon != null &&
+                                row.pano_id &&
+                                !processedPanos.has(row.pano_id)) {  // Only process if we haven't seen this pano_id
+                                
+                                processedPanos.add(row.pano_id);  // Mark this pano_id as processed
+                                
+                                const captureDate = new Date(row.capture_date);
+                                const year = captureDate.getFullYear();
+                                const currentYear = new Date().getFullYear();
+                                const age = currentYear - year;
+                                
+                                const marker = L.circleMarker([row.pano_lat, row.pano_lon], {
+                                    radius: 3,
+                                    fillColor: getColor(age),
+                                    color: '#000',
+                                    weight: 0,
+                                    opacity: 1,
+                                    fillOpacity: 0.8
+                                });
+                                
+                                marker.bindPopup(`Capture Date: ${row.capture_date}<br>Pano ID: ${row.pano_id}`);
+                                marker.addTo(map);
+                                
+                                if (!markersByYear[year]) {
+                                    markersByYear[year] = [];
                                 }
-                            });
-                            
-                            // Update legend with available years
-                            updateLegend(years);
-                            
-                            // Fit map to bounds if we have valid points
-                            if (validPoints.length > 0) {
-                                const bounds = L.latLngBounds(validPoints);
-                                map.fitBounds(bounds);
+                                markersByYear[year].push(marker);
+                                years.add(year);
+                                
+                                validPoints.push([row.pano_lat, row.pano_lon]);
                             }
+                        });
+                        
+                        // Update legend with available years
+                        updateLegend(years);
+                        
+                        // Fit map to bounds if we have valid points
+                        if (validPoints.length > 0) {
+                            const bounds = L.latLngBounds(validPoints);
+                            map.fitBounds(bounds);
                         }
-                    });
-                })
-                .catch(error => {
-                    console.error('Error loading or parsing file:', error);
-                    alert('Error loading or parsing the CSV file. Please check the console for details.');
+                    }
                 });
+
+            } catch (error) {
+                console.error('Error loading or parsing file:', error);
+                alert('Error loading or parsing the file. Please check the console for details.');
+                document.getElementById('progress-container').style.display = 'none';
+            }
         }
+
+        loadData();
     </script>
 </body>
 </html>
