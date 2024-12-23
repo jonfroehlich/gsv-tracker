@@ -91,7 +91,7 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            width: 300px;
+            width: 450px;
             background: white;
             padding: 20px;
             border-radius: 8px;
@@ -392,6 +392,12 @@
                                 const currentYear = new Date().getFullYear();
                                 const age = currentYear - year;
                                 
+                                // Calculate age with precision
+                                const ageInYears = (new Date() - captureDate) / (1000 * 60 * 60 * 24 * 365.25);
+                                const ageFormatted = ageInYears < 1 ? 
+                                    `${Math.round(ageInYears * 12)} months` : 
+                                    `${ageInYears.toFixed(1)} years`;
+
                                 const marker = L.circleMarker([row.pano_lat, row.pano_lon], {
                                     radius: 3,
                                     fillColor: getColor(age),
@@ -401,7 +407,22 @@
                                     fillOpacity: 0.8
                                 });
                                 
-                                marker.bindPopup(`Capture Date: ${row.capture_date}<br>Pano ID: ${row.pano_id}`);
+                                const popupContent = `
+                                    <div style="font-family: sans-serif;">
+                                        <strong>Capture Date:</strong> ${captureDate.toLocaleDateString()}<br>
+                                        <strong>Age:</strong> ${ageFormatted}<br>
+                                        <strong>Photographer:</strong> Google<br>
+                                        <strong>Pano ID:</strong> ${row.pano_id}<br>
+                                        <br>
+                                        <a href="https://www.google.com/maps/@?api=1&map_action=pano&pano=${row.pano_id}" 
+                                           target="_blank" 
+                                           style="color: #2196F3; text-decoration: none;">
+                                           View in Google Street View
+                                        </a>
+                                    </div>
+                                `;
+                                
+                                marker.bindPopup(popupContent);
                                 marker.addTo(map);
                                 
                                 if (!markersByYear[year]) {
