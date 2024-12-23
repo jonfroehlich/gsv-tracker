@@ -16,6 +16,7 @@
             bottom: 0;
             width: 100%;
         }
+
         .legend {
             padding: 6px 8px;
             background: white;
@@ -24,16 +25,28 @@
             border-radius: 5px;
             line-height: 24px;
         }
+        
         .legend i {
             width: 18px;
             height: 18px;
             float: left;
             margin-right: 8px;
-            opacity: 0.7;
+            /* Default styling */
+            background-color: #ddd; /* Set a default background color */
             cursor: pointer;
+            border: 1px solid transparent; /* Add a transparent border */
+            transition: all 0.2s ease-in-out; /* Add transition for smooth effect */
         }
+
         .legend i.inactive {
             opacity: 0.2;
+        }
+
+        .legend i:active, .legend i.active {
+            /* Styles for active legend items */
+            background-color: #ddd; /* Set the same background color for active state */
+            border: 1px solid black; /* Change border to black */
+            font-weight: bold; /* Make text bold */
         }
     </style>
 </head>
@@ -73,6 +86,17 @@
             maxZoom: 19
         }).addTo(map);
 
+        // Add map click handler to reset selection
+        map.on('click', function(e) {
+            if (e.originalEvent.target === map._container) {
+                activeYears.clear();
+                Object.entries(markersByYear).forEach(([markerYear, markers]) => {
+                    markers.forEach(marker => marker.addTo(map));
+                });
+                updateLegend(Object.keys(markersByYear).map(Number));
+            }
+        });
+
         // Store markers by year for filtering
         let markersByYear = {};
         let activeYears = new Set();
@@ -97,8 +121,12 @@
                 const color = getColor(age);
                 const isActive = activeYears.has(year);
                 const count = markersByYear[year].length;
-                div.innerHTML += `<i style="background:${color}" class="${isActive ? '' : 'inactive'}" 
-                                   onclick="toggleYear(${year})"></i>${year} (${count})<br>`;
+                
+                // Set the class based on active state
+                const legendClass = isActive ? '' : 'inactive';
+                
+                div.innerHTML += `<i style="background:${color}" class="${legendClass}" 
+                                    onclick="toggleYear(${year})"></i>${year} (${count})<br>`;
             });
         }
 
@@ -163,12 +191,12 @@
                                     const age = currentYear - year;
                                     
                                     const marker = L.circleMarker([row.pano_lat, row.pano_lon], {
-                                        radius: 4,
+                                        radius: 3,
                                         fillColor: getColor(age),
                                         color: '#000',
-                                        weight: 1,
+                                        weight: 0,
                                         opacity: 1,
-                                        fillOpacity: 0.8
+                                        fillOpacity: 0.8 // Set translucency
                                     });
                                     
                                     marker.bindPopup(`Capture Date: ${row.capture_date}<br>Pano ID: ${row.pano_id}`);
