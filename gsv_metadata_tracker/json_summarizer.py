@@ -251,6 +251,9 @@ def calculate_histogram_of_capture_dates_by_year(df_input: pd.DataFrame, google_
     
     # Convert capture_date to datetime and extract year
     df_filtered['capture_year'] = pd.to_datetime(df_filtered['capture_date']).dt.year
+
+    # Drop duplicates based on pano_id to ensure each panorama is counted only once
+    df_filtered = df_filtered.drop_duplicates(subset=['pano_id'])
     
     # Create year histogram
     year_counts = df_filtered['capture_year'].value_counts().sort_index()
