@@ -10,3 +10,4 @@ vis/*.html
 www/index copy.html
 data/sammamish_wa_width_9582_height_11549_step_20.json
 data/tumwater_wa_width_8285_height_9909_step_20.json
+/tests/test_data

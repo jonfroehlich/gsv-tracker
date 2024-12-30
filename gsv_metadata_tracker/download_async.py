@@ -22,6 +22,22 @@ from .config import METADATA_DTYPES
 
 logger = logging.getLogger(__name__)
 
+def create_helpful_permission_error(path: str) -> str:
+    """Create a helpful error message for permission issues."""
+    return (
+        f"Permission denied when accessing: {path}\n"
+        f"This typically occurs on Windows when:\n"
+        f"1. The data directory is read-only\n"
+        f"2. Another program has locked the directory\n"
+        f"3. You need administrator privileges\n\n"
+        f"To fix this:\n"
+        f"- Run your terminal as administrator\n"
+        f"- Check folder permissions in File Explorer\n"
+        f"- Close any programs that might be accessing the directory\n"
+        f"- Try setting GSV_DOWNLOAD_PATH to a different directory using:\n"
+        f"  conda env config vars set GSV_DOWNLOAD_PATH=D:\\your\\preferred\\path"
+    )
+
 class DownloadError(Exception):
     """Custom exception for download-related errors."""
     pass
@@ -230,38 +246,31 @@ async def process_batch_async(
         # Save batch results to temporary file
         df_batch = pd.DataFrame(batch_results)  # First create the DataFrame
         df_batch = df_batch.astype(METADATA_DTYPES)  # Then apply the dtypes
-        df_batch.to_csv(temp_file, index=False)
-        
-        # Create a proper lock file with content
-        lock = FileLock(lock_file)
+
         try:
-            # Add a small delay to ensure lock file is properly created
-            lock.acquire(timeout=10)
-            
-            # Write process information to lock file
-            with open(lock_file, 'w') as f:
-                f.write(f"Process ID: {os.getpid()}\n")
-                f.write(f"Timestamp: {datetime.now().isoformat()}\n")
-                f.write(f"Batch ID: {batch_id}\n")
-            
-            # Perform the file operations
-            if os.path.exists(base_file_path):
-                df_batch.to_csv(base_file_path, mode='a', header=False, index=False)
-            else:
-                df_batch.to_csv(base_file_path, index=False)
-                
-        finally:
-            # Ensure lock is released and lock file is removed
-            if lock.is_locked:
-                lock.release()
-            try:
-                os.remove(lock_file)
-            except FileNotFoundError:
-                pass
+            df_batch.to_csv(temp_file, index=False)
+        except PermissionError as e:
+            logger.error("df_batch.to_csv failed: " + create_helpful_permission_error(temp_file))
+            raise PermissionError("df_batch.to_csv failed: " + create_helpful_permission_error(temp_file))
         
-        # Clean up temp file
-        if os.path.exists(temp_file):
-            os.remove(temp_file)
+        # Create a proper lock file
+        lock = FileLock(lock_file, timeout=10)
+        try:
+            with lock:            
+                if os.path.exists(base_file_path):
+                    df_batch.to_csv(base_file_path, mode='a', header=False, index=False)
+                else:
+                    df_batch.to_csv(base_file_path, index=False)
+        except PermissionError as e:
+            raise PermissionError("FileLock failure: " + create_helpful_permission_error(base_file_path))        
+        finally:
+            # Clean up temp files
+            for file in [temp_file, lock_file]:
+                try:
+                    if os.path.exists(file):
+                        os.remove(file)
+                except FileNotFoundError:
+                    pass
         
         results.extend(batch_results)
         
