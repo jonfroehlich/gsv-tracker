@@ -34,8 +34,8 @@ def create_helpful_permission_error(path: str) -> str:
         f"- Run your terminal as administrator\n"
         f"- Check folder permissions in File Explorer\n"
         f"- Close any programs that might be accessing the directory\n"
-        f"- Try setting GSV_DOWNLOAD_PATH to a different directory using:\n"
-        f"  conda env config vars set GSV_DOWNLOAD_PATH=D:\\your\\preferred\\path"
+        f"- Try setting the command line param download-dir to a different directory using:\n"
+        f"  python gsv_tracker.py CITY_NAME --download-dir NEW_DIRECTORY\n"
     )
 
 class DownloadError(Exception):
