@@ -87,6 +87,14 @@ def parse_args():
         'city', 
         help='City name to analyze (e.g., "Seattle, WA")'
     )
+
+    # Optional arguments for download directory
+    parser.add_argument(
+        '--download-dir',
+        type=str,
+        help='Directory to save downloaded data (defaults to ./data)',
+        default=get_default_data_dir()
+    )
     
     # Optional grid dimension arguments
     parser.add_argument(
@@ -181,7 +189,7 @@ def main():
         # If checking boundaries, create and save visualization then exit
         if args.check_boundary:
             base_name = generate_base_filename(args.city, args.width, args.height, args.step)
-            preview_path = os.path.join(config['download_path'], f"{base_name}_preview.html")
+            preview_path = os.path.join(args.download_dir, f"{base_name}_preview.html")
             
             # Create preview map using your display_search_area function
             preview_map = display_search_area(
@@ -208,13 +216,13 @@ def main():
             grid_height=args.height,
             step_length=args.step,
             api_key=config['api_key'],
-            download_path=config['download_path']
+            download_path=args.download_dir
         )
         
         # Generate visualization if not disabled
         if not args.no_visual:
             base_name = generate_base_filename(args.city, args.width, args.height, args.step)
-            map_path = os.path.join(config['download_path'], f"{base_name}.html")
+            map_path = os.path.join(args.download_dir, f"{base_name}.html")
             
             map_obj = create_visualization_map(df, args.city)
             map_obj.save(map_path)

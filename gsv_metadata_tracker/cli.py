@@ -27,6 +27,7 @@ import aiohttp
 from typing import Optional
 from .fileutils import get_default_vis_dir
 from .json_summarizer import generate_city_metadata_summary_as_json, generate_aggregate_summary_as_json
+from .paths import get_default_data_dir, get_default_vis_dir
 from . import (
     load_config,
     get_city_location_data,
@@ -70,6 +71,14 @@ def parse_args():
     parser.add_argument(
         'city', 
         help='City name to analyze'
+    )
+
+    # Optional arguments for download directory
+    parser.add_argument(
+        '--download-dir',
+        type=str,
+        help='Dir to save downloaded data (defaults to ./data)',
+        default=get_default_data_dir()
     )
     
     parser.add_argument(
@@ -180,6 +189,10 @@ async def async_main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
+
+    # Create the data directory if it doesn't exist
+    os.makedirs(args.download_dir, exist_ok=True)
+    logging.info(f"Using download directory: {args.download_dir}")
     
     try:
         config = load_config()
@@ -241,7 +254,7 @@ async def async_main():
             grid_height=search_grid_height,
             step_length=args.step,
             api_key=config['api_key'],
-            download_path=config['download_path'],
+            download_path=args.download_dir,
             batch_size=args.batch_size,
             connection_limit=args.connection_limit,
             request_timeout=args.timeout
@@ -258,7 +271,7 @@ async def async_main():
                                                search_grid_width, search_grid_height, 
                                                args.step)
         
-        generate_aggregate_summary_as_json(config['download_path'])
+        generate_aggregate_summary_as_json(args.download_dir)
 
         if not args.no_visual:
             base_name = generate_base_filename(args.city, search_grid_width, search_grid_height, args.step)
