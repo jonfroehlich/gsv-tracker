@@ -22,13 +22,9 @@ METADATA_DTYPES = {
 
 def load_config() -> Dict[str, Any]:
     """Load configuration from conda environment variables."""
-
-    # Get the project root directory (two levels up from this file)
-    data_dir = get_default_data_dir()
  
     config = {
         'api_key': os.environ.get('GMAPS_API_KEY'),
-        'download_path': os.environ.get('GSV_DOWNLOAD_PATH')
     }
 
     if not config['api_key']:
@@ -43,13 +39,5 @@ def load_config() -> Dict[str, Any]:
             "\nIf you do not have a Google Maps API key, you can create one at https://console.cloud.google.com/apis/credentials\n"
             "You will need to enable the Street View Static API for the key."
         )
-    
-    if not config['download_path']:
-        logger.info(f"FYI: The GSV_DOWNLOAD_PATH not set as an environment variable, using default path: {data_dir}")
-        config['download_path'] = data_dir
-
-    # Create the data directory if it doesn't exist
-    os.makedirs(config['download_path'], exist_ok=True)
-    logger.info(f"Using data directory: {config['download_path']}")
     
     return config
