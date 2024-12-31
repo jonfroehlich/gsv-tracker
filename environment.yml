@@ -3,18 +3,20 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.9
-  - pandas
-  - numpy
-  - folium
-  - geopy
-  - requests
-  - tqdm
-  - matplotlib
-  - seaborn
-  - branca
-  - python-dotenv
-  - pytest
-  - filelock
-  - aiohttp
-  - backoff
+  - python=3.11 # Project was started with 3.11
+  - pandas=2.2.0  # Core data processing
+  - numpy=1.26.3  # Required by pandas
+  - folium=0.15.1  # Map visualization
+  - geopy=2.4.1  # Geocoding and distance calculations
+  - requests=2.31.0  # API calls
+  - tqdm=4.66.1  # Progress bars for long operations
+  - matplotlib=3.8.2  # Basic plotting
+  - seaborn=0.13.1  # Statistical visualizations
+  - branca=0.7.0  # Required by folium
+  - python-dotenv=1.0.0  # Environment variable management
+  - pytest=7.4.4  # Testing framework
+  - filelock=3.13.1  # File locking for concurrent operations
+  - aiohttp=3.9.1  # Async HTTP requests
+  - backoff=2.2.1  # API retry logic
+  - us=3.1.1  # US state/territory data
+  - pycountry=22.3.5  # Country code handling
