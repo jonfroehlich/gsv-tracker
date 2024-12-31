@@ -103,7 +103,7 @@ class EnhancedLocation:
     All other attributes are delegated to the wrapped Location object, so this class can be used
     as a drop-in replacement for the original Location class.
     """
-    def __init__(self, location):
+    def __init__(self, city_query_str, location):
         """
         Initialize the enhanced location wrapper.
 
@@ -124,6 +124,7 @@ class EnhancedLocation:
         self._city = None
         self._country_code = None
         self._state_code = None
+        self._city_query_str = city_query_str
 
 
         logger.debug(f"EnhancedLocation created for {location}")
@@ -146,12 +147,20 @@ class EnhancedLocation:
                     break
 
             # Try different possible city field names
-            for field in ['city', 'town', 'village', 'municipality', 'suburb']:
+            for field in ['city', 'town', 'township', 'village', 'municipality', 'suburb']:
                 if field in address_data:
                     self._city = address_data.get(field)
                     logger.debug(f"EnhancedLocation state {self._city} found with field {field}")
                     break
-            
+
+            if self._city is None:
+                logger.warning(f"Could not find city in {address_data}, will attempt to extract from query string {self._city_query_str}")
+                if ',' in self._city_query_str:
+                    self._city = self._city_query_str.split(',')[0].strip()
+                else:
+                    self._city = self._city_query_str
+                
+                logger.info(f"Extracted city from query string: {self._city}")
             
     @property
     def country_code(self) -> Optional[str]:
@@ -229,10 +238,52 @@ class EnhancedLocation:
             AttributeError: If the attribute doesn't exist on the wrapped Location object
         """
         return getattr(self._location, name)
+    
+    def __str__(self) -> str:
+        """
+        Returns a human-readable string representation of the location.
+        
+        The string includes available location components in a hierarchical format:
+        city, state (state_code), country (country_code). Components that aren't
+        available are omitted.
+        
+        Returns:
+            str: A formatted string containing the available location information
+        
+        Examples:
+            "San Francisco, California (CA), United States (US)"
+            "London, United Kingdom (GB)"
+            "Paris, Île-de-France, France (FR)"
+        """
+        components = []
+        
+        # Add city if available
+        if self._city:
+            components.append(self._city)
+            
+        # Add state with code if available
+        if self._state:
+            state_str = self._state
+            if self._state_code:
+                state_str += f" ({self._state_code})"
+            components.append(state_str)
+            
+        # Add country with code if available
+        if self._country:
+            country_str = self._country
+            if self._country_code:
+                country_str += f" ({self._country_code})"
+            components.append(country_str)
+            
+        # Handle empty case
+        if not components:
+            return "Unknown Location"
+            
+        return ", ".join(components)
 
 @lru_cache(maxsize=128)
 def get_city_location_data(
-    city_name: str, 
+    city_query_str: str, 
     center_lat: Optional[float] = None, 
     center_lng: Optional[float] = None
 ) -> Optional[EnhancedLocation]:
@@ -251,7 +302,7 @@ def get_city_location_data(
     location = get_city_location_data("Springfield", 42.1015, -72.5898)
     
     Args:
-        city_name: Name of the city to look up
+        city_query_str: Name of the city to look up
         center_lat: Optional latitude to help disambiguate city location
         center_lng: Optional longitude to help disambiguate city location
         
@@ -281,7 +332,7 @@ def get_city_location_data(
         >>>     bbox = location.raw['boundingbox']
         >>>     print(f"City bounds: N:{bbox[1]} S:{bbox[0]} E:{bbox[3]} W:{bbox[2]}")
     """
-    if not city_name or not city_name.strip():
+    if not city_query_str or not city_query_str.strip():
         logging.error("City name cannot be empty")
         return None
         
@@ -296,7 +347,7 @@ def get_city_location_data(
         if center_lat is not None and center_lng is not None:
             # Get multiple location results
             locations = geolocator.geocode(
-                city_name,
+                city_query_str,
                 language="en",
                 addressdetails=True,
                 exactly_one=False
@@ -313,7 +364,7 @@ def get_city_location_data(
                     ).kilometers
                 )
                 logging.info(
-                    f"Found closest match for {city_name} near ({center_lat}, {center_lng}): "
+                    f"Found closest match for {city_query_str} near ({center_lat}, {center_lng}): "
                     f"{closest_location.latitude}, {closest_location.longitude}"
                 )
                 found_loc = closest_location
@@ -321,30 +372,33 @@ def get_city_location_data(
         if not found_loc:    
             # If no center coordinates or no results found, fall back to basic search
             found_loc = geolocator.geocode(
-                city_name,
+                city_query_str,
                 language="en",
                 addressdetails=True
             )
         
         if found_loc is not None:
-            logging.info(f"Found coordinates for {city_name}: {found_loc.latitude}, {found_loc.longitude}")
+            logging.info(f"Found coordinates for {city_query_str}: {found_loc.latitude}, {found_loc.longitude}")
             
             print(found_loc.latitude, found_loc.longitude)
             print(found_loc.address)
 
-            return EnhancedLocation(found_loc)
+            enhancedLoc = EnhancedLocation(city_query_str, found_loc)
+            logging.info(f"From query string '{city_query_str}', created '{enhancedLoc}'")
+            return enhancedLoc
+            
         else:
-            logging.warning(f"Could not find coordinates for {city_name}")
+            logging.warning(f"Could not find coordinates for {city_query_str}")
             return None
             
     except GeocoderTimedOut:
-        logging.error(f"Timeout looking up coordinates for {city_name}")
+        logging.error(f"Timeout looking up coordinates for {city_query_str}")
         return None
     except GeocoderUnavailable:
-        logging.error(f"Geocoding service unavailable for {city_name}")
+        logging.error(f"Geocoding service unavailable for {city_query_str}")
         return None
     except Exception as e:
-        logging.error(f"Error looking up coordinates for {city_name}: {str(e)}")
+        logging.error(f"Error looking up coordinates for {city_query_str}: {str(e)}")
         return None
 
 
