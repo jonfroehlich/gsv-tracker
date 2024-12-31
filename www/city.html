@@ -261,6 +261,7 @@
         const urlParams = new URLSearchParams(window.location.search);
         const csvFile = urlParams.get('file');
         const cityQuery = urlParams.get('city');
+        const citiesJsonFilename = 'cities.json.gz';
         const rawUrl = 'https://raw.githubusercontent.com/jonfroehlich/gsv-tracker/main/data/';
         
         async function loadData() {
@@ -284,10 +285,13 @@
                     progressText.textContent = `Finding city data for: ${cityQuery}`;
                     
                     // Load and parse cities.json.gz
-                    const citiesResponse = await fetch(rawUrl + 'cities.json.gz');
+                    const citiesResponse = await fetch(rawUrl + citiesJsonFilename);
                     const citiesBuffer = await citiesResponse.arrayBuffer();
                     const citiesText = pako.inflate(new Uint8Array(citiesBuffer), { to: 'string' });
                     const citiesData = JSON.parse(citiesText);
+
+                    console.log(`Loaded ${citiesData.cities.length} cities from ${citiesJsonFilename}`);
+                    console.log(`Attempting to find city for query: ${cityQuery}`);
 
                     // Search for matching city
                     const query = cityQuery.toLowerCase();
@@ -297,6 +301,7 @@
                     );
                     
                     if (!match) {
+                        console.log(`Did not find exact match for: ${cityQuery}, trying partial matches...`);
                         // Try partial matches
                         match = citiesData.cities.find(city => 
                             city.city.toLowerCase().includes(query) || 
