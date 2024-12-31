@@ -227,6 +227,8 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
 
     # Calculate bounding box dimensions
     width_meters, height_meters = get_bounding_box_size(valid_rows)
+    logger.debug(f"Bounding box dimensions: {width_meters:.1f} x {height_meters:.1f} meters from {valid_rows.shape[0]} panos")
+
     area_km2 = (width_meters * height_meters) / 1_000_000  # Convert to km²
     zoom_level = get_best_folium_zoom_level(width_meters, height_meters)
 
@@ -245,7 +247,7 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
     median_age = valid_rows['age_years'].median()
     total_panos = len(valid_rows)
 
-    logger.info(f"Average age: {avg_age:.1f} years, Median age: {median_age:.1f} years, Total panos: {total_panos}")
+    logger.info(f"Average age: {avg_age:.1f} years, Median age: {median_age:.1f} years, Total panos: {total_panos}, Area: {area_km2:.1f} km²")
     
     # Calculate coverage density
     density_per_km2 = total_panos / area_km2
