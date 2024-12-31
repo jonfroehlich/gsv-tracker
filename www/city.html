@@ -263,6 +263,245 @@
         const cityQuery = urlParams.get('city');
         const citiesJsonFilename = 'cities.json.gz';
         const rawUrl = 'https://raw.githubusercontent.com/jonfroehlich/gsv-tracker/main/data/';
+
+        // Levenshtein distance calculation for fuzzy matching
+        function levenshteinDistance(a, b) {
+            if (a.length === 0) return b.length;
+            if (b.length === 0) return a.length;
+
+            const matrix = [];
+
+            // Initialize matrix
+            for (let i = 0; i <= b.length; i++) {
+                matrix[i] = [i];
+            }
+            for (let j = 0; j <= a.length; j++) {
+                matrix[0][j] = j;
+            }
+
+            // Fill in the rest of the matrix
+            for (let i = 1; i <= b.length; i++) {
+                for (let j = 1; j <= a.length; j++) {
+                    if (b.charAt(i-1) === a.charAt(j-1)) {
+                        matrix[i][j] = matrix[i-1][j-1];
+                    } else {
+                        matrix[i][j] = Math.min(
+                            matrix[i-1][j-1] + 1, // substitution
+                            matrix[i][j-1] + 1,   // insertion
+                            matrix[i-1][j] + 1    // deletion
+                        );
+                    }
+                }
+            }
+
+            return matrix[b.length][a.length];
+        }
+
+        // Parse location query into components
+        function parseLocationQuery(query, cities) {
+            if (!query || typeof query !== 'string') {
+                return null;
+            }
+
+            query = query.trim();
+            const parts = query.split(',').map(part => part.trim());
+            
+            // Try to parse as "city, state, country"
+            if (parts.length === 3) {
+                return {
+                    city: parts[0],
+                    state: parts[1],
+                    country: parts[2]
+                };
+            }
+            // For "city, identifier" format, determine if second part is state or country
+            else if (parts.length === 2) {
+                const cityPart = parts[0];
+                const identifierPart = parts[1].toLowerCase();
+                
+                // Get all unique state and country identifiers from the cities data
+                const stateIdentifiers = new Set();  // Both codes and full names
+                const countryIdentifiers = new Set(); // Both codes and full names
+                cities.cities.forEach(cityData => {
+                    if (cityData.city.state?.code) {
+                        stateIdentifiers.add(cityData.city.state.code.toLowerCase());
+                    }
+                    if (cityData.city.state?.name) {
+                        stateIdentifiers.add(cityData.city.state.name.toLowerCase());
+                    }
+                    if (cityData.city.country?.code) {
+                        countryIdentifiers.add(cityData.city.country.code.toLowerCase());
+                    }
+                    if (cityData.city.country?.name) {
+                        countryIdentifiers.add(cityData.city.country.name.toLowerCase());
+                    }
+                });
+
+                // Check if identifier matches exactly with any state or country identifier
+                const isExactStateMatch = stateIdentifiers.has(identifierPart);
+                const isExactCountryMatch = countryIdentifiers.has(identifierPart);
+
+                // If it's an exact match to a country (code or name) but not a state,
+                // treat it as a country
+                if (isExactCountryMatch && !isExactStateMatch) {
+                    return {
+                        city: cityPart,
+                        state: null,
+                        country: identifierPart
+                    };
+                }
+                // If it's an exact match to a state (code or name) but not a country,
+                // treat it as a state
+                else if (isExactStateMatch && !isExactCountryMatch) {
+                    return {
+                        city: cityPart,
+                        state: identifierPart,
+                        country: null
+                    };
+                }
+                // If it matches both or neither, prefer state interpretation
+                // (this can be adjusted based on your preferred default)
+                else {
+                    return {
+                        city: cityPart,
+                        state: identifierPart,
+                        country: null
+                    };
+                }
+            }
+            // Just city
+            else if (parts.length === 1) {
+                return {
+                    city: parts[0],
+                    state: null,
+                    country: null
+                };
+            }
+
+            return null;
+        }
+
+        // Find best matching city with fuzzy matching
+        function findBestMatchingCity(parsedQuery, cities, maxDistance = 3) {
+            console.log('Finding best matching city for parsed query:', parsedQuery);
+            console.log('Using distance threshold:', maxDistance);
+
+            if (!parsedQuery || !parsedQuery.city) {
+                console.log('Invalid parsed query - missing required city');
+                return {
+                    match: null,
+                    error: "Invalid query format. Please use 'City, State', 'City, Country', or 'City, State, Country' format."
+                };
+            }
+
+            let bestMatch = null;
+            let bestDistance = Infinity;
+            let matchedCities = [];
+
+            cities.cities.forEach(cityData => {
+                const cityNameLower = cityData.city.name.toLowerCase();
+                const queryNameLower = parsedQuery.city.toLowerCase();
+                const cityDistance = levenshteinDistance(queryNameLower, cityNameLower);
+                
+                console.log(`\nComparing city: "${cityData.city.name}"`);
+                console.log(`City distance (${queryNameLower} vs ${cityNameLower}):`, cityDistance);
+                
+                let cityMatch = {
+                    cityDistance: cityDistance
+                };
+
+                // If state is provided, calculate state match
+                if (parsedQuery.state) {
+                    const stateCode = cityData.city.state.code;
+                    const stateName = cityData.city.state.name;
+                    const queryState = parsedQuery.state.toLowerCase();
+                    
+                    const stateCodeDistance = levenshteinDistance(queryState, stateCode.toLowerCase());
+                    const stateNameDistance = levenshteinDistance(queryState, stateName.toLowerCase());
+                    cityMatch.stateDistance = Math.min(stateCodeDistance, stateNameDistance);
+                    
+                    console.log('State matching:');
+                    console.log(` - Code distance (${queryState} vs ${stateCode.toLowerCase()}):`, stateCodeDistance);
+                    console.log(` - Name distance (${queryState} vs ${stateName.toLowerCase()}):`, stateNameDistance);
+                    console.log(` - Final state distance:`, cityMatch.stateDistance);
+                }
+
+                // If country is provided, calculate country match
+                if (parsedQuery.country) {
+                    const countryCode = cityData.city.country.code;
+                    const countryName = cityData.city.country.name;
+                    const queryCountry = parsedQuery.country.toLowerCase();
+                    
+                    const countryCodeDistance = levenshteinDistance(queryCountry, countryCode.toLowerCase());
+                    const countryNameDistance = levenshteinDistance(queryCountry, countryName.toLowerCase());
+                    cityMatch.countryDistance = Math.min(countryCodeDistance, countryNameDistance);
+                    
+                    console.log('Country matching:');
+                    console.log(` - Code distance (${queryCountry} vs ${countryCode.toLowerCase()}):`, countryCodeDistance);
+                    console.log(` - Name distance (${queryCountry} vs ${countryName.toLowerCase()}):`, countryNameDistance);
+                    console.log(` - Final country distance:`, cityMatch.countryDistance);
+                }
+
+                // Calculate total distance with weights
+                cityMatch.totalDistance = cityMatch.cityDistance * 2; // Weight city matches more heavily
+                if (cityMatch.stateDistance !== undefined) {
+                    cityMatch.totalDistance += cityMatch.stateDistance;
+                }
+                if (cityMatch.countryDistance !== undefined) {
+                    cityMatch.totalDistance += cityMatch.countryDistance;
+                }
+                
+                console.log('Total weighted distance:', cityMatch.totalDistance);
+
+                matchedCities.push({
+                    city: cityData,
+                    match: cityMatch
+                });
+
+                if (cityMatch.totalDistance < bestDistance) {
+                    bestDistance = cityMatch.totalDistance;
+                    bestMatch = cityData;
+                }
+            });
+
+            // Sort matched cities by distance for suggestions
+            matchedCities.sort((a, b) => a.match.totalDistance - b.match.totalDistance);
+
+            // If best match exceeds threshold, return helpful error with suggestions
+            if (bestDistance > maxDistance) {
+                console.log('Best match distance', bestDistance, 'exceeds threshold', maxDistance);
+                console.log('Getting top 3 suggestions for user...');
+                
+                const suggestions = matchedCities.slice(0, 3).map(match => {
+                    const suggestion = {
+                        city: match.city.city.name,
+                        state: match.city.city.state.code,
+                        country: match.city.city.country.code,
+                        distance: match.match.totalDistance
+                    };
+                    console.log('Suggestion:', suggestion);
+                    return suggestion;
+                });
+
+                let errorMessage = "No close matches found. ";
+                if (suggestions.length > 0) {
+                    errorMessage += "Did you mean:\n" + suggestions.map(s => 
+                        `${s.city}, ${s.state}, ${s.country}`
+                    ).join('\n');
+                }
+
+                return {
+                    match: null,
+                    error: errorMessage,
+                    suggestions
+                };
+            }
+
+            return {
+                match: bestMatch,
+                distance: bestDistance
+            };
+        }
         
         async function loadData() {
             
@@ -293,35 +532,31 @@
                     console.log(`Loaded ${citiesData.cities.length} cities from ${citiesJsonFilename}`);
                     console.log(`Attempting to find city for query: ${cityQuery}`);
 
-                    // Search for matching city
-                    const query = cityQuery.toLowerCase();
-                    let match = citiesData.cities.find(city => 
-                        city.city.toLowerCase() === query || 
-                        `${city.city}, ${city.state}`.toLowerCase() === query
-                    );
-                    
-                    if (!match) {
-                        console.log(`Did not find exact match for: ${cityQuery}, trying partial matches...`);
-                        // Try partial matches
-                        match = citiesData.cities.find(city => 
-                            city.city.toLowerCase().includes(query) || 
-                            `${city.city}, ${city.state}`.toLowerCase().includes(query)
-                        );
-                    }
-
-                    if (!match) {
+                    // Find best matching city
+                    // Parse query first to determine if two-part format is state or country
+                    const parsedQuery = parseLocationQuery(cityQuery, citiesData);
+                    if (!parsedQuery) {
                         progressContainer.style.display = 'none';
-                        alert(`No matching city found for query: ${cityQuery}`);
+                        alert('Invalid query format. Please use "City, State", "City, Country", or "City, State, Country" format.');
                         return;
                     }
 
-                    targetFile = match.data_file.filename;
+                    const result = findBestMatchingCity(parsedQuery, citiesData);
+
+                    if (!result.match) {
+                        progressContainer.style.display = 'none';
+                        alert(result.error);
+                        return;
+                    }
+
+                    targetFile = result.match.data_file.filename;
 
                     // Update URL without reloading page
                     const newUrl = new URL(window.location);
                     newUrl.searchParams.set('file', targetFile);
                     window.history.pushState({}, '', newUrl);
                 }
+
 
                 // Now load the city-specific JSON metadata file
                 progressText.textContent = 'Loading city metadata...';
