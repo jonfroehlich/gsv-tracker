@@ -106,66 +106,125 @@ def get_default_vis_dir() -> str:
     vis_dir = os.path.join(project_root, "vis")
     return vis_dir
 
-def sanitize_city_name(city_name: str) -> str:
+def sanitize_city_query_str(city_query_str: str) -> str:
     """
-    Sanitize city name for use in filenames.
+    Sanitize a city query string for use in filenames. 
+    
+    Uses single dash (-) for spaces within location components and 
+    double dash (--) to separate location components (city, state, country).
+    
+    Handles problematic characters across Windows, macOS, and Linux:
+    - Replaces spaces with single dashes
+    - Uses double dashes to separate location components (e.g., city--state--country)
+    - Removes characters that are invalid on Windows (< > : " / \ | ? *)
+    - Removes any leading/trailing periods
+    - Converts to lowercase
     
     Args:
-        city_name: Raw city name
+        city_query_str: Query string that may contain city, state, and/or country. Examples:
+                    - "Grand Marais"
+                    - "Grand Marais, MN"
+                    - "Grand Marais, MN, USA"
+                    - "Port Angeles, WA"
     
     Returns:
-        Sanitized city name safe for filenames
+        Sanitized string safe for filenames
+        
+    Examples:
+        >>> sanitize_city_name("St. Louis, MO, USA")
+        "st-louis--mo--usa"
+        >>> sanitize_city_name("Grand Marais, MN")
+        "grand-marais--mn"
+        >>> sanitize_city_name("Grand Marais")
+        "grand-marais"
     """
-    # Replace spaces with underscores
-    sanitized = city_name.replace(' ', '_')
-    # Remove any non-alphanumeric characters (except underscores)
-    sanitized = re.sub(r'[^a-zA-Z0-9_]', '', sanitized)
-    # Convert to lowercase
-    sanitized = sanitized.lower()
-    return sanitized
+    # First split on commas to separate components
+    parts = [p.strip() for p in city_query_str.split(',')]
+    
+    # For each part, replace spaces with single dashes and clean up
+    cleaned_parts = []
+    for part in parts:
+        # Replace spaces with single dashes
+        cleaned = part.replace(' ', '-')
+        # Remove problematic characters (Windows restrictions)
+        cleaned = re.sub(r'[<>:"/\\|?*]', '', cleaned)
+        # Remove any leading/trailing periods and dashes
+        cleaned = cleaned.strip('.-')
+        # Convert to lowercase
+        cleaned = cleaned.lower()
+        cleaned_parts.append(cleaned)
+    
+    # Join parts with double dashes
+    return '--'.join(cleaned_parts)
 
 def parse_filename(filename: str) -> Dict[str, Union[str, float]]:
     """
-    Parse a GSV metadata filename to extract parameters.
-    Expected format: city_state_width_[num]_height_[num]_step_[num].csv.gz
+    Parse a GSV metadata filename to extract parameters. Because we can handle differently
+    formatted city query strings with differing levels of specificity, our filename parser
+    is rather flexible. At the very least, we require a city name but other location components
+    like a state/region or country are optional. So, the following are all valid:
+
+    Expected format(s): 
+    [city]_width_[num]_height_[num]_step_[num].csv.gz
+    [city--state]_width_[num]_height_[num]_step_[num].csv.gz
+    [city--country]_width_[num]_height_[num]_step_[num].csv.gz
+    [city--state--country]_width_[num]_height_[num]_step_[num].csv.gz
+    
+    Uses single dash (-) for spaces within location components and 
+    double dash (--) to separate location components.
+
+    Of course, city names are not unique across the world and so the queryer should be as specific
+    as they can when making the original query (and creating the filename)
     
     Args:
         filename: Name of the CSV file
         
     Returns:
         Dictionary containing:
-            - city_name: Name of the city
-            - location_code: State/country code (e.g., 'wa', 'nl', etc.)
+            - city_query_str: Original query string reconstructed with proper spacing
             - width_meters: Width of the search grid in meters
-            - height_meters: Height of the search grid in meters
+            - height_meters: Height of search grid in meters
             - step_meters: Step size in meters
         
-    Raises:
-        ValueError: If filename doesn't match expected format
+    Examples:
+        >>> parse_filename("grand-marais--mn--usa_width_1000_height_1000_step_20.csv.gz")
+        {
+            'city_query_str': 'Grand Marais, MN, USA',
+            'width_meters': 1000.0,
+            'height_meters': 1000.0,
+            'step_meters': 20.0
+        }
     """
     base = os.path.basename(filename)
     # Remove the .csv.gz extension
     base = base.replace('.csv.gz', '')
     
-    # Parse the components - matching city_state_width_X_height_Y_step_Z format
-    match = re.match(r'(.+?)_([a-z]+)_width_(\d+)_height_(\d+)_step_(\d+)$', base)
+    # Parse the components
+    match = re.match(r'(.+?)_width_(\d+)_height_(\d+)_step_(\d+)$', base)
     if not match:
-        raise ValueError(f"Filename {filename} doesn't match expected format: city_state_width_X_height_Y_step_Z.csv.gz")
+        raise ValueError(f"Filename {filename} doesn't match expected format")
     
-    # Handle special cases where location code might be multi-part (e.g., taiwan, switzerland)
-    city_name = match.group(1)
-    location_code = match.group(2)
+    # Split on double dashes to get location components
+    location_parts = match.group(1).split('--')
+    
+    # For each part: split on single dashes, capitalize each word, join with spaces
+    processed_parts = []
+    for part in location_parts:
+        words = part.split('-')  # Split on single dashes to get words
+        processed_parts.append(' '.join(word.capitalize() for word in words))
+    
+    # Join all parts with commas
+    city_query_str = ', '.join(processed_parts)
     
     return {
-        'city_name': city_name.replace('_', ' '),  # Convert underscores to spaces in city name
-        'location_code': location_code,
-        'width_meters': float(match.group(3)),
-        'height_meters': float(match.group(4)),
-        'step_meters': float(match.group(5))
+        'city_query_str': city_query_str,
+        'width_meters': float(match.group(2)),
+        'height_meters': float(match.group(3)),
+        'step_meters': float(match.group(4))
     }
 
 def generate_base_filename(
-    city_name: str,
+    city_query_str: str,
     grid_width: float,
     grid_height: float,
     step_length: float
@@ -174,16 +233,26 @@ def generate_base_filename(
     Generate base filename for GSV metadata files.
     
     Args:
-        city_name: Name of the city
+        city_query_str: Query string that may contain city, state, and/or country. Examples:
+                    - "Grand Marais"
+                    - "Grand Marais, MN"
+                    - "Grand Marais, MN, USA"
+                    - "Port Angeles, WA"
         grid_width: Width of search grid in meters
         grid_height: Height of search grid in meters
         step_length: Distance between sample points in meters
         
     Returns:
         Base filename without extension
+        
+    Examples:
+        >>> generate_base_filename("St. Louis, MO, USA", 1000, 1000, 20)
+        "st-louis--mo--usa_width_1000_height_1000_step_20"
+        >>> generate_base_filename("Grand Marais", 1000, 1000, 20)
+        "grand-marais_width_1000_height_1000_step_20"
     """
-    safe_city_name = sanitize_city_name(city_name)
-    return f"{safe_city_name}_width_{int(grid_width)}_height_{int(grid_height)}_step_{step_length}"
+    safe_name = sanitize_city_query_str(city_query_str)
+    return f"{safe_name}_width_{int(grid_width)}_height_{int(grid_height)}_step_{step_length}"
 
 def try_open_with_system_command(file_path: str) -> bool:
     """
