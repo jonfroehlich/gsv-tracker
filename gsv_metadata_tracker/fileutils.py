@@ -167,6 +167,7 @@ def parse_filename(filename: str) -> Dict[str, Union[str, float]]:
     Expected format(s): 
     [city]_width_[num]_height_[num]_step_[num].csv.gz
     [city--state]_width_[num]_height_[num]_step_[num].csv.gz
+    [city--country]_width_[num]_height_[num]_step_[num].csv.gz
     [city--state--country]_width_[num]_height_[num]_step_[num].csv.gz
     
     Uses single dash (-) for spaces within location components and 
