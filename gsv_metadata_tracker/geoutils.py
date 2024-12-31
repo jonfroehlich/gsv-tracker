@@ -134,27 +134,43 @@ class EnhancedLocation:
             logger.debug(f"EnhancedLocation address_data {address_data}")
 
             self._country = address_data.get('country')
-            self._country_code = get_country_code(self._country)
-            logger.debug(f"EnhancedLocation country {self._country} and code {self._country_code} extracted from {address_data}")
+
+            COUNTRY_CODE_FIELD = 'country_code'
+            if COUNTRY_CODE_FIELD in address_data:
+                self._country_code = address_data.get(COUNTRY_CODE_FIELD)
+                logger.debug(f"EnhancedLocation country code '{self._country_code}' found with field '{COUNTRY_CODE_FIELD}'")
+            elif self._country:
+                self._country_code = get_country_code(self._country)
+                logger.debug(f"EnhancedLocation country '{self._country}' and code '{self._country_code}' extracted from '{address_data}'")
             
             # Try different possible state field names
             for field in ['state', 'county', 'state_district', 'region']:
                 if field in address_data:
                     self._state = address_data.get(field)
-                    logger.debug(f"EnhancedLocation state {self._state} found with field {field}")
-                    self._state_code = get_state_abbreviation(self._state)
-                    logger.debug(f"EnhancedLocation state code {self._state_code} found with field {field}")
+                    logger.debug(f"EnhancedLocation state '{self._state}' found with field '{field}'")
                     break
+
+            ISO_3166_2_FIELD = 'ISO3166-2-lvl4'
+            if ISO_3166_2_FIELD in address_data:
+                iso_code = address_data.get(ISO_3166_2_FIELD)
+
+                # Split on hyphen and take the second part
+                # e.g., 'US-WA' becomes ['US', 'WA'] and we take 'WA'
+                self._state_code = iso_code.split('-')[1] if '-' in iso_code else None
+                logger.debug(f"EnhancedLocation state code '{self._state_code}' extracted from '{iso_code}' and field '{ISO_3166_2_FIELD}'")
+            elif self._state:
+                self._state_code = get_state_abbreviation(self._state)
+                logger.debug(f"EnhancedLocation state code '{self._state_code}' derived from state name '{self._state}'")
 
             # Try different possible city field names
             for field in ['city', 'town', 'township', 'village', 'municipality', 'suburb']:
                 if field in address_data:
                     self._city = address_data.get(field)
-                    logger.debug(f"EnhancedLocation state {self._city} found with field {field}")
+                    logger.debug(f"EnhancedLocation state '{self._city}' found with field '{field}'")
                     break
 
             if self._city is None:
-                logger.warning(f"Could not find city in {address_data}, will attempt to extract from query string {self._city_query_str}")
+                logger.warning(f"Could not find city in {address_data}, will attempt to extract from query string '{self._city_query_str}'")
                 if ',' in self._city_query_str:
                     self._city = self._city_query_str.split(',')[0].strip()
                 else:
