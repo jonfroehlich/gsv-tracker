@@ -8,7 +8,7 @@ from tqdm import tqdm
 from typing import Optional, Dict, Any, List
 import logging
 from .fileutils import load_city_csv_file, get_list_of_city_csv_files, parse_filename
-from .geoutils import get_city_location_data
+from .geoutils import get_city_location_data, get_state_abbreviation, get_country_code
 
 logger = logging.getLogger(__name__)
 
@@ -410,8 +410,14 @@ def generate_city_metadata_summary_as_json(
         },
         "city": {
             "name": city_name,
-            "state": state_name,
-            "country": country_name,
+            "state": {
+                "name": state_name,
+                "code": get_state_abbreviation(state_name)
+            },
+            "country": {
+                "name": country_name,
+                "code": get_country_code(country_name)
+            },
             "center": {
                 "latitude": center_lat,
                 "longitude": center_lon
@@ -493,8 +499,14 @@ def generate_aggregate_summary_as_json(json_dir: str) -> Dict[str, Any]:
             city_summary = {
                 # Basic information
                 "city": city_data["city"]["name"],
-                "state": city_data["city"]["state"],
-                "country": city_data["city"]["country"],
+                "state": {
+                    "name": city_data["city"]["state"]["name"],
+                    "code": city_data["city"]["state"]["code"]
+                },
+                "country": {
+                    "name": city_data["city"]["country"]["name"],
+                    "code": city_data["city"]["country"]["code"]
+                },
                 
                 # Location information
                 "center": {
