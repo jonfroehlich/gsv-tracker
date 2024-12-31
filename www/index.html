@@ -669,7 +669,20 @@
                 const compressed = await response.arrayBuffer();
                 const decompressed = pako.inflate(new Uint8Array(compressed), { to: 'string' });
                 const data = JSON.parse(decompressed);
+
+                // Error checking for data structure
+                if (!data || !data.cities || !Array.isArray(data.cities)) {
+                    throw new Error('Invalid data format: missing cities array');
+                }
+
                 const cities = data.cities;
+
+                // Log any invalid city data
+                cities.forEach((city, index) => {
+                    if (!city || typeof city !== 'object') {
+                        console.warn(`Invalid city data at index ${index}:`, city);
+                    }
+                });
 
                 // Update stats overlay
                 document.getElementById('stats').innerHTML = `
@@ -686,6 +699,9 @@
 
                 // Add rectangles to map
                 cities.forEach(city => {
+                    // console.log(city.city, city.panorama_counts.unique_google_panos, city.google_panos_age_stats.median_age_years);
+                    console.log(`City: ${city.city}, ${city.state}, ${city.country} | Panos: ${city.panorama_counts.unique_google_panos} | Median Age: ${city.google_panos_age_stats.median_age_years} years`);
+
                     const bounds = [
                         [city.bounds.min_lat, city.bounds.min_lon],
                         [city.bounds.max_lat, city.bounds.max_lon]
