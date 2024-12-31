@@ -260,25 +260,83 @@
         // Get the CSV file from URL parameter
         const urlParams = new URLSearchParams(window.location.search);
         const csvFile = urlParams.get('file');
+        const cityQuery = urlParams.get('city');
         const rawUrl = 'https://raw.githubusercontent.com/jonfroehlich/gsv-tracker/main/data/';
         
         async function loadData() {
-            if (!csvFile) {
-                alert('Please provide a CSV file using the "file" URL parameter');
+            
+            if (!csvFile && !cityQuery) {
+                alert('Please provide either a file parameter or city parameter');
                 return;
             }
 
             try {
-                // First fetch the JSON stats file
-                const jsonResponse = await fetch(rawUrl + csvFile.replace('.csv.gz', '.json.gz'));
+                // Show progress container
+                const progressContainer = document.getElementById('progress-container');
+                const progressFill = document.getElementById('progress-fill');
+                const progressText = document.getElementById('progress-text');
+                progressContainer.style.display = 'block';
+
+                let targetFile = csvFile;
+
+                // If we have a city query, find the matching city from cities.json.gz
+                if (!csvFile && cityQuery) {
+                    progressText.textContent = `Finding city data for: ${cityQuery}`;
+                    
+                    // Load and parse cities.json.gz
+                    const citiesResponse = await fetch(rawUrl + 'cities.json.gz');
+                    const citiesBuffer = await citiesResponse.arrayBuffer();
+                    const citiesText = pako.inflate(new Uint8Array(citiesBuffer), { to: 'string' });
+                    const citiesData = JSON.parse(citiesText);
+
+                    // Search for matching city
+                    const query = cityQuery.toLowerCase();
+                    let match = citiesData.cities.find(city => 
+                        city.city.toLowerCase() === query || 
+                        `${city.city}, ${city.state}`.toLowerCase() === query
+                    );
+                    
+                    if (!match) {
+                        // Try partial matches
+                        match = citiesData.cities.find(city => 
+                            city.city.toLowerCase().includes(query) || 
+                            `${city.city}, ${city.state}`.toLowerCase().includes(query)
+                        );
+                    }
+
+                    if (!match) {
+                        progressContainer.style.display = 'none';
+                        alert(`No matching city found for query: ${cityQuery}`);
+                        return;
+                    }
+
+                    targetFile = match.data_file.filename;
+
+                    // Update URL without reloading page
+                    const newUrl = new URL(window.location);
+                    newUrl.searchParams.set('file', targetFile);
+                    window.history.pushState({}, '', newUrl);
+                }
+
+                // Now load the city-specific JSON metadata file
+                progressText.textContent = 'Loading city metadata...';
+                const jsonResponse = await fetch(rawUrl + targetFile.replace('.csv.gz', '.json.gz'));
                 const jsonBuffer = await jsonResponse.arrayBuffer();
                 const jsonText = pako.inflate(new Uint8Array(jsonBuffer), { to: 'string' });
                 const stats = JSON.parse(jsonText);
+
                 const totalBytes = stats.data_file.size_bytes;
+                const fileSizeMB = (totalBytes / (1024 * 1024)).toFixed(1);
 
                 // Get city and state from JSON metadata
                 const cityName = stats.city.name;
                 const stateName = stats.city.state;
+
+                // Update progress text for main CSV download
+                progressText.textContent = `Downloading ${fileSizeMB} MB for ${cityName}, ${stateName}...`;
+
+                // Update document title
+                document.title = `Street View Data: ${cityName}, ${stateName}`;
                 
                 // Store globally for legend
                 cityNameGlobal = cityName;
@@ -335,17 +393,8 @@
                 });
                 
                 
-                // Format file size to MB with one decimal place
-                const fileSizeMB = (totalBytes / (1024 * 1024)).toFixed(1);
-
-                // Show progress container
-                const progressContainer = document.getElementById('progress-container');
-                const progressFill = document.getElementById('progress-fill');
-                const progressText = document.getElementById('progress-text');
-                progressContainer.style.display = 'block';
-
                 // Fetch the CSV file with progress tracking
-                const response = await fetch(rawUrl + csvFile);
+                const response = await fetch(rawUrl + targetFile);
                 const reader = response.body.getReader();
                 const chunks = [];
                 let receivedBytes = 0;
