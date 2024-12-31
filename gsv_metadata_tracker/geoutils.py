@@ -1,3 +1,6 @@
+import pycountry # for ISO country codes
+import us  # for US states
+
 from typing import Optional, Dict, Tuple
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
@@ -10,6 +13,72 @@ from functools import lru_cache
 logger = logging.getLogger(__name__)
 
 NOMINATIM_USER_AGENT = "gsv_metadata_tracker"
+
+def get_state_abbreviation(state_name: Optional[str]) -> Optional[str]:
+    """
+    Get the standard two-letter abbreviation for a US state.
+    Returns original string if no abbreviation is found.
+    
+    Args:
+        state_name: Full name of the US state
+        
+    Returns:
+        Two-letter state abbreviation, original string if not found, or None if input is None
+    """
+    if not state_name:
+        return None
+        
+    try:
+        state = us.states.lookup(state_name)
+        return state.abbr if state else state_name
+    except AttributeError:
+        return state_name
+
+def get_country_code(country_name: Optional[str]) -> Optional[str]:
+    """
+    Get the standard two-letter ISO country code.
+    Returns original string if no code is found.
+    
+    Args:
+        country_name: Full name of the country
+        
+    Returns:
+        Two-letter ISO country code, original string if not found, or None if input is None
+    """
+    if not country_name:
+        return None
+        
+    # Handle common variations in country names
+    name_variations = {
+        'United States': 'USA',
+        'United States of America': 'USA',
+        'USA': 'USA',
+        'UK': 'United Kingdom',
+        'Great Britain': 'United Kingdom',
+        'Russia': 'Russian Federation',
+        'South Korea': 'Korea, Republic of',
+        'North Korea': "Korea, Democratic People's Republic of",
+        'Taiwan': 'Taiwan, Province of China',
+    }
+    
+    # Normalize the country name
+    normalized_name = name_variations.get(country_name, country_name)
+    
+    try:
+        # First try direct lookup
+        country = pycountry.countries.get(name=normalized_name)
+        if country:
+            return country.alpha_2
+            
+        # Try fuzzy matching if direct lookup fails
+        matches = pycountry.countries.search_fuzzy(normalized_name)
+        if matches:
+            return matches[0].alpha_2
+            
+    except (LookupError, AttributeError):
+        pass
+        
+    return country_name
 
 class EnhancedLocation:
     """
@@ -53,6 +122,9 @@ class EnhancedLocation:
         self._country = None
         self._state = None
         self._city = None
+        self._country_code = None
+        self._state_code = None
+
 
         logger.debug(f"EnhancedLocation created for {location}")
         
@@ -61,12 +133,16 @@ class EnhancedLocation:
             logger.debug(f"EnhancedLocation address_data {address_data}")
 
             self._country = address_data.get('country')
+            self._country_code = get_country_code(self._country)
+            logger.debug(f"EnhancedLocation country {self._country} and code {self._country_code} extracted from {address_data}")
             
             # Try different possible state field names
             for field in ['state', 'county', 'state_district', 'region']:
                 if field in address_data:
                     self._state = address_data.get(field)
                     logger.debug(f"EnhancedLocation state {self._state} found with field {field}")
+                    self._state_code = get_state_abbreviation(self._state)
+                    logger.debug(f"EnhancedLocation state code {self._state_code} found with field {field}")
                     break
 
             # Try different possible city field names
@@ -77,6 +153,26 @@ class EnhancedLocation:
                     break
             
             
+    @property
+    def country_code(self) -> Optional[str]:
+        """
+        Get the two-letter ISO country code.
+        
+        Returns:
+            str or None: The ISO 3166-1 alpha-2 country code if available, None otherwise
+        """
+        return self._country_code
+        
+    @property
+    def state_code(self) -> Optional[str]:
+        """
+        Get the state/region abbreviation (currently supports US states).
+        
+        Returns:
+            str or None: The state abbreviation if available (e.g., 'CA' for California),
+            None otherwise
+        """
+        return self._state_code
     
     @property
     def country(self) -> Optional[str]:
