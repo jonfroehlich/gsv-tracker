@@ -195,12 +195,12 @@ def generate_missing_city_json_files(data_dir: str) -> None:
     for csv_path in tqdm(missing_json_files, desc="Generating metadata .json files"):
         try:
             params = parse_filename(csv_path)
-            city_name = params['city_name']
+            city_query_str = params['city_query_str']
             search_width = params['width_meters']
             search_height = params['height_meters']
             step = params['step_meters']
 
-            logger.debug(f"Parsed filename into city: {city_name}, width: {search_width}, height: {search_height}, step: {step}")
+            logger.debug(f"Parsed filename into city: {city_query_str}, width: {search_width}, height: {search_height}, step: {step}")
             
             df = load_city_csv_file(csv_path)
 
@@ -208,7 +208,7 @@ def generate_missing_city_json_files(data_dir: str) -> None:
             center_lon = float(df['query_lon'].mean())
             
             # Reverse geocode city name with lat,lng as hints
-            city_loc_data = get_city_location_data(city_name, center_lat, center_lon)
+            city_loc_data = get_city_location_data(city_query_str, center_lat, center_lon)
 
             logger.debug(f"Generating .json metadata for {csv_path} at {city_loc_data.city}, {city_loc_data.state}, {city_loc_data.country}")
 
