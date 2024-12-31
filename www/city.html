@@ -261,6 +261,10 @@
         const urlParams = new URLSearchParams(window.location.search);
         const csvFile = urlParams.get('file');
         const cityQuery = urlParams.get('city');
+
+        // Remove any surrounding quotes and decode URL encoding
+        const decodedCityQuery = cityQuery ? decodeURIComponent(cityQuery).replace(/^"(.*)"$/, '$1') : null;
+
         const citiesJsonFilename = 'cities.json.gz';
         const rawUrl = 'https://raw.githubusercontent.com/jonfroehlich/gsv-tracker/main/data/';
 
@@ -382,9 +386,15 @@
         }
 
         // Find best matching city with fuzzy matching
-        function findBestMatchingCity(parsedQuery, cities, maxDistance = 3) {
+        function findBestMatchingCity(parsedQuery, citiesData, maxDistance = 3) {
             console.log('Finding best matching city for parsed query:', parsedQuery);
             console.log('Using distance threshold:', maxDistance);
+            
+            // Debug log to see the structure
+            console.log('First city in data:', JSON.stringify(citiesData.cities[0], null, 2));
+            console.log('Cities data type:', typeof citiesData);
+            console.log('Cities array type:', Array.isArray(citiesData.cities));
+            console.log('Total cities:', citiesData.cities.length);
 
             if (!parsedQuery || !parsedQuery.city) {
                 console.log('Invalid parsed query - missing required city');
@@ -398,12 +408,15 @@
             let bestDistance = Infinity;
             let matchedCities = [];
 
-            cities.cities.forEach(cityData => {
-                const cityNameLower = cityData.city.name.toLowerCase();
+            citiesData.cities.forEach(cityData => {
+                // Debug log for each city being processed
+                console.log('Processing city:', cityData);
+
+                const cityNameLower = cityData.city.toLowerCase();
                 const queryNameLower = parsedQuery.city.toLowerCase();
                 const cityDistance = levenshteinDistance(queryNameLower, cityNameLower);
                 
-                console.log(`\nComparing city: "${cityData.city.name}"`);
+                console.log(`\nComparing city: "${cityData.city}"`);
                 console.log(`City distance (${queryNameLower} vs ${cityNameLower}):`, cityDistance);
                 
                 let cityMatch = {
@@ -505,7 +518,7 @@
         
         async function loadData() {
             
-            if (!csvFile && !cityQuery) {
+            if (!csvFile && !decodedCityQuery) {
                 alert('Please provide either a file parameter or city parameter');
                 return;
             }
@@ -520,8 +533,8 @@
                 let targetFile = csvFile;
 
                 // If we have a city query, find the matching city from cities.json.gz
-                if (!csvFile && cityQuery) {
-                    progressText.textContent = `Finding city data for: ${cityQuery}`;
+                if (!csvFile && decodedCityQuery) {
+                    progressText.textContent = `Finding city data for: ${decodedCityQuery}`;
                     
                     // Load and parse cities.json.gz
                     const citiesResponse = await fetch(rawUrl + citiesJsonFilename);
@@ -530,11 +543,11 @@
                     const citiesData = JSON.parse(citiesText);
 
                     console.log(`Loaded ${citiesData.cities.length} cities from ${citiesJsonFilename}`);
-                    console.log(`Attempting to find city for query: ${cityQuery}`);
+                    console.log(`Attempting to find city for query: ${decodedCityQuery}`);
 
                     // Find best matching city
                     // Parse query first to determine if two-part format is state or country
-                    const parsedQuery = parseLocationQuery(cityQuery, citiesData);
+                    const parsedQuery = parseLocationQuery(decodedCityQuery, citiesData);
                     if (!parsedQuery) {
                         progressContainer.style.display = 'none';
                         alert('Invalid query format. Please use "City, State", "City, Country", or "City, State, Country" format.');
