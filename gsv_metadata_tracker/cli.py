@@ -115,7 +115,7 @@ def parse_args():
     concurrency_group.add_argument(
         '--batch-size',
         type=int,
-        default=150,
+        default=100,
         help='''Number of requests to prepare and queue at once. 
              Should be >= connection-limit. Higher values use more memory 
              but can be more efficient. API limit is 500/second.'''
@@ -124,7 +124,7 @@ def parse_args():
     concurrency_group.add_argument(
         '--connection-limit',
         type=int,
-        default=75,
+        default=50,
         help='''Maximum number of concurrent connections to the API.
              Controls how many requests are actually in-flight at once.
              Should be <= batch-size. Conservative values prevent overwhelming
