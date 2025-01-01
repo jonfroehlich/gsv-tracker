@@ -201,14 +201,31 @@ def main():
         
         # Print overall status code distribution
         print("\nOverall Status Code Distribution:")
-        print("-" * 50)
-        print("Code               Count     Percentage")
-        print("-" * 50)
-        
+
+        # Calculate exact column widths based on data
+        code_width = max(len(str(code)) for code in overall_stats.keys())
+        code_width = max(code_width, len("Code"))  # Account for header
+
+        count_width = max(len(f"{count:,}") for count in overall_stats.values())
+        count_width = max(count_width, len("Count"))  # Account for header
+
+        # Fixed spacing and percent width since percentage format #.##% is consistent
+        spacing = 2
+        percent_width = 8  # Width to handle "100.00%" as maximum case
+
+        total_width = code_width + count_width + percent_width + (spacing * 2)
+
+        # Print header and separators
+        print("-" * total_width)
+        print(f"{'Code':<{code_width}}{' ' * spacing}{'Count':>{count_width}}{' ' * spacing}{'Percentage':>{percent_width}}")
+        print("-" * total_width)
+
+        # Print each row with exact spacing
         for code in sorted(overall_stats.keys()):
             count = overall_stats[code]
             percentage = (count / total_records) * 100
-            print(f"{str(code):<18} {count:>8,}  {percentage:>8.2f}%")
+            formatted_count = f"{count:,}"
+            print(f"{str(code):<{code_width}}{' ' * spacing}{formatted_count:>{count_width}}{' ' * spacing}{percentage:>7.2f}%")
 
         # Print files with OVER_QUERY_LIMIT
         if files_with_query_limit:
