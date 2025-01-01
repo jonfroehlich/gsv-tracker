@@ -5,6 +5,7 @@ channels:
 dependencies:
   - python=3.11 # Project was started with 3.11
   - pandas=2.2.0  # Core data processing
+  - pyarrow=14.0.1  # Pyarrow required dependency of pandas
   - numpy=1.26.3  # Required by pandas
   - folium=0.15.1  # Map visualization
   - geopy=2.4.1  # Geocoding and distance calculations
@@ -20,3 +21,4 @@ dependencies:
   - backoff=2.2.1  # API retry logic
   - us=3.1.1  # US state/territory data
   - pycountry=22.3.5  # Country code handling
+  - tabulate=0.9.0 # Pretty printing of data

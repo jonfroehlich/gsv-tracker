@@ -6,32 +6,42 @@ This research project began in 2021 by Professor Jon E. Froehlich and was also p
 
 ## Installation
 
+We use Mamba rather than Conda for environment management because Mamba is significantly faster at resolving dependencies and installing packages. 
+
 1. Clone the repository:
 ```bash
 git clone https://github.com/yourusername/gsv-tracker.git
 cd gsv-tracker
 ```
 
-2. Create and activate the conda environment:
+2. Install mamba (if you haven't already):
 ```bash
-conda env create -f environment.yml
+conda install mamba -n base -c conda-forge
+```
+
+3. Create and activate the environment using mamba:
+```bash
+mamba env create -f environment.yml
 conda activate gsv-tracker
 ```
 
-3. Set your Google Street View API key:
+If you need to update your environment later, use:
 ```bash
-conda env config vars set gmaps_api_key=YOUR_API_KEY
+mamba env update -f environment.yml
 ```
 
-4. Reactivate your conda environment
-```bash
-conda activate gsv-tracker
-```
+### Why Mamba?
 
-<!-- 5. Install the package in development mode:
-```bash
-pip install -e .
-``` -->
+This project recommends using Mamba instead of Conda for environment management. While both tools serve the same purpose, Mamba offers the following advantages:
+
+- **Speed**: Mamba's C++ implementation is substantially faster than Conda's Python implementation, often resolving dependencies 5-10x faster ([source](https://github.com/mamba-org/mamba#the-fast-cross-platform-package-manager)).
+- **Memory Efficiency**: Mamba uses less memory when solving environments ([benchmark results](https://prefix.dev/blog/conda_vs_mamba)).
+- **Better Solver**: Mamba's dependency solver is more robust and less likely to get stuck in dependency conflicts ([documentation](https://mamba.readthedocs.io/en/latest/installation.html#why-mamba)).
+- **Drop-in Replacement**: Mamba is fully compatible with Conda environments and packages, making it a seamless alternative ([Anaconda blog](https://www.anaconda.com/blog/a-faster-conda-for-a-growing-community)).
+
+For more details on Mamba's advantages, see the [official Mamba documentation](https://mamba.readthedocs.io/en/latest/index.html) and this [performance comparison](https://prefix.dev/blog/conda_vs_mamba).
+
+While we use mamba for creating and updating the environment, we still use conda commands for environment activation and setting environment variables.
 
 ## Usage
 

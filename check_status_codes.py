@@ -1,52 +1,26 @@
 import pandas as pd
 import gzip
-from collections import Counter
 import argparse
 import sys
 import os
 from pathlib import Path
+from typing import Tuple, Dict, Optional, List
+from gsv_metadata_tracker.analysis import (
+    analyze_gsv_status,
+    format_status_table,
+    format_record_counts_table,
+    format_query_limit_table
+)
 
-def is_gzipped(filepath):
+def read_csv_file(filepath: str) -> Tuple[Optional[pd.DataFrame], List[str]]:
     """
-    Check if a file is gzipped based on its extension.
-    """
-    return filepath.lower().endswith('.gz')
-
-def should_process_file(filepath):
-    """
-    Check if the file should be processed based on its extension.
-    """
-    # Exclude .json.gz files
-    if filepath.endswith('.json.gz'):
-        return False
-    
-    extensions = {'.gz', '.csv', '.downloading'}
-    return Path(filepath).suffix.lower() in extensions
-
-def find_files_to_process(directory):
-    """
-    Find all files in directory (and subdirectories) that should be processed.
+    Read a GSV metadata file (CSV/gzipped CSV) and handle malformed lines.
     
     Args:
-        directory (str): Path to the directory to scan
-    
+        filepath: Path to the file to read
+        
     Returns:
-        list: List of file paths to process
-    """
-    files_to_process = []
-    
-    # Walk through directory and all subdirectories
-    for root, _, files in os.walk(directory):
-        for file in files:
-            filepath = os.path.join(root, file)
-            if should_process_file(filepath):
-                files_to_process.append(filepath)
-    
-    return sorted(files_to_process)
-
-def analyze_status_codes(filepath):
-    """
-    Analyze status codes in a CSV file (gzipped or not).
+        Tuple of (DataFrame or None if error, list of malformed lines)
     """
     malformed_lines = []
     
@@ -57,89 +31,69 @@ def analyze_status_codes(filepath):
             return None
 
         # Read the file with appropriate compression based on extension
-        compression = 'gzip' if is_gzipped(filepath) else None
-        df = pd.read_csv(filepath, compression=compression, on_bad_lines=bad_line_handler, engine='python')
+        compression = 'gzip' if filepath.lower().endswith('.gz') else None
+        df = pd.read_csv(
+            filepath, 
+            compression=compression, 
+            on_bad_lines=bad_line_handler, 
+            engine='python'
+        )
         
-        # Get the status code column name (assuming it exists)
-        status_cols = [col for col in df.columns if 'status' in col.lower()]
-        
-        if not status_cols:
-            raise ValueError("No status code column found in the CSV file")
-            
-        status_col = status_cols[0]
-        
-        # Get unique status codes and their counts
-        status_counts = Counter(df[status_col])
-        total_records = len(df)
-        
-        # Calculate percentages
-        status_stats = {
-            'unique_codes': sorted(status_counts.keys()),
-            'counts': dict(status_counts),
-            'percentages': {code: (count/total_records * 100) 
-                          for code, count in status_counts.items()},
-            'total_records': total_records,
-            'malformed_count': len(malformed_lines)
-        }
-        
-        return status_stats, malformed_lines
+        return df, malformed_lines
         
     except Exception as e:
-        print(f"Error analyzing file: {str(e)}")
+        print(f"Error reading file: {str(e)}")
         return None, malformed_lines
 
-def print_status_analysis(stats, malformed_lines, show_malformed=True):
-    """
-    Print the status code analysis in a readable format.
-    """
-    if not stats:
+def should_process_file(filepath: str) -> bool:
+    """Check if the file should be processed based on its extension."""
+    if filepath.endswith('.json.gz'):
+        return False
+    
+    extensions = {'.gz', '.csv', '.downloading'}
+    return Path(filepath).suffix.lower() in extensions
+
+def find_files_to_process(directory: str) -> List[str]:
+    """Find all GSV metadata files in directory and subdirectories."""
+    files_to_process = []
+    
+    for root, _, files in os.walk(directory):
+        for file in files:
+            filepath = os.path.join(root, file)
+            if should_process_file(filepath):
+                files_to_process.append(filepath)
+    
+    return sorted(files_to_process)
+
+def print_malformed_lines(malformed_lines: List[str]) -> None:
+    """Print malformed lines in a readable format."""
+    if not malformed_lines:
         return
         
-    print("\nStatus Code Analysis:")
+    print("\nMalformed Lines:")
     print("-" * 50)
-    print(f"Total Records Processed: {stats['total_records']:,}")
-    print(f"Malformed Lines: {stats['malformed_count']:,}")
-    print(f"Total Lines: {stats['total_records'] + stats['malformed_count']:,}")
-    
-    # Calculate the maximum width needed for the code column
-    max_code_width = max(len(str(code)) for code in stats['unique_codes'])
-    max_code_width = max(max_code_width, len("Code"))  # Account for header
-    
-    # Calculate max width for count column
-    max_count_width = max(len(f"{stats['counts'][code]:,}") for code in stats['unique_codes'])
-    max_count_width = max(max_count_width, len("Count"))
-    
-    # Format the headers and separator with dynamic widths
-    print("\nStatus Code Distribution:")
-    print("-" * (max_code_width + max_count_width + 20))
-    print(f"{'Code':<{max_code_width}}  {'Count':<{max_count_width}}  {'Percentage'}")
-    print("-" * (max_code_width + max_count_width + 20))
-    
-    # Print each row with proper alignment
-    for code in sorted(stats['unique_codes']):
-        count = stats['counts'][code]
-        percentage = stats['percentages'][code]
-        print(f"{str(code):<{max_code_width}}  {count:>{max_count_width},}  {percentage:>8.2f}%")
-    
-    if show_malformed and malformed_lines:
-        print("\nMalformed Lines:")
-        print("-" * 50)
-        for i, line in enumerate(malformed_lines, 1):
-            print(f"Line {i}: {line.strip()}")
+    for i, line in enumerate(malformed_lines, 1):
+        print(f"Line {i}: {line.strip()}")
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Analyze status codes in CSV files (gzipped or not) from files and/or directories.')
-    parser.add_argument('paths', nargs='+', 
-                       help='Paths to files and/or directories to analyze')
-    parser.add_argument('--hide-malformed', action='store_true', 
-                       help='Hide content of malformed lines')
+        description='Analyze status codes in GSV metadata files.'
+    )
+    parser.add_argument(
+        'paths', 
+        nargs='+', 
+        help='Paths to files and/or directories to analyze'
+    )
+    parser.add_argument(
+        '--hide-malformed',
+        action='store_true',
+        help='Hide content of malformed lines'
+    )
     
     args = parser.parse_args()
     
+    # Find all files to process
     files_to_process = []
-    
-    # Process each provided path
     for path in args.paths:
         if not os.path.exists(path):
             print(f"Error: Path not found: {path}")
@@ -151,22 +105,21 @@ def main():
                 print(f"No matching files found in directory: {path}")
             files_to_process.extend(dir_files)
         else:
-            if should_process_file(path) or path.lower().endswith(('.gz', '.csv', '.downloading')):
+            if should_process_file(path):
                 files_to_process.append(path)
             else:
                 print(f"Skipping file with unsupported extension: {path}")
-                
+    
     if not files_to_process:
         print("No files to process!")
         sys.exit(1)
-        
+    
     # Remove duplicates and sort
     files_to_process = sorted(set(files_to_process))
     
     # Track overall statistics
-    overall_stats = Counter()
+    overall_data = []
     files_with_query_limit = []
-    total_records = 0
     total_malformed = 0
     total_files = len(files_to_process)
 
@@ -175,47 +128,59 @@ def main():
         print(f"\nAnalyzing file {i} of {total_files}: {file_path}")
         print("=" * 50)
         
-        stats, malformed_lines = analyze_status_codes(file_path)
-        print_status_analysis(stats, malformed_lines, not args.hide_malformed)
-
-        # Update overall statistics
-        if stats:
-            overall_stats.update(stats['counts'])
-            total_records += stats['total_records']
-            total_malformed += stats['malformed_count']
+        df, malformed_lines = read_csv_file(file_path)
+        
+        if df is not None:
+            # Analyze and print status distribution
+            status_stats = analyze_gsv_status(df)
+            print("\nStatus Code Distribution:")
+            print(format_status_table(df))
+            
+            # Print record counts
+            print("\nRecord Counts:")
+            print(format_record_counts_table(
+                valid_records=len(df),
+                malformed_count=len(malformed_lines)
+            ))
+            
+            # Track statistics for overall summary
+            overall_data.append(df)
+            total_malformed += len(malformed_lines)
             
             # Track files with OVER_QUERY_LIMIT
-            if 'OVER_QUERY_LIMIT' in stats['counts'] and stats['counts']['OVER_QUERY_LIMIT'] > 0:
-                files_with_query_limit.append((file_path, stats['counts']['OVER_QUERY_LIMIT']))
-
-        print(f"\nFinished analysis of file {i} of {total_files}: {file_path}")
-        print("-" * 50)
+            limit_count = len(df[df['status'] == 'OVER_QUERY_LIMIT'])
+            if limit_count > 0:
+                files_with_query_limit.append((file_path, limit_count))
+            
+            # Show malformed lines if requested
+            if not args.hide_malformed:
+                print_malformed_lines(malformed_lines)
 
     # Print overall summary if we processed multiple files
-    if len(files_to_process) > 1 and overall_stats:
+    if len(files_to_process) > 1 and overall_data:
         print("\nOVERALL SUMMARY")
         print("=" * 50)
-        print(f"Total Files Processed: {total_files}")
-        print(f"Total Records: {total_records:,}")
-        print(f"Total Malformed Lines: {total_malformed:,}")
         
-        # Print overall status code distribution
+        # Combine all DataFrames
+        combined_df = pd.concat(overall_data, ignore_index=True)
+        
+        print(f"\nProcessed Files: {total_files}")
+        
+        # Print overall record counts
+        print("\nTotal Record Counts:")
+        print(format_record_counts_table(
+            valid_records=len(combined_df),
+            malformed_count=total_malformed
+        ))
+        
+        # Print overall status distribution
         print("\nOverall Status Code Distribution:")
-        print("-" * 50)
-        print("Code               Count     Percentage")
-        print("-" * 50)
+        print(format_status_table(combined_df))
         
-        for code in sorted(overall_stats.keys()):
-            count = overall_stats[code]
-            percentage = (count / total_records) * 100
-            print(f"{str(code):<18} {count:>8,}  {percentage:>8.2f}%")
-
-        # Print files with OVER_QUERY_LIMIT
+        # Print files with query limits
         if files_with_query_limit:
             print("\nFiles with OVER_QUERY_LIMIT status:")
-            print("-" * 50)
-            for filepath, count in sorted(files_with_query_limit, key=lambda x: x[1], reverse=True):
-                print(f"{filepath}: {count:,} occurrences")
+            print(format_query_limit_table(files_with_query_limit))
 
 if __name__ == "__main__":
     main()
