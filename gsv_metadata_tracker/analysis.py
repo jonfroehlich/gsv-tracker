@@ -94,10 +94,6 @@ def format_age_stats(age_stats: Dict[str, Any], title: str = "Age Statistics") -
         ["Average Age (years)", f"{age_stats['avg_pano_age_years']:.2f}"],
         ["Median Age (years)", f"{age_stats['median_pano_age_years']:.2f}"],
         ["Std Dev Age (years)", f"{age_stats['stdev_pano_age_years']:.2f}"],
-        ["10th Percentile Age", f"{percentiles.get('p10', 'N/A'):.2f}"],
-        ["25th Percentile Age", f"{percentiles.get('p25', 'N/A'):.2f}"],
-        ["75th Percentile Age", f"{percentiles.get('p75', 'N/A'):.2f}"],
-        ["90th Percentile Age", f"{percentiles.get('p90', 'N/A'):.2f}"]
     ]
     
     return f"\n{title}\n" + tabulate(
@@ -341,11 +337,6 @@ def print_df_summary(df: pd.DataFrame, now: Optional[pd.Timestamp] = None) -> No
     all_stats = calculate_pano_stats(df, timestamp)
     google_stats = calculate_pano_stats(df, timestamp, copyright_filter='Google')
     
-    # Print status code table
-    print("\nStatus Code Distribution")
-    print("=" * 40)
-    print(format_status_table(df))
-    
     # Print coverage statistics
     print("\nCoverage Statistics")
     print("=" * 40)
@@ -367,6 +358,14 @@ def print_df_summary(df: pd.DataFrame, now: Optional[pd.Timestamp] = None) -> No
     # Print yearly distribution
     print(format_yearly_distribution(all_stats['yearly_distribution'], "\nYearly Distribution (All Panoramas)"))
     print(format_yearly_distribution(google_stats['yearly_distribution'], "\nYearly Distribution (Google Panoramas Only)"))
+
+    # Print status code table
+    print("\nStatus Code Distribution")
+    print("=" * 40)
+    print(format_status_table(df))
+
+    print("\nEnd of Summary")
+    print("-" * 40)
 
 def analyze_gsv_status(df: pd.DataFrame) -> Dict[str, Any]:
     """
