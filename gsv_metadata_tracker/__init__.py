@@ -1,5 +1,5 @@
 # Import everything we want to expose at package level
-from .download import download_gsv_metadata
+# from .download import download_gsv_metadata
 from .download_async import download_gsv_metadata_async
 from .config import load_config
 from .geoutils import get_city_location_data, get_search_dimensions

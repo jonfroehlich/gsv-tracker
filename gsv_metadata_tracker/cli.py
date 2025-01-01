@@ -28,6 +28,8 @@ from typing import Optional
 from .fileutils import get_default_vis_dir
 from .json_summarizer import generate_city_metadata_summary_as_json, generate_aggregate_summary_as_json
 from .paths import get_default_data_dir, get_default_vis_dir
+from .analysis import print_df_summary
+
 from . import (
     load_config,
     get_city_location_data,
@@ -113,7 +115,7 @@ def parse_args():
     concurrency_group.add_argument(
         '--batch-size',
         type=int,
-        default=200,
+        default=150,
         help='''Number of requests to prepare and queue at once. 
              Should be >= connection-limit. Higher values use more memory 
              but can be more efficient. API limit is 500/second.'''
@@ -122,7 +124,7 @@ def parse_args():
     concurrency_group.add_argument(
         '--connection-limit',
         type=int,
-        default=100,
+        default=75,
         help='''Maximum number of concurrent connections to the API.
              Controls how many requests are actually in-flight at once.
              Should be <= batch-size. Conservative values prevent overwhelming
@@ -259,9 +261,14 @@ async def async_main():
             connection_limit=args.connection_limit,
             request_timeout=args.timeout
         )
+        df = dict_results["df"]
+
+        # Print the download summary
+        print("\nDownload Summary for", args.city)
+        print("=" * 50)
+        print_df_summary(df)
 
         # Create .json summary file
-        df = dict_results["df"]
         logging.debug(f"The DataFrame has {len(df)} rows with types {df.dtypes}")
         csv_filename_with_path = dict_results["filename_with_path"]
         generate_city_metadata_summary_as_json(csv_filename_with_path, df,
