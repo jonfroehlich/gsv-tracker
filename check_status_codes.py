@@ -163,16 +163,59 @@ def main():
     # Remove duplicates and sort
     files_to_process = sorted(set(files_to_process))
     
+    # Track overall statistics
+    overall_stats = Counter()
+    files_with_query_limit = []
+    total_records = 0
+    total_malformed = 0
+    total_files = len(files_to_process)
+
     # Process each file
-    for file_path in files_to_process:
-        print(f"\nAnalyzing file: {file_path}")
+    for i, file_path in enumerate(files_to_process, 1):
+        print(f"\nAnalyzing file {i} of {total_files}: {file_path}")
         print("=" * 50)
         
         stats, malformed_lines = analyze_status_codes(file_path)
         print_status_analysis(stats, malformed_lines, not args.hide_malformed)
 
-        print(f"\nFinished analysis of: {file_path}")
+        # Update overall statistics
+        if stats:
+            overall_stats.update(stats['counts'])
+            total_records += stats['total_records']
+            total_malformed += stats['malformed_count']
+            
+            # Track files with OVER_QUERY_LIMIT
+            if 'OVER_QUERY_LIMIT' in stats['counts'] and stats['counts']['OVER_QUERY_LIMIT'] > 0:
+                files_with_query_limit.append((file_path, stats['counts']['OVER_QUERY_LIMIT']))
+
+        print(f"\nFinished analysis of file {i} of {total_files}: {file_path}")
         print("-" * 50)
+
+    # Print overall summary if we processed multiple files
+    if len(files_to_process) > 1 and overall_stats:
+        print("\nOVERALL SUMMARY")
+        print("=" * 50)
+        print(f"Total Files Processed: {total_files}")
+        print(f"Total Records: {total_records:,}")
+        print(f"Total Malformed Lines: {total_malformed:,}")
+        
+        # Print overall status code distribution
+        print("\nOverall Status Code Distribution:")
+        print("-" * 50)
+        print("Code               Count     Percentage")
+        print("-" * 50)
+        
+        for code in sorted(overall_stats.keys()):
+            count = overall_stats[code]
+            percentage = (count / total_records) * 100
+            print(f"{str(code):<18} {count:>8,}  {percentage:>8.2f}%")
+
+        # Print files with OVER_QUERY_LIMIT
+        if files_with_query_limit:
+            print("\nFiles with OVER_QUERY_LIMIT status:")
+            print("-" * 50)
+            for filepath, count in sorted(files_with_query_limit, key=lambda x: x[1], reverse=True):
+                print(f"{filepath}: {count:,} occurrences")
 
 if __name__ == "__main__":
     main()
