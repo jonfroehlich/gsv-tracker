@@ -9,6 +9,12 @@ from typing import Optional, Dict, Any, List
 import logging
 from .fileutils import load_city_csv_file, get_list_of_city_csv_files, parse_filename
 from .geoutils import get_city_location_data, get_state_abbreviation, get_country_code
+from .analysis import (
+    calculate_pano_stats,
+    calculate_age_stats,
+    calculate_coverage_stats,
+    calculate_yearly_distribution
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,130 +37,6 @@ EMPTY_PERCENTILES = {
     "p75": None,
     "p90": None
 }
-
-def calculate_age_stats(df: pd.DataFrame, now: pd.Timestamp) -> Dict[str, Any]:
-    """Helper function to calculate age statistics for panoramas with valid dates."""
-    if len(df) == 0:
-        return {**EMPTY_AGE_STATS, "age_percentiles_years": EMPTY_PERCENTILES}
-    
-    if not pd.api.types.is_datetime64_any_dtype(df['capture_date']):
-        return {
-            **EMPTY_AGE_STATS,
-            "count": len(df),
-            "error": "capture_date is not in datetime format",
-            "age_percentiles_years": EMPTY_PERCENTILES
-        }
-    
-    valid_dates_mask = df['capture_date'].notna()
-    df_with_dates = df[valid_dates_mask]
-    
-    if len(df_with_dates) == 0:
-        return {
-            **EMPTY_AGE_STATS,
-            "count": len(df),
-            "valid_dates_count": 0,
-            "invalid_dates_count": len(df),
-            "age_percentiles_years": EMPTY_PERCENTILES
-        }
-    
-    ages = (now - df_with_dates['capture_date']).dt.total_seconds() / (365.25 * 24 * 3600)
-    oldest_date = df_with_dates['capture_date'].min()
-    newest_date = df_with_dates['capture_date'].max()
-    
-    return {
-        "count": len(df),
-        "valid_dates_count": len(df_with_dates),
-        "invalid_dates_count": len(df) - len(df_with_dates),
-        "oldest_pano_date": oldest_date.isoformat() if oldest_date is not None else None,
-        "newest_pano_date": newest_date.isoformat() if newest_date is not None else None,
-        "avg_pano_age_years": float(ages.mean()) if len(ages) > 0 else None,
-        "median_pano_age_years": float(ages.median()) if len(ages) > 0 else None,
-        "stdev_pano_age_years": float(ages.std()) if len(ages) > 0 else None,
-        "age_percentiles_years": {
-            "p10": float(ages.quantile(0.1)) if len(ages) > 0 else None,
-            "p25": float(ages.quantile(0.25)) if len(ages) > 0 else None,
-            "p75": float(ages.quantile(0.75)) if len(ages) > 0 else None,
-            "p90": float(ages.quantile(0.9)) if len(ages) > 0 else None
-        }
-    }
-
-def calculate_pano_stats(df: pd.DataFrame, copyright_filter_condition: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Calculate statistics for panoramas, optionally filtered by condition.
-    
-    Args:
-        df: DataFrame containing panorama data
-        copyright_filter_condition: Optional string to filter copyright info (e.g., 'Google')
-    
-    Returns:
-        Dictionary containing panorama statistics including status breakdown and age statistics
-        for successful panoramas
-    """
-    logger.debug(f"Calculating panorama statistics for {len(df)} entries; the copyright filter is '{copyright_filter_condition}'")
-
-    # Apply copyright filter if specified
-    filtered_df = df[df['copyright_info'].str.contains(copyright_filter_condition, na=False)] if copyright_filter_condition else df
-    
-    # Get status breakdown for all entries
-    logger.debug(f"Calculating status breakdown for {len(filtered_df)} entries...")
-    status_counts = filtered_df['status'].value_counts().to_dict()
-    total_entries = len(filtered_df)
-    
-    # Calculate status percentages
-    status_breakdown = {
-        status: {
-            "count": count,
-            "percentage": (count / total_entries * 100) if total_entries > 0 else 0
-        }
-        for status, count in status_counts.items()
-    }
-    logger.debug(f"Status breakdown: {status_breakdown}")
-
-    # Filter to successful panoramas
-    ok_panos = filtered_df[filtered_df['status'] == 'OK']
-    logger.debug(f"Filtered to {len(ok_panos)} panoramas with status 'OK'")
-    
-    # Calculate duplicate pano stats
-    pano_id_counts = ok_panos['pano_id'].value_counts()
-    logger.debug(f"Found {len(pano_id_counts)} unique pano ids across {len(ok_panos)} entries")
-    duplicate_stats = {
-        "total_unique_panos": len(pano_id_counts),
-        "total_pano_references": len(ok_panos),
-        "duplicate_reference_count": len(ok_panos) - len(pano_id_counts),
-        "most_referenced_count": int(pano_id_counts.max()) if not pano_id_counts.empty else 0,
-        "panos_with_multiple_refs": int((pano_id_counts > 1).sum()),
-        "average_references_per_pano": float(len(ok_panos) / len(pano_id_counts)) if len(pano_id_counts) > 0 else 0
-    }
-    logger.debug(f"Duplicate pano stats: {duplicate_stats}")
-
-    try:
-        # Get unique panoramas by taking the first occurrence of each pano_id
-        unique_panos = ok_panos.drop_duplicates(subset=['pano_id'])
-        
-        # Calculate age stats for unique panoramas
-        logger.debug(f"Calculating age statistics for {len(unique_panos)} unique panoramas...")
-        age_stats = calculate_age_stats(unique_panos, pd.Timestamp.now())
-        logger.debug(f"Age statistics: {age_stats}")
-        
-        return {
-            "total_entries": total_entries,
-            "status_breakdown": status_breakdown,
-            "duplicate_stats": duplicate_stats,
-            "age_stats": age_stats
-        }
-        
-    except Exception as e:
-        return {
-            "total_entries": total_entries,
-            "status_breakdown": status_breakdown,
-            "duplicate_stats": duplicate_stats,
-            "age_stats": {
-                **EMPTY_AGE_STATS,
-                "count": len(ok_panos),
-                "error": str(e),
-                "age_percentiles_years": EMPTY_PERCENTILES
-            }
-        }
     
 def find_missing_json_files(data_dir: str) -> List[str]:
     """
@@ -301,7 +183,7 @@ def generate_city_metadata_summary_as_json(
     force_recreate_file: bool = False
 ) -> str:
     """
-    Generate and save download statistics and metadata to a JSON file (compressed).
+    Generate and save download statistics for an individual city to a JSON file (compressed).
 
     Returns the .json.gz filename with path
     
@@ -324,21 +206,12 @@ def generate_city_metadata_summary_as_json(
     if os.path.exists(json_filename_with_path) and not force_recreate_file:
         logger.info(f"JSON.gz file already exists: {json_filename_with_path}; returning...")
         return json_filename_with_path
-  
-    # Check for any problematic conversions
-    missing_dates = df[(df['status'] == 'OK') & (df['capture_date'].isna())]
-    if len(missing_dates) > 0:
-        print(f"Warning: Found {len(missing_dates)} rows with invalid capture dates")
-        print("Sample of problematic values:")
-        print(missing_dates[['status', 'capture_date']].head())
-
+    
     # Calculate center coordinates from query points
     center_lat = float(df['query_lat'].mean())
     center_lon = float(df['query_lon'].mean())
 
     # Calculate ranges to verify grid dimensions
-    lat_range = df['query_lat'].max() - df['query_lat'].min()
-    lon_range = df['query_lon'].max() - df['query_lon'].min()
     diagonal_meters = np.sqrt(grid_width**2 + grid_height**2)
     
     # Calculate extents
@@ -348,18 +221,8 @@ def generate_city_metadata_summary_as_json(
         "min_lon": float(df['query_lon'].min()),
         "max_lon": float(df['query_lon'].max())
     }
-    
-    # Calculate total points and success/failure counts
-    total_points = len(df)
-    points_with_panos = len(df[df['status'] == 'OK'])
-    points_without_panos = len(df[df['status'] == 'ZERO_RESULTS'])
-    points_with_errors = len(df[df['status'].isin(['ERROR', 'REQUEST_DENIED', 'INVALID_REQUEST'])])
-    
-    # Get start and end times from query_timestamp with error checking
-    logger.debug(f"\nChecking timestamp formats in {csv_gz_path}...")
 
-    # We would store the converted timestamps back in query_timestamp
-    # Convert timestamps once and store in the DataFrame
+    # Get start and end times from query_timestamp
     df['query_timestamp_converted'] = pd.to_datetime(df['query_timestamp'], errors='coerce')
     problematic_timestamps = df[df['query_timestamp_converted'].isna()]
 
@@ -371,35 +234,26 @@ def generate_city_metadata_summary_as_json(
     else:
         logger.debug(f"All timestamps converted successfully in {csv_gz_path}!")
 
-    # Use the converted timestamps for all operations
     start_time = df['query_timestamp_converted'].min()
     end_time = df['query_timestamp_converted'].max()
 
     try:
         duration = end_time - start_time
         duration_seconds = duration.total_seconds()
-        print(f"Duration: {duration_seconds:.2f} seconds")
+        logger.debug(f"Duration: {duration_seconds:.2f} seconds")
     except Exception as e:
-        print(f"Error calculating duration: {str(e)}")
+        logger.error(f"Error calculating duration: {str(e)}")
         duration_seconds = None
+
+    # Use the analysis module for statistics calculations
+    now = pd.Timestamp.now()
     
-    # Calculate distance statistics for successful panos
-    successful_df = df[df['status'] == 'OK'].copy()
-    if len(successful_df) > 0:
-        successful_df['distance_to_query'] = np.sqrt(
-            (successful_df['query_lat'] - successful_df['pano_lat'])**2 +
-            (successful_df['query_lon'] - successful_df['pano_lon'])**2
-        ) * 111000  # Approximate conversion to meters
-        
-        distance_stats = {
-            "min_meters": float(successful_df['distance_to_query'].min()),
-            "max_meters": float(successful_df['distance_to_query'].max()),
-            "avg_meters": float(successful_df['distance_to_query'].mean()),
-            "median_meters": float(successful_df['distance_to_query'].median()),
-            "stdev_meters": float(successful_df['distance_to_query'].std())
-        }
-    else:
-        distance_stats = None
+    # Calculate all pano statistics
+    all_pano_stats = calculate_pano_stats(df, now)
+    google_pano_stats = calculate_pano_stats(df, now, copyright_filter='Google')
+    
+    # Calculate coverage statistics
+    coverage_stats = calculate_coverage_stats(df)
 
     metadata = {
         "data_file": {
@@ -429,7 +283,7 @@ def generate_city_metadata_summary_as_json(
             "height_meters": grid_height,
             "step_length_meters": step_length,
             "diagonal_meters": diagonal_meters,
-            "total_search_points": total_points,
+            "total_search_points": len(df),
             "area_km2": (grid_width * grid_height) / 1_000_000
         },
         "download": {
@@ -437,20 +291,16 @@ def generate_city_metadata_summary_as_json(
             "end_time": end_time.isoformat() if end_time is not None else None,
             "duration_seconds": duration_seconds,
         },
-        "coverage": {
-            "points_with_panos": points_with_panos,
-            "points_without_panos": points_without_panos,
-            "points_with_errors": points_with_errors,
-            "coverage_rate": (points_with_panos / total_points) * 100 if total_points > 0 else 0,
-            "pano_distance_stats": distance_stats
-        },
+        "coverage": coverage_stats,
         "all_panos": {
-            **calculate_pano_stats(df),
-            "histogram_of_capture_dates_by_year": calculate_histogram_of_capture_dates_by_year(df)
+            "duplicate_stats": all_pano_stats['duplicate_stats'],
+            "age_stats": all_pano_stats['age_stats'],
+            "histogram_of_capture_dates_by_year": all_pano_stats['yearly_distribution']
         },
         "google_panos": {
-            **calculate_pano_stats(df, copyright_filter_condition='Google'),
-            "histogram_of_capture_dates_by_year": calculate_histogram_of_capture_dates_by_year(df, google_only=True)
+            "duplicate_stats": google_pano_stats['duplicate_stats'],
+            "age_stats": google_pano_stats['age_stats'],
+            "histogram_of_capture_dates_by_year": google_pano_stats['yearly_distribution']
         },
         "timestamps": {
             "json_file_created": datetime.now().isoformat(),
@@ -532,21 +382,8 @@ def generate_aggregate_summary_as_json(json_dir: str) -> Dict[str, Any]:
                 },
                 
                 # Age statistics for unique panoramas
-                "all_panos_age_stats": {
-                    "avg_age_years": city_data["all_panos"]["age_stats"]["avg_pano_age_years"],
-                    "median_age_years": city_data["all_panos"]["age_stats"]["median_pano_age_years"],
-                    "oldest_date": city_data["all_panos"]["age_stats"]["oldest_pano_date"],
-                    "newest_date": city_data["all_panos"]["age_stats"]["newest_pano_date"],
-                    "stdev_age_years": city_data["all_panos"]["age_stats"]["stdev_pano_age_years"],
-                },
-
-                "google_panos_age_stats": {
-                    "avg_age_years": city_data["google_panos"]["age_stats"]["avg_pano_age_years"],
-                    "median_age_years": city_data["google_panos"]["age_stats"]["median_pano_age_years"],
-                    "oldest_date": city_data["google_panos"]["age_stats"]["oldest_pano_date"],
-                    "newest_date": city_data["google_panos"]["age_stats"]["newest_pano_date"],
-                    "stdev_age_years": city_data["google_panos"]["age_stats"]["stdev_pano_age_years"],
-                },
+                "all_panos_age_stats": city_data["all_panos"]["age_stats"],
+                "google_panos_age_stats": city_data["google_panos"]["age_stats"],
                 
                 # Collection metadata
                 "collection_info": {
@@ -565,7 +402,10 @@ def generate_aggregate_summary_as_json(json_dir: str) -> Dict[str, Any]:
             cities_data.append(city_summary)
             
         except Exception as e:
+            import traceback
             logger.error(f"Error processing {json_file}: {str(e)}")
+            logger.error("Full traceback:")
+            logger.error(traceback.format_exc())
 
     # Merge histograms from all cities
     merged_histograms = merge_capture_date_histograms(raw_city_data)
