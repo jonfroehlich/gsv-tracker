@@ -248,7 +248,7 @@
             
             // Add basic info HTML first
             containerDiv.innerHTML = `
-                <h3>${cityName}, ${city.state}, ${city.country}</h3>
+                <h3>${cityName}, ${city.state.name}, ${city.country.name}</h3>
                 <strong>Coverage Statistics:</strong>
                 <ul style="padding-left: 20px; margin: 5px 0;">
                     <li>Area: ${city.search_area_km2.toFixed(1)} km²</li>
@@ -257,8 +257,8 @@
                 </ul>
                 <div style="margin-top: 12px"><strong>Age Statistics:</strong></div>
                 <ul style="padding-left: 20px; margin: 5px 0;">
-                    <li>Median Age: ${city.google_panos_age_stats.median_age_years.toFixed(1)} years</li>
-                    <li>Average Age: ${city.google_panos_age_stats.avg_age_years.toFixed(1)} years (SD=${city.google_panos_age_stats.stdev_age_years.toFixed(1)})</li>
+                    <li>Median Age: ${city.google_panos_age_stats.median_pano_age_years.toFixed(1)} years</li>
+                    <li>Average Age: ${city.google_panos_age_stats.avg_pano_age_years.toFixed(1)} years (SD=${city.google_panos_age_stats.stdev_pano_age_years.toFixed(1)})</li>
                     <li>Newest: ${new Date(city.google_panos_age_stats.newest_date).toLocaleDateString()}</li>
                     <li>Oldest: ${new Date(city.google_panos_age_stats.oldest_date).toLocaleDateString()}</li>
                 </ul>
@@ -317,9 +317,10 @@
             const maxYears = Math.ceil(maxAge);
             
             // Count cities for each age
+            console.log("maxYears:", maxYears);
             const ageCounts = new Array(maxYears + 1).fill(0);
             cities.forEach(city => {
-                const age = Math.floor(city.google_panos_age_stats.median_age_years);
+                const age = Math.floor(city.google_panos_age_stats.median_pano_age_years);
                 if (age <= maxYears) {
                     ageCounts[age]++;
                 }
@@ -389,7 +390,7 @@
 
             // Set styles for highlighted vs. unhighlighted city rectangles
             mapRectangles.forEach(rectangle => {
-                const age = Math.floor(rectangle.city.google_panos_age_stats.median_age_years);
+                const age = Math.floor(rectangle.city.google_panos_age_stats.median_pano_age_years);
                 if (Math.abs(age - targetAge) <= tolerance) {
                     rectangle.setStyle({
                         fillOpacity: 0.8,
@@ -442,7 +443,7 @@
             });
 
             mapRectangles.forEach(rectangle => {
-                const age = rectangle.city.google_panos_age_stats.median_age_years;
+                const age = rectangle.city.google_panos_age_stats.median_pano_age_years;
                 if (age >= minAge && age < maxAge) {
                     rectangle.setStyle({
                         fillOpacity: 0.8,
@@ -516,16 +517,16 @@
             // Create data for plots
             const panoData = cities.map(city => ({
                 x: city.panorama_counts.unique_google_panos,
-                y: city.google_panos_age_stats.median_age_years,
+                y: city.google_panos_age_stats.median_pano_age_years,
                 city: city,
-                backgroundColor: getColor(city.google_panos_age_stats.median_age_years)
+                backgroundColor: getColor(city.google_panos_age_stats.median_pano_age_years)
             }));
 
             const areaData = cities.map(city => ({
                 x: city.search_area_km2,
-                y: city.google_panos_age_stats.median_age_years,
+                y: city.google_panos_age_stats.median_pano_age_years,
                 city: city,
-                backgroundColor: getColor(city.google_panos_age_stats.median_age_years)
+                backgroundColor: getColor(city.google_panos_age_stats.median_pano_age_years)
             }));
 
             // Shared chart options
@@ -684,6 +685,14 @@
                     }
                 });
 
+                // Debug print all cities and their age stats
+                // console.log("\n=== DEBUG: City Data Analysis ===");
+                // cities.forEach((city, index) => {
+                //     console.log(`\n${index}. ${city.city || city.state.name}`);
+                //     console.log('google_panos_age_stats:', city.google_panos_age_stats);
+                // });
+                // console.log("\n=== End City Data Analysis ===\n");
+
                 // Update stats overlay
                 document.getElementById('stats').innerHTML = `
                     <strong>GSV City Coverage Analysis</strong><br>
@@ -694,13 +703,16 @@
                 document.getElementById('loading').style.display = 'none';
 
                 // Calculate max age for legend
-                const maxAge = Math.max(...cities.map(city => city.google_panos_age_stats.median_age_years));
+                const ageValues = cities.map(city => city.google_panos_age_stats.median_pano_age_years);
+                console.log("Age values:", ageValues);
+                const maxAge = Math.max(...cities.map(city => city.google_panos_age_stats.median_pano_age_years));
+                console.log("Max age:", maxAge);
                 createLegend(maxAge, cities);
 
                 // Add rectangles to map
                 cities.forEach(city => {
-                    // console.log(city.city, city.panorama_counts.unique_google_panos, city.google_panos_age_stats.median_age_years);
-                    console.log(`City: ${city.city}, ${city.state}, ${city.country} | Panos: ${city.panorama_counts.unique_google_panos} | Median Age: ${city.google_panos_age_stats.median_age_years} years`);
+                    // console.log(city.city, city.panorama_counts.unique_google_panos, city.google_panos_age_stats.median_pano_age_years);
+                    console.log(`City: ${city.city}, ${city.state.name}, ${city.country.name} | Panos: ${city.panorama_counts.unique_google_panos} | Median Age: ${city.google_panos_age_stats.median_pano_age_years} years`);
 
                     const bounds = [
                         [city.bounds.min_lat, city.bounds.min_lon],
@@ -708,7 +720,7 @@
                     ];
 
                     const rectangle = L.rectangle(bounds, {
-                        color: getColor(city.google_panos_age_stats.median_age_years),
+                        color: getColor(city.google_panos_age_stats.median_pano_age_years),
                         weight: 1,
                         fillOpacity: 0.6
                     }).addTo(map);
