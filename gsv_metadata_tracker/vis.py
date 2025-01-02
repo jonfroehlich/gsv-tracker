@@ -236,8 +236,8 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
 
     # Calculate temporal statistics
     logger.debug(f"Calculating temporal statistics for {len(valid_rows)} rows")
-    print(valid_rows['capture_date'].dtypes)
-    print(valid_rows['capture_date'].head())
+    # print(valid_rows['capture_date'].dtypes)
+    # print(valid_rows['capture_date'].head())
     now = datetime.now()
     valid_rows['capture_date'] = pd.to_datetime(valid_rows['capture_date'])
     valid_rows['age_years'] = (now - valid_rows['capture_date']).dt.days / 365.25
