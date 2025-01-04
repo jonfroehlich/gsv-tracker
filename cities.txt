@@ -16,54 +16,54 @@
 # Medium cities: --width 3000 --height 3000 --step 20
 # Large cities:  --width 4000 --height 4000 --step 15
 
-# State Capitals (alphabetical by state)
-Montgomery, AL
-Juneau, AK
-Phoenix, AZ
-Little Rock, AR
-Sacramento, CA
-Denver, CO
-Hartford, CT
-Dover, DE
-Tallahassee, FL
-Atlanta, GA
-Honolulu, HI
-Boise, ID
-Springfield, IL
-Indianapolis, IN
-Des Moines, IA
-Topeka, KS
-Frankfort, KY
-Baton Rouge, LA
-Augusta, ME
+# State Capitals (ordered by city name)
+Albany, NY
 Annapolis, MD
+Atlanta, GA
+Augusta, ME
+Austin, TX
+Baton Rouge, LA
+Bismarck, ND
+Boise, ID
 Boston, MA
-Lansing, MI
-Saint Paul, MN
+Carson City, NV
+Charleston, WV
+Cheyenne, WY
+Columbia, SC
+Columbus, OH
+Concord, NH
+Denver, CO
+Des Moines, IA
+Dover, DE
+Frankfort, KY
+Harrisburg, PA
+Hartford, CT
+Helena, MT
+Honolulu, HI
+Indianapolis, IN
 Jackson, MS
 Jefferson City, MO
-Helena, MT
+Juneau, AK
+Lansing, MI
 Lincoln, NE
-Carson City, NV
-Concord, NH
-Trenton, NJ
-Santa Fe, NM
-Albany, NY
-Raleigh, NC
-Bismarck, ND
-Columbus, OH
-Oklahoma City, OK
-Salem, OR
-Harrisburg, PA
-Providence, RI
-Columbia, SC
-Pierre, SD
-Nashville, TN
-Austin, TX
-Salt Lake City, UT
-Montpelier, VT
-Richmond, VA
-Olympia, WA
-Charleston, WV
+Little Rock, AR
 Madison, WI
-Cheyenne, WY
+Montgomery, AL
+Montpelier, VT
+Nashville, TN
+Oklahoma City, OK
+Olympia, WA
+Phoenix, AZ
+Pierre, SD
+Providence, RI
+Raleigh, NC
+Richmond, VA
+Sacramento, CA
+Saint Paul, MN
+Salem, OR
+Salt Lake City, UT
+Santa Fe, NM
+Springfield, IL
+Tallahassee, FL
+Topeka, KS
+Trenton, NJ
