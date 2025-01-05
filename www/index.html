@@ -538,9 +538,10 @@
                         callbacks: {
                             label: (context) => {
                                 const city = context.raw.city;
-                                const cityName = city.city || city.state;
+                                const cityName = city.city || city.state?.name || city.country.name;
+                                const location = city.state?.name ? `${cityName}, ${city.state.name}` : `${cityName}, ${city.country.name}`;
                                 return [
-                                    `${cityName}, ${city.state}`,
+                                    location,
                                     `Age: ${context.raw.y.toFixed(1)} years`,
                                 ];
                             }
