@@ -13,3 +13,4 @@ data/tumwater_wa_width_8285_height_9909_step_20.json
 /tests/test_data
 /over-limit
 /files-too-large
+*.backup
