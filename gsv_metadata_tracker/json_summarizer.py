@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import os
 from tqdm import tqdm
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 import logging
 from .fileutils import load_city_csv_file, get_list_of_city_csv_files, parse_filename
 from .geoutils import get_city_location_data, get_state_abbreviation, get_country_code
@@ -13,7 +13,7 @@ from .analysis import (
     calculate_pano_stats,
     calculate_age_stats,
     calculate_coverage_stats,
-    calculate_yearly_distribution
+    calculate_histogram_of_capture_dates_by_year
 )
 
 logger = logging.getLogger(__name__)
@@ -113,62 +113,45 @@ def generate_missing_city_json_files(data_dir: str) -> None:
     
     logger.info(f"Metadata generation completed for {cnt_generated_json_files} file(s).")
 
-def calculate_histogram_of_capture_dates_by_year(df_input: pd.DataFrame, google_only: bool = False) -> dict:
+def merge_capture_date_histograms(cities_data: List[Dict]) -> Dict[str, Dict[Union[int, str], int]]:
     """
-    Calculate histogram of pano counts by year.
-    
-    Args:
-        df_input: DataFrame containing the GSV data
-        google_only: If True, only count Google panos
-    
-    Returns:
-        Dictionary with years as keys and counts as values
-    """
-    # Filter for successful panos
-    df_filtered = df_input[df_input['status'] == 'OK'].copy()
-    
-    # Apply Google filter if requested
-    if google_only:
-        df_filtered = df_filtered[df_filtered['copyright_info'].str.contains('Google', na=False)]
-    
-    # Convert capture_date to datetime and extract year
-    df_filtered['capture_year'] = pd.to_datetime(df_filtered['capture_date']).dt.year
-
-    # Drop duplicates based on pano_id to ensure each panorama is counted only once
-    df_filtered = df_filtered.drop_duplicates(subset=['pano_id'])
-    
-    # Create year histogram
-    year_counts = df_filtered['capture_year'].value_counts().sort_index()
-    
-    # Convert to dictionary with years as strings
-    return {str(year): int(count) for year, count in year_counts.items()}
-
-def merge_capture_date_histograms(cities_data: List[Dict]) -> Dict[str, Dict[str, int]]:
-    """
-    Merge yearly histograms from multiple cities.
+    Merge yearly and daily histograms from multiple cities.
     
     Args:
         cities_data: List of city data dictionaries
         
     Returns:
-        Dictionary containing merged histograms for all panos and google panos
+        Dictionary containing merged histograms for all panos and google panos.
+        Yearly histograms use integer years as keys, daily histograms use ISO date strings.
     """
-    all_panos_histogram = {}
-    google_panos_histogram = {}
+    all_panos_yearly = {}
+    google_panos_yearly = {}
+    all_panos_daily = {}
+    google_panos_daily = {}
     
     for city_data in cities_data:
-        # Merge all panos histogram
+        # Merge yearly histograms - years are integers
         for year, count in city_data["all_panos"]["histogram_of_capture_dates_by_year"].items():
-            all_panos_histogram[year] = all_panos_histogram.get(year, 0) + count
+            year_int = int(year) if isinstance(year, str) else year  # Handle potential string years in existing data
+            all_panos_yearly[year_int] = all_panos_yearly.get(year_int, 0) + count
             
-        # Merge google panos histogram
         for year, count in city_data["google_panos"]["histogram_of_capture_dates_by_year"].items():
-            google_panos_histogram[year] = google_panos_histogram.get(year, 0) + count
+            year_int = int(year) if isinstance(year, str) else year
+            google_panos_yearly[year_int] = google_panos_yearly.get(year_int, 0) + count
+            
+        # Merge daily histograms - dates are ISO format strings
+        for date, count in city_data["all_panos"]["histogram_of_capture_dates"].items():
+            all_panos_daily[date] = all_panos_daily.get(date, 0) + count
+            
+        for date, count in city_data["google_panos"]["histogram_of_capture_dates"].items():
+            google_panos_daily[date] = google_panos_daily.get(date, 0) + count
     
-    # Sort the histograms by year
+    # Sort all histograms
     return {
-        "all_panos_histogram": dict(sorted(all_panos_histogram.items())),
-        "google_panos_histogram": dict(sorted(google_panos_histogram.items()))
+        "all_panos_yearly": dict(sorted(all_panos_yearly.items())),
+        "google_panos_yearly": dict(sorted(google_panos_yearly.items())),
+        "all_panos_daily": dict(sorted(all_panos_daily.items())),
+        "google_panos_daily": dict(sorted(google_panos_daily.items()))
     }
 
 def generate_city_metadata_summary_as_json(
@@ -295,12 +278,14 @@ def generate_city_metadata_summary_as_json(
         "all_panos": {
             "duplicate_stats": all_pano_stats['duplicate_stats'],
             "age_stats": all_pano_stats['age_stats'],
-            "histogram_of_capture_dates_by_year": all_pano_stats['yearly_distribution']
+            "histogram_of_capture_dates_by_year": all_pano_stats['yearly_distribution'],
+            "histogram_of_capture_dates": all_pano_stats['daily_distribution']
         },
         "google_panos": {
             "duplicate_stats": google_pano_stats['duplicate_stats'],
             "age_stats": google_pano_stats['age_stats'],
-            "histogram_of_capture_dates_by_year": google_pano_stats['yearly_distribution']
+            "histogram_of_capture_dates_by_year": google_pano_stats['yearly_distribution'],
+            "histogram_of_capture_dates": google_pano_stats['daily_distribution']
         },
         "timestamps": {
             "json_file_created": datetime.now().isoformat(),

@@ -211,13 +211,15 @@ def calculate_pano_stats(
     coverage_stats = calculate_coverage_stats(df)
     
     # Calculate yearly distribution
-    yearly_dist = calculate_yearly_distribution(unique_panos)
+    yearly_dist = calculate_histogram_of_capture_dates_by_year(unique_panos)
+    daily_dist = calculate_histogram_of_capture_dates_by_day(unique_panos)
     
     return {
         "duplicate_stats": duplicate_stats,
         "age_stats": age_stats,
         "coverage_stats": coverage_stats,
-        "yearly_distribution": yearly_dist
+        "yearly_distribution": yearly_dist,
+        "daily_distribution": daily_dist
     }
 
 def calculate_age_stats(df: pd.DataFrame, now: pd.Timestamp) -> Dict[str, Any]:
@@ -309,7 +311,7 @@ def calculate_coverage_stats(df: pd.DataFrame) -> Dict[str, Any]:
         "pano_distance_stats": distance_stats
     }
 
-def calculate_yearly_distribution(df: pd.DataFrame) -> Dict[str, int]:
+def calculate_histogram_of_capture_dates_by_year(df: pd.DataFrame) -> Dict[str, int]:
     """Calculate distribution of panoramas by year."""
     if len(df) == 0:
         return {}
@@ -321,7 +323,30 @@ def calculate_yearly_distribution(df: pd.DataFrame) -> Dict[str, int]:
     # Extract year and count occurrences
     year_counts = df['capture_date'].dt.year.value_counts().sort_index()
     
-    return {str(year): int(count) for year, count in year_counts.items()}
+    return {int(year): int(count) for year, count in year_counts.items()}
+
+def calculate_histogram_of_capture_dates_by_day(df: pd.DataFrame) -> Dict[str, int]:
+    """
+    Calculate distribution of panoramas by date (YYYY-MM-DD).
+    
+    Args:
+        df: DataFrame containing panorama data with capture_date column
+        
+    Returns:
+        Dictionary mapping dates (YYYY-MM-DD format) to panorama counts
+    """
+    if len(df) == 0:
+        return {}
+    
+    # Convert capture_date to datetime if necessary
+    if not pd.api.types.is_datetime64_any_dtype(df['capture_date']):
+        df['capture_date'] = pd.to_datetime(df['capture_date'])
+    
+    # Use ISO format for dates (YYYY-MM-DD)
+    date_counts = df['capture_date'].apply(lambda x: x.date().isoformat()).value_counts().sort_index()
+    
+    # Convert counts to integers while maintaining ISO date strings as keys
+    return {date: int(count) for date, count in date_counts.items()}
 
 def print_df_summary(df: pd.DataFrame, now: Optional[pd.Timestamp] = None) -> None:
     """
