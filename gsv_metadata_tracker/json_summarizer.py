@@ -124,12 +124,16 @@ def merge_capture_date_histograms(cities_data: List[Dict]) -> Dict[str, Dict[Uni
         Dictionary containing merged histograms for all panos and google panos.
         Yearly histograms use integer years as keys, daily histograms use ISO date strings.
     """
+    logger.debug(f"Merging capture date histograms for {len(cities_data)} cities")
+
     all_panos_yearly = {}
     google_panos_yearly = {}
     all_panos_daily = {}
     google_panos_daily = {}
     
     for city_data in cities_data:
+        logger.debug(f"Merging histograms for {city_data['city']['name']}, {city_data['city']['state']['name']}, {city_data['city']['country']['name']}")
+        
         # Merge yearly histograms - years are integers
         for year, count in city_data["all_panos"]["histogram_of_capture_dates_by_year"].items():
             year_int = int(year) if isinstance(year, str) else year  # Handle potential string years in existing data

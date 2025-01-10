@@ -30,6 +30,7 @@ def update_city_json_with_daily_histograms(data_dir: str, dry_run: bool = True) 
     logger.info(f"Found {len(json_files)} JSON.gz files to process")
     skipped_count = 0
     updated_count = 0
+    error_files = []
     
     for json_file in tqdm(json_files, desc="Processing city files"):
         json_path = os.path.join(data_dir, json_file)
@@ -59,11 +60,11 @@ def update_city_json_with_daily_histograms(data_dir: str, dry_run: bool = True) 
             
             if not os.path.exists(csv_path):
                 logger.warning(f"CSV file not found: {csv_path}")
+                error_files.append(json_file)
                 continue
                 
             # Load CSV data and calculate new statistics
-            df = load_city_csv_file(csv_path)
-         
+            df = load_city_csv_file(csv_path) 
             
             # Calculate statistics for all panos and Google panos
             all_pano_stats = calculate_pano_stats(df, original_timestamp)
@@ -98,11 +99,19 @@ def update_city_json_with_daily_histograms(data_dir: str, dry_run: bool = True) 
                 
         except Exception as e:
             logger.error(f"Error processing {json_file}: {str(e)}")
+            error_files.append(json_file)
             continue
     
-    logger.info(f"Processing complete:")
+    logger.info(f"Processing complete for {len(json_files)} files:")
+    logger.info(f"  Files skipped (error): {len(error_files)}")
     logger.info(f"  Files skipped (already had histograms): {skipped_count}")
     logger.info(f"  Files {'would be' if dry_run else ''} updated: {updated_count}")
+
+    if len(error_files) > 0:
+        logger.info("Files with errors:")
+        for error_file in error_files:
+            logger.info(f"  {error_file}")
+        
 
 def main():
     """Command-line entry point for updating JSON files."""
