@@ -5,6 +5,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-adapter-moment/1.0.1/chartjs-adapter-moment.min.js"></script>
     <style>
         body {
             margin: 0;
@@ -121,6 +124,19 @@
             font-family: sans-serif;
             margin-top: 5px;
         }
+
+        #temporal-plot-container {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(80, 80, 80, 0.9);
+            border-radius: 4px;
+            padding: 10px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            width: 400px;
+            height: 200px;
+        }
     </style>
 </head>
 <!-- Google tag (gtag.js) -->
@@ -134,6 +150,9 @@
 </script>
 <body>
     <div id="map"></div>
+    <div id="temporal-plot-container">
+        <canvas id="temporal-plot"></canvas>
+    </div>
     <a href="https://jonfroehlich.github.io/gsv-tracker/www/" id="back-link">← Back to Overview Map</a>
     <div id="progress-container">
         <div id="progress-bar">
@@ -515,6 +534,155 @@
                 distance: bestDistance
             };
         }
+
+        /**
+         * Process CSV data to create temporal distribution of Street View panoramas
+         * @param {Array} data - Array of CSV row objects
+         * @returns {Object} Object containing dates and counts for unique panoramas
+         */
+        function processTemporalData(data) {
+            const dateCountMap = new Map();
+            const processedPanos = new Set();
+
+            // Process each row, counting unique panoramas by date
+            data.forEach(row => {
+                if (row.status === 'OK' && 
+                    row.copyright_info === '© Google' && 
+                    row.capture_date &&
+                    row.pano_id &&
+                    !processedPanos.has(row.pano_id)) {
+                    
+                    processedPanos.add(row.pano_id);
+                    const date = new Date(row.capture_date);
+                    const dateStr = date.toISOString().split('T')[0];
+                    
+                    dateCountMap.set(dateStr, (dateCountMap.get(dateStr) || 0) + 1);
+                }
+            });
+
+            // Convert to sorted array of objects
+            return Array.from(dateCountMap.entries())
+                .map(([date, count]) => ({
+                    date: new Date(date),
+                    count: count
+                }))
+                .sort((a, b) => a.date - b.date);
+        }
+
+        /**
+         * Create temporal distribution chart using Chart.js
+         * @param {Array} temporalData - Array of objects with date and count properties
+         * @param {HTMLCanvasElement} canvas - Canvas element to render chart on
+         */
+        function createTemporalPlot(temporalData, canvas) {
+            // Add vertical line plugin
+            const verticalLinePlugin = {
+                id: 'verticalLines',
+                beforeDraw: (chart) => {
+                    const ctx = chart.ctx;
+                    const xAxis = chart.scales.x;
+                    const yAxis = chart.scales.y;
+                    
+                    chart.data.datasets[0].data.forEach((point, i) => {
+                        const x = xAxis.getPixelForValue(point.x);
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.strokeStyle = chart.data.datasets[0].backgroundColor[i];
+                        ctx.lineWidth = 3;  // Add this line for thicker lines
+                        // ctx.setLineDash([2, 2]); // Create dashed line
+                        ctx.moveTo(x, yAxis.getPixelForValue(point.y));
+                        ctx.lineTo(x, yAxis.getPixelForValue(0));
+                        ctx.stroke();
+                        ctx.restore();
+                    });
+                }
+            };
+
+            // Prepare data for Chart.js
+            const chartData = {
+                datasets: [{
+                    label: 'Panoramas',
+                    data: temporalData.map(d => ({
+                        x: d.date,
+                        y: d.count
+                    })),
+                    backgroundColor: temporalData.map(d => {
+                        const age = (new Date().getFullYear() - d.date.getFullYear());
+                        return getColor(age);
+                    }),
+                    //borderColor: 'rgba(0, 0, 0, 0.5)',
+                    borderWidth: 1,
+                    pointRadius: 4
+                }]
+            };
+
+            // Create chart
+            new Chart(canvas, {
+                type: 'scatter',
+                data: chartData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'year',
+                                displayFormats: {
+                                    year: 'YYYY'
+                                }
+                            },
+                            grid: {
+                                display: false,
+                                color: '#888888'
+                            },
+                            border: {
+                                color: '#888888'
+                            },
+                            ticks: {
+                                color: '#999999'
+                            },
+                            title: {
+                                color: '#999999',
+                                display: true,
+                                text: 'Capture Date'
+                            }
+                        },
+                        y: {
+                            grid: {
+                                display: false,
+                                color: '#888888'
+                            },
+                            ticks: {
+                                color: '#999999'
+                            },
+                            border: {
+                                color: '#888888'
+                            },
+                            title: {
+                                color: '#999999',
+                                display: true,
+                                text: 'Num of Panoramas'
+                            },
+                            beginAtZero: true
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `Date: ${moment(context.raw.x).format('MM/DD/YYYY')}, Count: ${context.raw.y}`;
+                                }
+                            }
+                        }
+                    }
+                },
+                plugins: [verticalLinePlugin]
+            });
+        }
         
         async function loadData() {
             
@@ -750,6 +918,11 @@
                         totalPanosGlobal = processedPanos.size;
                         
                         updateLegend(years);
+
+                        // Create temporal plot
+                        const temporalData = processTemporalData(results.data);
+                        const canvas = document.getElementById('temporal-plot');
+                        createTemporalPlot(temporalData, canvas);
                         
                         if (validPoints.length > 0) {
                             const bounds = L.latLngBounds(validPoints);
