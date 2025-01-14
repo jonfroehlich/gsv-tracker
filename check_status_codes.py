@@ -133,7 +133,7 @@ def main():
         if df is not None:
             # Analyze and print status distribution
             status_stats = analyze_gsv_status(df)
-            print("\nStatus Code Distribution:")
+            print("\nStatus Code Distribution Across Queries:")
             print(format_status_table(df))
             
             # Print record counts
