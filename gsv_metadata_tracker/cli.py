@@ -291,7 +291,7 @@ async def async_main():
             logging.info(f"Map visualization saved to {map_path}")
             
     except Exception as e:
-        logging.error(f"Error: {str(e)}")
+        logging.exception(f"Error: {str(e)}")
         sys.exit(1)
 
 def main():
@@ -320,7 +320,7 @@ def main():
         print("\nOperation cancelled by user")
         sys.exit(1)
     except Exception as e:
-        logging.error(f"Fatal error: {str(e)}")
+        logging.exception(f"Fatal error: {str(e)}")
         sys.exit(1)
 
 if __name__ == '__main__':
