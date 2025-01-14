@@ -87,14 +87,23 @@ def format_age_stats(age_stats: Dict[str, Any], title: str = "Age Statistics") -
     """
     percentiles = age_stats.get('age_percentiles_years', {})
     
+    def format_value(value) -> str:
+        """Helper to safely format values that might be None"""
+        if value is None:
+            return "N/A"
+        if isinstance(value, (float, int)):
+            return f"{value:.2f}"
+        return str(value)
+    
     rows = [
-        ["Total Panoramas", age_stats['count']],
-        ["Oldest Panorama", age_stats['oldest_pano_date']],
-        ["Newest Panorama", age_stats['newest_pano_date']],
-        ["Average Age (years)", f"{age_stats['avg_pano_age_years']:.2f}"],
-        ["Median Age (years)", f"{age_stats['median_pano_age_years']:.2f}"],
-        ["Std Dev Age (years)", f"{age_stats['stdev_pano_age_years']:.2f}"],
+        ["Total Panoramas", age_stats.get('count', 'N/A')],
+        ["Oldest Panorama", age_stats.get('oldest_pano_date', 'N/A')],
+        ["Newest Panorama", age_stats.get('newest_pano_date', 'N/A')],
+        ["Average Age (years)", format_value(age_stats.get('avg_pano_age_years'))],
+        ["Median Age (years)", format_value(age_stats.get('median_pano_age_years'))],
+        ["Std Dev Age (years)", format_value(age_stats.get('stdev_pano_age_years'))]
     ]
+    
     
     return f"\n{title}\n" + tabulate(
         rows,
@@ -114,18 +123,34 @@ def format_coverage_stats(coverage_stats: Dict[str, Any]) -> str:
     Returns:
         Formatted string containing the coverage statistics table
     """
+    def format_float(value) -> str:
+        """Helper to format floats or None values"""
+        if value is None:
+            return "N/A"
+        return f"{value:.2f}"
+
     distance_stats = coverage_stats.get('pano_distance_stats', {})
-    
+
     rows = [
-        ["Points with Panoramas", coverage_stats['points_with_panos']],
-        ["Points without Panoramas", coverage_stats['points_without_panos']],
-        ["Points with Errors", coverage_stats['points_with_errors']],
-        ["Coverage Rate", f"{coverage_stats['coverage_rate']:.2f}%"],
-        ["Min Distance (m)", f"{distance_stats.get('min_meters', 'N/A'):.2f}"],
-        ["Max Distance (m)", f"{distance_stats.get('max_meters', 'N/A'):.2f}"],
-        ["Avg Distance (m)", f"{distance_stats.get('avg_meters', 'N/A'):.2f}"],
-        ["Median Distance (m)", f"{distance_stats.get('median_meters', 'N/A'):.2f}"]
+        ["Points with Panoramas", coverage_stats['num_points_with_panos']],
+        ["Points with Unique Pano IDs", coverage_stats['num_points_with_unique_pano_ids']],
+        ["Points without Panoramas", coverage_stats['num_points_without_panos']],
+        ["Points with Errors", coverage_stats['num_points_with_errors']],
+        ["Unique Pano IDs / Num Points Queried", f"{coverage_stats['coverage_rate']:.2f}%"],
     ]
+
+    # Handle optional distance statistics
+    distance_stats = coverage_stats.get('pano_distance_stats') or {}
+    
+    # Add distance statistics if they exist
+    distance_rows = [
+        ["Min Distance (m)", format_float(distance_stats.get('min_meters'))],
+        ["Max Distance (m)", format_float(distance_stats.get('max_meters'))],
+        ["Avg Distance (m)", format_float(distance_stats.get('avg_meters'))],
+        ["Median Distance (m)", format_float(distance_stats.get('median_meters'))]
+    ]
+    
+    rows.extend(distance_rows)
     
     return tabulate(
         rows,
@@ -208,7 +233,7 @@ def calculate_pano_stats(
     age_stats = calculate_age_stats(unique_panos, now)
     
     # Calculate coverage statistics
-    coverage_stats = calculate_coverage_stats(df)
+    coverage_stats = calculate_coverage_stats(filtered_df)
     
     # Calculate yearly distribution
     yearly_dist = calculate_histogram_of_capture_dates_by_year(unique_panos)
@@ -273,10 +298,12 @@ def calculate_coverage_stats(df: pd.DataFrame) -> Dict[str, Any]:
     - NO_DATE: Successful pano but missing date
     - UNKNOWN_ERROR: Unclassified errors
     """
-    total_points = len(df)
-    points_with_panos = len(df[df['status'] == 'OK'])
-    points_without_panos = len(df[df['status'] == 'ZERO_RESULTS'])
-    points_with_errors = len(df[df['status'].isin([
+    num_total_points = len(df)
+
+    total_points_with_panos = df[df['status'] == 'OK']
+    num_points_with_panos = len(total_points_with_panos)
+    num_points_without_panos = len(df[df['status'] == 'ZERO_RESULTS'])
+    num_points_with_errors = len(df[df['status'].isin([
         'ERROR',
         'REQUEST_DENIED', 
         'INVALID_REQUEST',
@@ -284,32 +311,89 @@ def calculate_coverage_stats(df: pd.DataFrame) -> Dict[str, Any]:
         'NO_DATE',
         'UNKNOWN_ERROR'
     ])])
-    
-    # Calculate distance statistics for successful panos
-    successful_df = df[df['status'] == 'OK'].copy()
-    if len(successful_df) > 0:
-        successful_df['distance_to_query'] = np.sqrt(
-            (successful_df['query_lat'] - successful_df['pano_lat'])**2 +
-            (successful_df['query_lon'] - successful_df['pano_lon'])**2
+
+    # Remove duplicates pano id (only count each pano id once)
+    successful_df_no_duplicates = total_points_with_panos.drop_duplicates(subset=['pano_id']).copy()
+    num_points_with_unique_pano_ids = len(successful_df_no_duplicates)
+    num_points_without_unique_pano_ids = num_points_with_panos - len(successful_df_no_duplicates)
+
+    if len(successful_df_no_duplicates) > 0:
+        # Calculate distances using loc for assignment
+        distances = np.sqrt(
+            (successful_df_no_duplicates['query_lat'] - successful_df_no_duplicates['pano_lat'])**2 +
+            (successful_df_no_duplicates['query_lon'] - successful_df_no_duplicates['pano_lon'])**2
         ) * 111000  # Approximate conversion to meters
         
+        successful_df_no_duplicates.loc[:, 'distance_to_query'] = distances
+        
         distance_stats = {
-            "min_meters": float(successful_df['distance_to_query'].min()),
-            "max_meters": float(successful_df['distance_to_query'].max()),
-            "avg_meters": float(successful_df['distance_to_query'].mean()),
-            "median_meters": float(successful_df['distance_to_query'].median()),
-            "stdev_meters": float(successful_df['distance_to_query'].std())
+            "min_meters": float(successful_df_no_duplicates['distance_to_query'].min()),
+            "max_meters": float(successful_df_no_duplicates['distance_to_query'].max()),
+            "avg_meters": float(successful_df_no_duplicates['distance_to_query'].mean()),
+            "median_meters": float(successful_df_no_duplicates['distance_to_query'].median()),
+            "stdev_meters": float(successful_df_no_duplicates['distance_to_query'].std())
         }
     else:
         distance_stats = None
     
     return {
-        "points_with_panos": points_with_panos,
-        "points_without_panos": points_without_panos,
-        "points_with_errors": points_with_errors,
-        "coverage_rate": (points_with_panos / total_points) * 100 if total_points > 0 else 0,
+        "num_points_with_panos": num_points_with_panos,
+        "num_points_with_unique_pano_ids": num_points_with_unique_pano_ids,
+        "num_points_without_panos": num_points_without_panos + num_points_without_unique_pano_ids,
+        "num_points_with_errors": num_points_with_errors,
+
+        # Coverage rate is defined as the number of unique pano ids found over the total number of points searched
+        "coverage_rate": (num_points_with_unique_pano_ids / num_total_points) * 100 if num_total_points > 0 else 0,
         "pano_distance_stats": distance_stats
     }
+
+def calculate_and_format_photographer_stats(df: pd.DataFrame) -> str:
+    """
+    Create a formatted table showing the top 5 photographers by number of unique panoramas.
+    
+    Args:
+        df: DataFrame containing GSV metadata with 'copyright_info' and 'pano_id' columns
+        
+    Returns:
+        Formatted string containing the photographer contribution table
+        
+    Example:
+        >>> photographer_stats = format_photographer_stats(gsv_metadata_df)
+        >>> print(photographer_stats)
+        Top 5 Photographers by Unique Panoramas
+        Photographer               Unique Panos    Percentage
+        ------------------------  -------------  ------------
+        Google                          15,234        85.23%
+        John Smith                       1,523         8.52%
+        Jane Doe                           543         3.04%
+        Photo Studios Inc                  324         1.81%
+        Street View Pro                    251         1.40%
+    """
+    # Filter for successful panoramas and drop duplicates
+    ok_panos = df[df['status'] == 'OK'].drop_duplicates(subset=['pano_id'])
+    
+    # Count unique pano_ids per photographer
+    photographer_counts = ok_panos['copyright_info'].value_counts()
+    total_panos = len(ok_panos)
+    
+    # Create rows for top 5 photographers
+    rows = []
+    for photographer, count in photographer_counts.head(5).items():
+        percentage = (count / total_panos) * 100
+        rows.append([
+            photographer,
+            f"{count:,}",
+            f"{percentage:.2f}%"
+        ])
+    
+    return "\nTop 5 Photographers by Unique Panoramas\n" + tabulate(
+        rows,
+        headers=["Photographer", "Unique Panos", "Percentage"],
+        tablefmt="simple",
+        floatfmt=".2f",
+        numalign="right",
+        stralign="left"
+    )
 
 def calculate_histogram_of_capture_dates_by_year(df: pd.DataFrame) -> Dict[str, int]:
     """Calculate distribution of panoramas by year."""
@@ -365,7 +449,14 @@ def print_df_summary(df: pd.DataFrame, now: Optional[pd.Timestamp] = None) -> No
     # Print coverage statistics
     print("\nCoverage Statistics")
     print("=" * 40)
+    print("\nAll Panos")
     print(format_coverage_stats(all_stats['coverage_stats']))
+
+    print("\nGoogle Panos Only")
+    print(format_coverage_stats(google_stats['coverage_stats']))
+
+    print("\nPhotographer Statistics")
+    print(calculate_and_format_photographer_stats(df))
     
     # Print duplicate statistics
     print("\nDuplicate Statistics")
@@ -375,7 +466,7 @@ def print_df_summary(df: pd.DataFrame, now: Optional[pd.Timestamp] = None) -> No
     # Print age statistics for all panoramas
     print("\nAge Statistics")
     print("=" * 40)
-    print(format_age_stats(all_stats['age_stats'], "\nAge Statistics (All Panoramas)"))
+    print(format_age_stats(all_stats['age_stats'], "Age Statistics (All Panoramas)"))
     
     # Print age statistics for Google panoramas
     print(format_age_stats(google_stats['age_stats'], "\nAge Statistics (Google Panoramas Only)"))
