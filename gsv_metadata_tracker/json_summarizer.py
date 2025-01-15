@@ -13,7 +13,6 @@ from .analysis import (
     calculate_pano_stats,
     calculate_age_stats,
     calculate_coverage_stats,
-    calculate_histogram_of_capture_dates_by_year
 )
 
 logger = logging.getLogger(__name__)
