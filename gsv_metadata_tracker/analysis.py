@@ -101,18 +101,22 @@ class AgeStats:
         'stdev_pano_age_years': 'Std Dev Age (years)'
     }
 
-    def format_value(self, value: Any) -> str:
-        """Helper to safely format values that might be None."""
+    def format_field_value(self, field: Any) -> str:
+        """Helper to safely format field values that might be None."""
+        value = getattr(self, field)
+
         if value is None:
             return "N/A"
+        if field == "count":
+            return f"{value:,}"
         if isinstance(value, (float, int)):
-            return f"{value:.2f}"
+            return f"{value:.1f}"
         return str(value)
 
     def to_rows(self) -> List[List[str]]:
         """Convert stats to formatted rows for tabulation."""
         return [
-            [self.FIELD_LABELS[field], self.format_value(getattr(self, field))]
+            [self.FIELD_LABELS[field], self.format_field_value(field)]
             for field in self.FIELD_LABELS.keys()
         ]
 
@@ -244,7 +248,7 @@ class DuplicateStats:
         )
 
 @dataclass
-class CaptureDateDistributionByYear:
+class YearlyDistribution:
     """Distribution of panoramas by year."""
     counts: Dict[int, int]
 
@@ -274,7 +278,7 @@ class CaptureDateDistributionByYear:
         )
 
 @dataclass
-class CaptureDateDistributionByDay:
+class DailyDistribution:
     """Distribution of panoramas by day."""
     counts: Dict[str, int]  # Maps ISO date strings (YYYY-MM-DD) to counts
 
@@ -304,13 +308,53 @@ class CaptureDateDistributionByDay:
         )
 
 @dataclass
+class PhotographerStats:
+    """Statistics about photographer contributions."""
+    photographer_counts: Dict[str, int]  # Maps photographer name to unique pano count
+    top_n: int = 5  # Number of top photographers to show
+
+    def to_rows(self) -> List[List[str]]:
+        """Convert stats to formatted rows for tabulation."""
+        total_panos = sum(self.photographer_counts.values())
+        rows = []
+        
+        # Sort by count and take top N
+        sorted_photographers = sorted(
+            self.photographer_counts.items(), 
+            key=lambda x: x[1], 
+            reverse=True
+        )[:self.top_n]
+        
+        for photographer, count in sorted_photographers:
+            percentage = (count / total_panos) * 100
+            rows.append([
+                photographer,
+                f"{count:,}",
+                f"{percentage:.2f}%"
+            ])
+            
+        return rows
+
+    def format_table(self, title: str = "Top Photographers by Unique Panoramas") -> str:
+        """Create a formatted table representation."""
+        return f"\n{title}\n" + tabulate(
+            self.to_rows(),
+            headers=["Photographer", "Unique Panos", "Percentage"],
+            tablefmt="simple",
+            floatfmt=".2f",
+            numalign="right",
+            stralign="left"
+        )
+
+@dataclass
 class GSVAnalysisResults:
     """Complete set of GSV metadata analysis results."""
     duplicate_stats: DuplicateStats
     age_stats: AgeStats
     coverage_stats: CoverageStats
-    yearly_distribution: CaptureDateDistributionByYear
-    daily_distribution: CaptureDateDistributionByDay
+    yearly_distribution: YearlyDistribution
+    daily_distribution: DailyDistribution
+    photographer_stats: PhotographerStats
 
     def print_summary(self, title: str = "GSV Analysis Summary") -> None:
         """Print a comprehensive summary of the analysis results."""
@@ -325,10 +369,14 @@ class GSVAnalysisResults:
 
         print(self.age_stats.format_table())
         
+        print("\nPhotographer Statistics")
+        print(self.photographer_stats.format_table())
+        
+        print("\nYearly and Daily Distributions")
         print(self.yearly_distribution.format_table())
         print(self.daily_distribution.format_table())
 
-def calculate_daily_distribution(df: pd.DataFrame) -> CaptureDateDistributionByDay:
+def calculate_daily_distribution(df: pd.DataFrame) -> DailyDistribution:
     """
     Calculate distribution of panoramas by date (YYYY-MM-DD).
     
@@ -339,7 +387,7 @@ def calculate_daily_distribution(df: pd.DataFrame) -> CaptureDateDistributionByD
         DailyDistribution object containing date-wise counts
     """
     if len(df) == 0:
-        return CaptureDateDistributionByDay(counts={})
+        return DailyDistribution(counts={})
     
     # Convert capture_date to datetime if necessary
     if not pd.api.types.is_datetime64_any_dtype(df['capture_date']):
@@ -349,9 +397,27 @@ def calculate_daily_distribution(df: pd.DataFrame) -> CaptureDateDistributionByD
     date_counts = df['capture_date'].apply(lambda x: x.date().isoformat()).value_counts().sort_index()
     
     # Convert counts to integers while maintaining ISO date strings as keys
-    return CaptureDateDistributionByDay(
+    return DailyDistribution(
         counts={date: int(count) for date, count in date_counts.items()}
     )
+
+def calculate_photographer_stats(df: pd.DataFrame) -> PhotographerStats:
+    """
+    Calculate photographer contribution statistics.
+    
+    Args:
+        df: DataFrame containing GSV metadata with 'copyright_info' and 'pano_id' columns
+        
+    Returns:
+        PhotographerStats containing photographer contribution analysis
+    """
+    # Filter for successful panoramas and drop duplicates
+    ok_panos = df[df['status'] == 'OK'].drop_duplicates(subset=['pano_id'])
+    
+    # Count unique pano_ids per photographer
+    photographer_counts = ok_panos['copyright_info'].value_counts().to_dict()
+    
+    return PhotographerStats(photographer_counts=photographer_counts)
 
 def calculate_pano_stats(
     df: pd.DataFrame, 
@@ -399,22 +465,24 @@ def calculate_pano_stats(
     # Calculate coverage statistics
     coverage_stats = calculate_coverage_stats(filtered_df)
     
-    # Calculate distributions
+    # Calculate distributions and photographer stats
     yearly_dist = calculate_yearly_distribution(unique_panos)
     daily_dist = calculate_daily_distribution(unique_panos)
+    photographer_stats = calculate_photographer_stats(filtered_df)
     
     return GSVAnalysisResults(
         duplicate_stats=duplicate_stats,
         age_stats=age_stats,
         coverage_stats=coverage_stats,
         yearly_distribution=yearly_dist,
-        daily_distribution=daily_dist
+        daily_distribution=daily_dist,
+        photographer_stats=photographer_stats
     )
 
-def calculate_yearly_distribution(df: pd.DataFrame) -> CaptureDateDistributionByYear:
+def calculate_yearly_distribution(df: pd.DataFrame) -> YearlyDistribution:
     """Calculate distribution of panoramas by year."""
     if len(df) == 0:
-        return CaptureDateDistributionByYear(counts={})
+        return YearlyDistribution(counts={})
     
     # Convert capture_date to datetime if necessary
     if not pd.api.types.is_datetime64_any_dtype(df['capture_date']):
@@ -423,7 +491,7 @@ def calculate_yearly_distribution(df: pd.DataFrame) -> CaptureDateDistributionBy
     # Extract year and count occurrences
     year_counts = df['capture_date'].dt.year.value_counts().sort_index()
     
-    return CaptureDateDistributionByYear(
+    return YearlyDistribution(
         counts={int(year): int(count) for year, count in year_counts.items()}
     )
 
