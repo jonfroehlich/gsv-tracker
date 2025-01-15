@@ -257,10 +257,10 @@
                 </ul>
                 <div style="margin-top: 12px"><strong>Age Statistics:</strong></div>
                 <ul style="padding-left: 20px; margin: 5px 0;">
-                    <li>Median Age: ${city.google_panos_age_stats.median_pano_age_years.toFixed(1)} years</li>
-                    <li>Average Age: ${city.google_panos_age_stats.avg_pano_age_years.toFixed(1)} years (SD=${city.google_panos_age_stats.stdev_pano_age_years.toFixed(1)})</li>
-                    <li>Newest: ${new Date(city.google_panos_age_stats.newest_date).toLocaleDateString()}</li>
-                    <li>Oldest: ${new Date(city.google_panos_age_stats.oldest_date).toLocaleDateString()}</li>
+                    <li>Median Age: ${city.google_panos_age_stats.median_pano_age_years ? city.google_panos_age_stats.median_pano_age_years.toFixed(1) + ' years' : 'No data'}</li>
+                    <li>Average Age: ${city.google_panos_age_stats.avg_pano_age_years ? city.google_panos_age_stats.avg_pano_age_years.toFixed(1) + ' years' : 'No data'} ${city.google_panos_age_stats.stdev_pano_age_years ? `(SD=${city.google_panos_age_stats.stdev_pano_age_years.toFixed(1)})` : ''}</li>
+                    <li>Newest: ${city.google_panos_age_stats.newest_date ? new Date(city.google_panos_age_stats.newest_date).toLocaleDateString() : 'No data'}</li>
+                    <li>Oldest: ${city.google_panos_age_stats.oldest_date ? new Date(city.google_panos_age_stats.oldest_date).toLocaleDateString() : 'No data'}</li>
                 </ul>
             `;
             
