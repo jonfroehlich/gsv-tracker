@@ -457,18 +457,22 @@ def calculate_pano_stats(
         panos_with_multiple_refs=int((pano_id_counts > 1).sum()),
         average_references_per_pano=float(len(ok_panos) / len(pano_id_counts)) if len(pano_id_counts) > 0 else 0
     )
+
+    # For most stats, we want to focus only on unique pano ids or we risk
+    # skewing our statistics for duplicate pano ids that are referenced multiple times
+    # from different query points
     
     # Calculate age statistics for unique panoramas
     unique_panos = ok_panos.drop_duplicates(subset=['pano_id'])
     age_stats = calculate_age_stats(unique_panos, now)
     
     # Calculate coverage statistics
-    coverage_stats = calculate_coverage_stats(filtered_df)
+    coverage_stats = calculate_coverage_stats(unique_panos)
     
     # Calculate distributions and photographer stats
     yearly_dist = calculate_yearly_distribution(unique_panos)
     daily_dist = calculate_daily_distribution(unique_panos)
-    photographer_stats = calculate_photographer_stats(filtered_df)
+    photographer_stats = calculate_photographer_stats(unique_panos)
     
     return GSVAnalysisResults(
         duplicate_stats=duplicate_stats,
