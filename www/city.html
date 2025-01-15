@@ -205,6 +205,12 @@
         // Add map click handler to reset selection
         map.on('click', function(e) {
             if (e.originalEvent.target === map._container) {
+                selectedDate = null;
+                Object.values(markersByYear).flat().forEach(marker => {
+                    marker.setStyle({ fillOpacity: 0.8 });
+                    marker.setRadius(3);
+                });    
+
                 activeYears.clear();
                 Object.entries(markersByYear).forEach(([markerYear, markers]) => {
                     markers.forEach(marker => marker.addTo(map));
@@ -216,6 +222,7 @@
         // Store markers by year for filtering
         let markersByYear = {};
         let activeYears = new Set();
+        let selectedDate = null;
 
         // Create legend
         const legend = L.control({position: 'topright'});
@@ -585,9 +592,12 @@
                     
                     chart.data.datasets[0].data.forEach((point, i) => {
                         const x = xAxis.getPixelForValue(point.x);
+                        const pointDate = new Date(point.x);
+   
                         ctx.save();
                         ctx.beginPath();
                         ctx.strokeStyle = chart.data.datasets[0].backgroundColor[i];
+                        ctx.globalAlpha = point.opacity === undefined ? 1 : point.opacity; // Use point.opacity
                         ctx.lineWidth = 3;  // Add this line for thicker lines
                         // ctx.setLineDash([2, 2]); // Create dashed line
                         ctx.moveTo(x, yAxis.getPixelForValue(point.y));
@@ -598,26 +608,30 @@
                 }
             };
 
+
             // Prepare data for Chart.js
             const chartData = {
                 datasets: [{
                     label: 'Panoramas',
                     data: temporalData.map(d => ({
                         x: d.date,
-                        y: d.count
+                        y: d.count,
+                        opacity: 1 // Initialize opacity to 1
                     })),
                     backgroundColor: temporalData.map(d => {
                         const age = (new Date().getFullYear() - d.date.getFullYear());
                         return getColor(age);
                     }),
-                    //borderColor: 'rgba(0, 0, 0, 0.5)',
-                    borderWidth: 1,
-                    pointRadius: 4
+                    //pointBackgroundColor: 'currentColor',
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    pointBorderWidth: 0,
+                    pointStyle: 'circle'
                 }]
             };
 
             // Create chart
-            new Chart(canvas, {
+            const chart = new Chart(canvas, {
                 type: 'scatter',
                 data: chartData,
                 options: {
@@ -672,6 +686,9 @@
                             display: false
                         },
                         tooltip: {
+                            enabled: true,
+                            mode: 'nearest',
+                            intersect: true,
                             callbacks: {
                                 label: function(context) {
                                     return `Date: ${moment(context.raw.x).format('MM/DD/YYYY')}, Count: ${context.raw.y}`;
@@ -682,6 +699,88 @@
                 },
                 plugins: [verticalLinePlugin]
             });
+
+            // Add click handler to select date
+            canvas.onclick = function(evt) {
+                const points = chart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, true);
+
+                if (points.length) {
+                    const firstPoint = points[0];
+                    const data = chart.data.datasets[firstPoint.datasetIndex].data[firstPoint.index];
+                    const clickedDate = new Date(data.x);
+
+                    console.log('Clicked date:', clickedDate.toDateString());
+
+                    if (selectedDate && selectedDate.getTime() === clickedDate.getTime()) {
+                        // Deselect
+                        selectedDate = null;
+                        Object.values(markersByYear).flat().forEach(marker => {
+                            marker.setStyle({ fillOpacity: 0.8 });
+                            marker.setRadius(3);
+                        });
+                        
+                        // Reset all point opacities and colors
+                        chart.data.datasets[0].data.forEach(point => point.opacity = 1);
+                        
+                        // Reset dataset colors
+                        chart.data.datasets[0].backgroundColor = chart.data.datasets[0].data.map(point => {
+                            const age = (new Date().getFullYear() - new Date(point.x).getFullYear());
+                            return getColor(age);
+                        });
+                        chart.data.datasets[0].pointBackgroundColor = chart.data.datasets[0].backgroundColor;
+                        
+                        chart.update();
+                    } else {
+                        // Select
+                        selectedDate = clickedDate;
+
+                        Object.values(markersByYear).flat().forEach(marker => {
+                            const markerDate = new Date(marker.options.captureDate);
+                            marker.setStyle({ fillOpacity: markerDate.toDateString() === selectedDate.toDateString() ? 1 : 0.3 }); // Correct opacity here
+                            marker.setRadius(3);
+                            if (markerDate.toDateString() === selectedDate.toDateString()) marker.setRadius(5);
+                        });
+
+                        // Update point opacities and colors
+                        chart.data.datasets[0].backgroundColor = chart.data.datasets[0].data.map(point => {
+                            const pointDate = new Date(point.x);
+                            const age = (new Date().getFullYear() - pointDate.getFullYear());
+                            const baseColor = getColor(age);
+                            const opacity = pointDate.toDateString() === selectedDate.toDateString() ? 1 : 0.1;
+                            point.opacity = opacity; // For vertical lines
+                            
+                            // Convert baseColor to rgba with opacity
+                            const rgbMatch = baseColor.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+                            if (rgbMatch) {
+                                return `rgba(${rgbMatch[1]}, ${rgbMatch[2]}, ${rgbMatch[3]}, ${opacity})`;
+                            }
+                            return baseColor;
+                        });
+                        
+                        // Apply same colors to points
+                        chart.data.datasets[0].pointBackgroundColor = chart.data.datasets[0].backgroundColor;
+                        
+                        chart.update();
+                    }
+                } else {
+                    // Clicked outside any point, deselect
+                    selectedDate = null;
+                    Object.values(markersByYear).flat().forEach(marker => {
+                        marker.setStyle({ fillOpacity: 0.8 });
+                        marker.setRadius(3);
+                    });
+
+                    // Reset all point opacities and colors
+                    chart.data.datasets[0].data.forEach(point => point.opacity = 1);
+                    chart.data.datasets[0].backgroundColor = chart.data.datasets[0].data.map(point => {
+                        const age = (new Date().getFullYear() - new Date(point.x).getFullYear());
+                        return getColor(age);
+                    });
+                    chart.data.datasets[0].pointBackgroundColor = chart.data.datasets[0].backgroundColor;
+                    
+                    chart.update();
+                }
+            };
         }
         
         async function loadData() {
@@ -883,7 +982,8 @@
                                     color: '#000',
                                     weight: 0,
                                     opacity: 1,
-                                    fillOpacity: 0.8
+                                    fillOpacity: 0.8,
+                                    captureDate: captureDate
                                 });
                                 
                                 const popupContent = `
