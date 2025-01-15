@@ -283,6 +283,10 @@ def generate_city_metadata_summary_as_json(
     # Calculate coverage statistics
     coverage_stats = calculate_coverage_stats(df)
 
+    top_10_photographers = dict(sorted(
+        all_pano_stats.photographer_stats.photographer_counts.items(), 
+        key=lambda x: x[1], reverse=True)[:10])
+
     metadata = {
         "data_file": {
             "filename": os.path.basename(csv_gz_path),
@@ -324,7 +328,8 @@ def generate_city_metadata_summary_as_json(
             "duplicate_stats": asdict(all_pano_stats.duplicate_stats),
             "age_stats": asdict(all_pano_stats.age_stats),
             "histogram_of_capture_dates_by_year": asdict(all_pano_stats.yearly_distribution),
-            "histogram_of_capture_dates": asdict(all_pano_stats.daily_distribution)
+            "histogram_of_capture_dates": asdict(all_pano_stats.daily_distribution),
+            "top_10_photographers": top_10_photographers,
         },
         "google_panos": {
             "duplicate_stats": asdict(google_pano_stats.duplicate_stats),
