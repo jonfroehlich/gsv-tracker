@@ -7,6 +7,7 @@ import os
 from tqdm import tqdm
 from typing import Optional, Dict, Any, List, Union
 import logging
+from dataclasses import asdict
 from .fileutils import load_city_csv_file, get_list_of_city_csv_files, parse_filename
 from .geoutils import get_city_location_data, get_state_abbreviation, get_country_code
 from .analysis import (
@@ -58,7 +59,12 @@ def find_missing_json_files(data_dir: str) -> List[str]:
     return missing_json
 
 def generate_missing_city_json_files(data_dir: str) -> None:
-    """Generate missing JSON metadata files for all csv.gz files in directory."""
+    """
+    Generate missing JSON metadata files for all csv.gz files in directory.
+    
+    This is useful if a .json file was never created for a given city or if
+    the .json file needs to be recreated due to changes in analysis code.
+    """
     logger.info(f"Scanning {data_dir} for csv.gz files missing JSON metadata...")
     
     all_csv_files = get_list_of_city_csv_files(data_dir)
@@ -133,21 +139,57 @@ def merge_capture_date_histograms(cities_data: List[Dict]) -> Dict[str, Dict[Uni
     for city_data in cities_data:
         logger.debug(f"Merging histograms for {city_data['city']['name']}, {city_data['city']['state']['name']}, {city_data['city']['country']['name']}")
         
-        # Merge yearly histograms - years are integers
-        for year, count in city_data["all_panos"]["histogram_of_capture_dates_by_year"].items():
-            year_int = int(year) if isinstance(year, str) else year  # Handle potential string years in existing data
-            all_panos_yearly[year_int] = all_panos_yearly.get(year_int, 0) + count
+        # Handle all panos yearly data
+        yearly_data = city_data["all_panos"]["histogram_of_capture_dates_by_year"]
+        if isinstance(yearly_data, dict) and "counts" in yearly_data:
+            for year, count in yearly_data["counts"].items():
+                try:
+                    year_int = int(year) if isinstance(year, str) else year
+                    all_panos_yearly[year_int] = all_panos_yearly.get(year_int, 0) + count
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error converting year '{year}' to integer: {str(e)}")
+        else:
+            for year, count in yearly_data.items():
+                try:
+                    year_int = int(year) if isinstance(year, str) else year
+                    all_panos_yearly[year_int] = all_panos_yearly.get(year_int, 0) + count
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error converting year '{year}' to integer: {str(e)}")
             
-        for year, count in city_data["google_panos"]["histogram_of_capture_dates_by_year"].items():
-            year_int = int(year) if isinstance(year, str) else year
-            google_panos_yearly[year_int] = google_panos_yearly.get(year_int, 0) + count
+        # Handle google panos yearly data
+        yearly_data = city_data["google_panos"]["histogram_of_capture_dates_by_year"]
+        if isinstance(yearly_data, dict) and "counts" in yearly_data:
+            for year, count in yearly_data["counts"].items():
+                try:
+                    year_int = int(year) if isinstance(year, str) else year
+                    google_panos_yearly[year_int] = google_panos_yearly.get(year_int, 0) + count
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error converting year '{year}' to integer: {str(e)}")
+        else:
+            for year, count in yearly_data.items():
+                try:
+                    year_int = int(year) if isinstance(year, str) else year
+                    google_panos_yearly[year_int] = google_panos_yearly.get(year_int, 0) + count
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error converting year '{year}' to integer: {str(e)}")
             
-        # Merge daily histograms - dates are ISO format strings
-        for date, count in city_data["all_panos"]["histogram_of_capture_dates"].items():
-            all_panos_daily[date] = all_panos_daily.get(date, 0) + count
+        # Handle all panos daily data
+        daily_data = city_data["all_panos"]["histogram_of_capture_dates"]
+        if isinstance(daily_data, dict) and "counts" in daily_data:
+            for date, count in daily_data["counts"].items():
+                all_panos_daily[date] = all_panos_daily.get(date, 0) + count
+        else:
+            for date, count in daily_data.items():
+                all_panos_daily[date] = all_panos_daily.get(date, 0) + count
             
-        for date, count in city_data["google_panos"]["histogram_of_capture_dates"].items():
-            google_panos_daily[date] = google_panos_daily.get(date, 0) + count
+        # Handle google panos daily data
+        daily_data = city_data["google_panos"]["histogram_of_capture_dates"]
+        if isinstance(daily_data, dict) and "counts" in daily_data:
+            for date, count in daily_data["counts"].items():
+                google_panos_daily[date] = google_panos_daily.get(date, 0) + count
+        else:
+            for date, count in daily_data.items():
+                google_panos_daily[date] = google_panos_daily.get(date, 0) + count
     
     # Sort all histograms
     return {
@@ -277,23 +319,19 @@ def generate_city_metadata_summary_as_json(
             "end_time": end_time.isoformat() if end_time is not None else None,
             "duration_seconds": duration_seconds,
         },
-        "coverage": coverage_stats,
+        "coverage": asdict(coverage_stats),
         "all_panos": {
-            "duplicate_stats": all_pano_stats['duplicate_stats'],
-            "age_stats": all_pano_stats['age_stats'],
-            "histogram_of_capture_dates_by_year": all_pano_stats['yearly_distribution'],
-            "histogram_of_capture_dates": all_pano_stats['daily_distribution']
+            "duplicate_stats": asdict(all_pano_stats.duplicate_stats),
+            "age_stats": asdict(all_pano_stats.age_stats),
+            "histogram_of_capture_dates_by_year": asdict(all_pano_stats.yearly_distribution),
+            "histogram_of_capture_dates": asdict(all_pano_stats.daily_distribution)
         },
         "google_panos": {
-            "duplicate_stats": google_pano_stats['duplicate_stats'],
-            "age_stats": google_pano_stats['age_stats'],
-            "histogram_of_capture_dates_by_year": google_pano_stats['yearly_distribution'],
-            "histogram_of_capture_dates": google_pano_stats['daily_distribution']
+            "duplicate_stats": asdict(google_pano_stats.duplicate_stats),
+            "age_stats": asdict(google_pano_stats.age_stats),
+            "histogram_of_capture_dates_by_year": asdict(google_pano_stats.yearly_distribution),
+            "histogram_of_capture_dates": asdict(google_pano_stats.daily_distribution)
         },
-        "timestamps": {
-            "json_file_created": datetime.now().isoformat(),
-            "timezone": datetime.now().astimezone().tzinfo.tzname(None)
-        }
     }
     
     # Save compressed JSON
