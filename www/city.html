@@ -703,6 +703,7 @@
             // Add click handler to select date
             canvas.onclick = function(evt) {
                 const points = chart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, true);
+                console.log('Clicked points:', points);
 
                 if (points.length) {
                     const firstPoint = points[0];
@@ -736,9 +737,9 @@
 
                         Object.values(markersByYear).flat().forEach(marker => {
                             const markerDate = new Date(marker.options.captureDate);
-                            marker.setStyle({ fillOpacity: markerDate.toDateString() === selectedDate.toDateString() ? 1 : 0.3 }); // Correct opacity here
+                            marker.setStyle({ fillOpacity: markerDate.toDateString() === selectedDate.toDateString() ? 1 : 0.05 }); // Correct opacity here
                             marker.setRadius(3);
-                            if (markerDate.toDateString() === selectedDate.toDateString()) marker.setRadius(5);
+                            if (markerDate.toDateString() === selectedDate.toDateString()) marker.setRadius(4);
                         });
 
                         // Update point opacities and colors
@@ -746,7 +747,7 @@
                             const pointDate = new Date(point.x);
                             const age = (new Date().getFullYear() - pointDate.getFullYear());
                             const baseColor = getColor(age);
-                            const opacity = pointDate.toDateString() === selectedDate.toDateString() ? 1 : 0.1;
+                            const opacity = pointDate.toDateString() === selectedDate.toDateString() ? 1 : 0.3;
                             point.opacity = opacity; // For vertical lines
                             
                             // Convert baseColor to rgba with opacity
