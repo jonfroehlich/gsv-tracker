@@ -4,6 +4,67 @@ import seaborn as sns
 import numpy as np
 
 
+map_state_to_capital = {
+    'Alabama': 'Montgomery', 'Alaska': 'Juneau', 'Arizona': 'Phoenix', 'Arkansas': 'Little Rock',
+    'California': 'Sacramento', 'Colorado': 'Denver', 'Connecticut': 'Hartford', 'Delaware': 'Dover',
+    'Florida': 'Tallahassee', 'Georgia': 'Atlanta', 'Hawaii': 'Honolulu', 'Idaho': 'Boise',
+    'Illinois': 'Springfield', 'Indiana': 'Indianapolis', 'Iowa': 'Des Moines', 'Kansas': 'Topeka',
+    'Kentucky': 'Frankfort', 'Louisiana': 'Baton Rouge', 'Maine': 'Augusta', 'Maryland': 'Annapolis',
+    'Massachusetts': 'Boston', 'Michigan': 'Lansing', 'Minnesota': 'St. Paul', 'Mississippi': 'Jackson',
+    'Missouri': 'Jefferson City', 'Montana': 'Helena', 'Nebraska': 'Lincoln', 'Nevada': 'Carson City',
+    'New Hampshire': 'Concord', 'New Jersey': 'Trenton', 'New Mexico': 'Santa Fe', 'New York': 'Albany',
+    'North Carolina': 'Raleigh', 'North Dakota': 'Bismarck', 'Ohio': 'Columbus', 'Oklahoma': 'Oklahoma City',
+    'Oregon': 'Salem', 'Pennsylvania': 'Harrisburg', 'Rhode Island': 'Providence', 'South Carolina': 'Columbia',
+    'South Dakota': 'Pierre', 'Tennessee': 'Nashville', 'Texas': 'Austin', 'Utah': 'Salt Lake City',
+    'Vermont': 'Montpelier', 'Virginia': 'Richmond', 'Washington': 'Olympia', 'West Virginia': 'Charleston',
+    'Wisconsin': 'Madison', 'Wyoming': 'Cheyenne'
+}
+
+def extract_city_state(geo_area):
+    try:
+        # Split on the last comma
+        parts = geo_area.rsplit(', ', 1)
+        if len(parts) != 2:
+            parsing_errors.append(f"Could not split city and state for: {geo_area}")
+            return pd.Series([geo_area, None])
+        
+        city, state = parts[0], parts[1]
+        
+        # List of lowercase suffixes to remove
+        suffixes = [
+            ' charter township',
+            ' unified government',
+            ' consolidated government',
+            ' metro township',
+            ' municipality',
+            ' borough',
+            ' village',
+            ' township',
+            ' city',
+            ' town'
+        ]
+        
+        # Handle parenthetical cases first
+        if '(' in city and ')' in city:
+            # Extract content within parentheses and rest of the name
+            main_part = city.split('(')[0].strip()
+            paren_part = city.split('(')[1].split(')')[0].strip()
+            # Use the parenthetical part if it exists, otherwise use main part
+            city = paren_part if paren_part else main_part
+        
+        # Remove suffixes if they appear at the end of the city name
+        # Only match exact lowercase suffixes
+        for suffix in suffixes:
+            if city.endswith(suffix):
+                city = city[:-len(suffix)]
+                break
+        
+        return pd.Series([city.strip(), state])
+    except Exception as e:
+        parsing_errors.append(f"Error processing {geo_area}: {str(e)}")
+        return pd.Series([None, None])
+
+
 def clean_and_prepare_data(file_path):
     """
     Reads and prepares census data from Excel file for analysis.
@@ -62,18 +123,6 @@ def clean_and_prepare_data(file_path):
     # Extract city and state more reliably
     parsing_errors = []
     
-    def extract_city_state(geo_area):
-        try:
-            # Split on the last comma
-            parts = geo_area.rsplit(', ', 1)
-            if len(parts) == 2:
-                return pd.Series([parts[0], parts[1]])
-            parsing_errors.append(f"Could not split city and state for: {geo_area}")
-            return pd.Series([geo_area, None])
-        except Exception as e:
-            parsing_errors.append(f"Error processing {geo_area}: {str(e)}")
-            return pd.Series([None, None])
-    
     # Apply the extraction
     df[['City', 'State']] = df['Geographic Area'].apply(extract_city_state)
     
@@ -117,6 +166,180 @@ def clean_and_prepare_data(file_path):
     print(f"States found: {', '.join(sorted(df['State'].unique()))}")
     
     return df
+
+def select_study_cities(df, cities_per_quartile=5):
+    """
+    Selects cities for study using a stratified sampling approach:
+    - Automatically includes state capital and largest city
+    - Randomly samples additional cities from each population quartile
+    
+    Args:
+        df (pd.DataFrame): Prepared census DataFrame with City, State, and population columns
+        cities_per_quartile (int): Number of cities to randomly select from each quartile
+        
+    Returns:
+        pd.DataFrame: Selected cities with their selection method and quartile
+        dict: Statistics about the selection process
+    """
+    import numpy as np
+    
+    # Create empty DataFrame to store selections
+    selected_cities = pd.DataFrame()
+    selection_stats = {}
+    
+    for state in df['State'].unique():
+        state_df = df[df['State'] == state].copy()
+        
+        # Skip if insufficient data
+        min_cities_required = 4 * cities_per_quartile + 2
+        if len(state_df) < min_cities_required: 
+            print(f"Warning: Insufficient data for {state} ({len(state_df)} cities)."
+                  f"With {cities_per_quartile} cities per quartile, need at least {min_cities_required} cities per state.")
+            continue
+            
+        state_selections = pd.DataFrame()
+        
+        # 1. Add state capital
+        capital_city_name = map_state_to_capital.get(state) 
+        if capital_city_name: 
+            capital_city = state_df[state_df['City'] == capital_city_name] 
+            capital_city['selection_method'] = 'capital' 
+            state_selections = pd.concat([state_selections, capital_city]) 
+            state_df = state_df[state_df['City'] != capital_city_name]
+        
+        # 2. Add largest city by population (or second largest if capital is largest)
+        top_2_cities = state_df.nlargest(2, '2023').copy()
+        
+        # Check if capital was found and is the largest city
+        if not capital_city.empty and capital_city.index[0] == top_2_cities.index[0]:
+            # Take second largest city
+            largest_city = top_2_cities.iloc[[1]]
+            largest_city['selection_method'] = 'largest (2nd)'
+        else:
+            largest_city = top_2_cities.iloc[[0]]
+            largest_city['selection_method'] = 'largest'
+            
+        state_selections = pd.concat([state_selections, largest_city])
+        
+        # 3. Calculate quartiles for remaining cities
+        remaining_cities = state_df[~state_df.index.isin(state_selections.index)].copy()
+        remaining_cities['population_quartile'] = pd.qcut(
+            remaining_cities['2023'], 
+            q=4, 
+            labels=['Q1', 'Q2', 'Q3', 'Q4']
+        )
+        
+        # 4. Sample from each quartile
+        for quartile in ['Q1', 'Q2', 'Q3', 'Q4']:
+            quartile_cities = remaining_cities[
+                remaining_cities['population_quartile'] == quartile
+            ]
+            
+            # Sample cities (or take all if fewer than requested)
+            sample_size = min(cities_per_quartile, len(quartile_cities))
+            if sample_size > 0:
+                sampled = quartile_cities.sample(n=sample_size).copy()
+                sampled['selection_method'] = f'random_{quartile}'
+                state_selections = pd.concat([state_selections, sampled])
+        
+        # Store statistics
+        selection_stats[state] = {
+            'total_selected': len(state_selections),
+            'largest_city': largest_city['City'].iloc[0],
+            'quartile_counts': state_selections['selection_method'].value_counts().to_dict()
+        }
+        
+        # Add to main selection DataFrame
+        selected_cities = pd.concat([selected_cities, state_selections])
+    
+    return selected_cities, selection_stats
+
+def analyze_selection_coverage(selected_cities, original_df):
+    """
+    Analyzes the coverage and representativeness of selected cities.
+    Provides detailed statistics per state including capital and largest city populations,
+    and quartile statistics.
+    
+    Args:
+        selected_cities (pd.DataFrame): DataFrame of selected cities
+        original_df (pd.DataFrame): Original complete DataFrame
+        
+    Returns:
+        dict: Analysis metrics including detailed state-by-state analysis
+    """
+    analysis = {}
+    
+    # Calculate population coverage
+    total_pop = original_df['2023'].sum()
+    selected_pop = selected_cities['2023'].sum()
+    
+    analysis['population_coverage'] = {
+        'total_population': total_pop,
+        'selected_population': selected_pop,
+        'coverage_percentage': (selected_pop / total_pop) * 100
+    }
+    
+    # Analyze geographic distribution
+    analysis['geographic_distribution'] = {
+        'cities_per_state': selected_cities['State'].value_counts().to_dict(),
+        'total_states': len(selected_cities['State'].unique())
+    }
+    
+    # Analyze population size distribution
+    analysis['size_distribution'] = {
+        'mean_pop': selected_cities['2023'].mean(),
+        'median_pop': selected_cities['2023'].median(),
+        'min_pop': selected_cities['2023'].min(),
+        'max_pop': selected_cities['2023'].max()
+    }
+    
+    # Add detailed state analysis
+    analysis['state_details'] = {}
+    
+    for state in selected_cities['State'].unique():
+        state_selections = selected_cities[selected_cities['State'] == state]
+        
+        # Get capital city info
+        capital_city = state_selections[state_selections['selection_method'] == 'capital']
+        capital_pop = capital_city['2023'].iloc[0] if not capital_city.empty else None
+        
+        # Get largest/second largest city info
+        largest_city = state_selections[
+            state_selections['selection_method'].isin(['largest', 'largest (2nd)'])
+        ]
+        largest_pop = largest_city['2023'].iloc[0] if not largest_city.empty else None
+        largest_name = largest_city['City'].iloc[0] if not largest_city.empty else None
+        largest_type = largest_city['selection_method'].iloc[0] if not largest_city.empty else None
+        
+        # Calculate quartile statistics
+        quartile_stats = {}
+        for quartile in ['Q1', 'Q2', 'Q3', 'Q4']:
+            quartile_cities = state_selections[
+                state_selections['selection_method'] == f'random_{quartile}'
+            ]
+            if not quartile_cities.empty:
+                quartile_stats[quartile] = {
+                    'avg': quartile_cities['2023'].mean(),
+                    'median': quartile_cities['2023'].median(),
+                    'std': quartile_cities['2023'].std(),
+                    'count': len(quartile_cities)
+                }
+        
+        analysis['state_details'][state] = {
+            'capital': {
+                'name': capital_city['City'].iloc[0] if not capital_city.empty else None,
+                'population': capital_pop
+            },
+            'largest_city': {
+                'name': largest_name,
+                'population': largest_pop,
+                'type': largest_type
+            },
+            'quartile_stats': quartile_stats
+        }
+    
+    return analysis
+
 
 def analyze_state_statistics(df):
     """
@@ -163,50 +386,6 @@ def analyze_state_statistics(df):
     
     return stats_by_state
 
-def create_visualizations(df):
-    """
-    Creates visualizations for census data analysis.
-    
-    Args:
-        df (pd.DataFrame): Prepared census DataFrame
-    """
-    # Set style
-    plt.style.use('seaborn')
-    
-    # 1. Population Distribution (Box Plot)
-    plt.figure(figsize=(15, 8))
-    sns.boxplot(x='State', y='2023', data=df)
-    plt.xticks(rotation=45, ha='right')
-    plt.title('City Population Distribution by State (2023)')
-    plt.ylabel('Population')
-    plt.tight_layout()
-    plt.show()
-    
-    # 2. Growth Rate Analysis
-    df['growth_rate'] = ((df['2023'] - df['2020']) / df['2020']) * 100
-    
-    plt.figure(figsize=(15, 8))
-    sns.barplot(x='State', y='growth_rate', 
-                data=df.groupby('State')['growth_rate'].mean().reset_index(),
-                color='skyblue')
-    plt.xticks(rotation=45, ha='right')
-    plt.title('Average City Population Growth Rate by State (2020-2023)')
-    plt.ylabel('Growth Rate (%)')
-    plt.tight_layout()
-    plt.show()
-    
-    # 3. City Size Distribution
-    df['size_category'] = pd.cut(df['2023'], 
-                                bins=[0, 1000, 5000, 10000, 50000, float('inf')],
-                                labels=['Very Small', 'Small', 'Medium', 'Large', 'Very Large'])
-    
-    plt.figure(figsize=(12, 6))
-    df['size_category'].value_counts().plot(kind='bar')
-    plt.title('Distribution of City Sizes (2023)')
-    plt.xlabel('City Size Category')
-    plt.ylabel('Number of Cities')
-    plt.tight_layout()
-    plt.show()
 
 # Main execution
 if __name__ == "__main__":
