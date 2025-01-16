@@ -846,12 +846,16 @@
                 const jsonText = pako.inflate(new Uint8Array(jsonBuffer), { to: 'string' });
                 const stats = JSON.parse(jsonText);
 
+                console.log("stats", stats);
+
                 const totalBytes = stats.data_file.size_bytes;
                 const fileSizeMB = (totalBytes / (1024 * 1024)).toFixed(1);
 
                 // Get city and state from JSON metadata
                 const cityName = stats.city.name;
-                const stateName = stats.city.state;
+                const stateName = stats.city.state.name;
+
+                console.log(`Loaded metadata for ${cityName}, ${stateName} with stats.city=${stats.city}`);
 
                 // Update progress text for main CSV download
                 progressText.textContent = `Downloading ${fileSizeMB} MB for ${cityName}, ${stateName}...`;
