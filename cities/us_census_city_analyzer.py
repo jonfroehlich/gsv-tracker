@@ -214,7 +214,7 @@ def select_study_cities(df: pd.DataFrame, cities_per_quartile: int = 5) -> Tuple
     for state in df['State'].unique():
         state_df = df[df['State'] == state].copy()
         logger.info(f"Selecting cities for {state}...")
-        
+
         state_df = state_df.reset_index(drop=True)  # Reset index for state DataFrame
         
         # Skip if insufficient data
@@ -469,6 +469,25 @@ def analyze_state_statistics(df):
     
     return stats_by_state
 
+def write_selected_cities(selected_cities: pd.DataFrame, output_file: str = 'selected_cities.txt'):
+    """
+    Writes selected cities to a text file, one city per line in 'city, state' format.
+    
+    Args:
+        selected_cities (pd.DataFrame): DataFrame containing selected cities with City and State columns
+        output_file (str): Path to output text file (default: 'selected_cities.txt')
+    """
+    logger.info(f"Writing selected cities to {output_file}")
+    
+    try:
+        with open(output_file, 'w') as f:
+            # Sort by state then city for consistent output
+            sorted_cities = selected_cities.sort_values(['State', 'City'])
+            for _, row in sorted_cities.iterrows():
+                f.write(f"{row['City']}, {row['State']}\n")
+        logger.info(f"Successfully wrote {len(selected_cities)} cities to {output_file}")
+    except Exception as e:
+        logger.error(f"Error writing to {output_file}: {str(e)}")
 
 # Main execution
 if __name__ == "__main__":
@@ -525,6 +544,8 @@ if __name__ == "__main__":
     analysis = analyze_selection_coverage(selected_cities, df)
     print_selection_analysis(analysis)
 
+    # Write selected cities to file
+    write_selected_cities(selected_cities)
     
     # Create visualizations
     # create_visualizations(df)
