@@ -2,7 +2,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+from typing import Tuple, Dict, Any
+import logging
+import argparse
 
+
+logger = logging.getLogger(__name__)
 
 map_state_to_capital = {
     'Alabama': 'Montgomery', 'Alaska': 'Juneau', 'Arizona': 'Phoenix', 'Arkansas': 'Little Rock',
@@ -20,12 +25,53 @@ map_state_to_capital = {
     'Wisconsin': 'Madison', 'Wyoming': 'Cheyenne'
 }
 
+def setup_logger(log_level):
+    """
+    Sets up global logging to both console and file.
+    
+    Args:
+        log_level (str): Desired logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    """
+    
+    # Convert string level to logging constant
+    numeric_level = getattr(logging, log_level.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ValueError(f'Invalid log level: {log_level}')
+    
+    logger.setLevel(numeric_level)
+    
+    # Create formatter
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    
+    # Create console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(numeric_level)
+    console_handler.setFormatter(formatter)
+    
+    # Create file handler
+    file_handler = logging.FileHandler('us_census_city_selection.log')
+    file_handler.setLevel(numeric_level)
+    file_handler.setFormatter(formatter)
+    
+    # Add handlers to logger
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+
 def extract_city_state(geo_area):
+    """
+    Extracts city and state from geographic area string, removing classification suffixes.
+    
+    Args:
+        geo_area (str): Geographic area string (e.g., "Albany city, New York")
+        
+    Returns:
+        pd.Series: Series containing cleaned city name and state
+    """
     try:
         # Split on the last comma
         parts = geo_area.rsplit(', ', 1)
         if len(parts) != 2:
-            parsing_errors.append(f"Could not split city and state for: {geo_area}")
+            logger.warning(f"Could not split city and state for: {geo_area}")
             return pd.Series([geo_area, None])
         
         city, state = parts[0], parts[1]
@@ -51,19 +97,22 @@ def extract_city_state(geo_area):
             paren_part = city.split('(')[1].split(')')[0].strip()
             # Use the parenthetical part if it exists, otherwise use main part
             city = paren_part if paren_part else main_part
+            logger.debug(f"Extracted '{city}' from parenthetical format in '{geo_area}'")
         
         # Remove suffixes if they appear at the end of the city name
         # Only match exact lowercase suffixes
+        original_city = city
         for suffix in suffixes:
             if city.endswith(suffix):
                 city = city[:-len(suffix)]
+                logger.debug(f"Removed suffix '{suffix}' from '{original_city}' to get '{city}'")
                 break
         
         return pd.Series([city.strip(), state])
+        
     except Exception as e:
-        parsing_errors.append(f"Error processing {geo_area}: {str(e)}")
+        logger.exception(f"Error processing {geo_area}: {str(e)}")
         return pd.Series([None, None])
-
 
 def clean_and_prepare_data(file_path):
     """
@@ -76,7 +125,7 @@ def clean_and_prepare_data(file_path):
     Returns:
         pd.DataFrame: Cleaned and prepared DataFrame
     """
-    print("Starting data cleaning process...")
+    logger.info("Starting data cleaning process...")
     
     # Skip the first 4 rows and use custom column names
     df = pd.read_excel(
@@ -86,44 +135,30 @@ def clean_and_prepare_data(file_path):
     )
     
     initial_rows = len(df)
-    print(f"Initially loaded {initial_rows} rows")
+    logger.info(f"Initially loaded {initial_rows} rows")
     
     # Check for missing data and report specifics
-    missing_data = []
-    
-    # Check each required column
     for col in ['Geographic Area', '2023']:
         missing = df[df[col].isna()]
         if not missing.empty:
-            print(f"\nRows with missing {col}:")
+            logger.warning(f"\nFound {len(missing)} rows with missing {col}:")
             for idx, row in missing.iterrows():
                 # Get the row number in Excel (accounting for header rows and 0-based index)
                 excel_row = idx + 5  # 4 header rows + 1 for 1-based Excel rows
-                missing_info = f"Row {excel_row}: "
-                
-                # If Geographic Area is missing but we have other data
                 if col == 'Geographic Area' and not pd.isna(row['2023']):
-                    missing_info += f"Missing city/state but has 2023 population of {row['2023']}"
-                # If 2023 is missing but we have Geographic Area
+                    logger.warning(f"Row {excel_row}: Missing city/state but has 2023 population of {row['2023']}")
                 elif col == '2023' and not pd.isna(row['Geographic Area']):
-                    missing_info += f"Missing 2023 population for {row['Geographic Area']}"
-                # If both are missing
+                    logger.warning(f"Row {excel_row}: Missing 2023 population for {row['Geographic Area']}")
                 else:
-                    missing_info += "Complete empty row"
-                
-                print(missing_info)
-                missing_data.append(missing_info)
+                    logger.warning(f"Row {excel_row}: Complete empty row")
     
     # Clean up any potential missing data
     df = df.dropna(subset=['Geographic Area', '2023'])
     rows_after_na = len(df)
     if rows_after_na < initial_rows:
-        print(f"\nRemoved {initial_rows - rows_after_na} rows with missing essential data")
+        logger.info(f"\nRemoved {initial_rows - rows_after_na} rows with missing essential data")
     
-    # Extract city and state more reliably
-    parsing_errors = []
-    
-    # Apply the extraction
+    # Apply the city/state extraction
     df[['City', 'State']] = df['Geographic Area'].apply(extract_city_state)
     
     # Remove any rows where we couldn't extract state properly
@@ -132,42 +167,29 @@ def clean_and_prepare_data(file_path):
     rows_after_state = len(df)
     
     if rows_before_state > rows_after_state:
-        print(f"Removed {rows_before_state - rows_after_state} rows with invalid state data")
+        logger.warning(f"Removed {rows_before_state - rows_after_state} rows with invalid state data")
     
     # Convert population columns to numeric, handling any potential non-numeric values
-    numeric_conversion_errors = []
     for col in ['2020', '2021', '2022', '2023']:
         try:
             numeric_series = pd.to_numeric(df[col], errors='coerce')
             invalid_rows = df[numeric_series.isna() & df[col].notna()]
             if not invalid_rows.empty:
                 for idx, row in invalid_rows.iterrows():
-                    numeric_conversion_errors.append(
+                    logger.warning(
                         f"Non-numeric value in {col} for {row['Geographic Area']}: {row[col]}"
                     )
             df[col] = numeric_series
         except Exception as e:
-            print(f"Error converting {col} to numeric: {str(e)}")
-    
-    # Print parsing errors if any
-    if parsing_errors:
-        print("\nParsing Errors Found:")
-        for error in parsing_errors:
-            print(f"- {error}")
-    
-    # Print numeric conversion errors if any
-    if numeric_conversion_errors:
-        print("\nNumeric Conversion Errors Found:")
-        for error in numeric_conversion_errors:
-            print(f"- {error}")
+            logger.error(f"Error converting {col} to numeric: {str(e)}")
     
     # Print final statistics
-    print(f"\nFinal dataset contains {len(df)} rows")
-    print(f"States found: {', '.join(sorted(df['State'].unique()))}")
+    logger.info(f"\nFinal dataset contains {len(df)} rows")
+    logger.info(f"States found: {', '.join(sorted(df['State'].unique()))}")
     
     return df
 
-def select_study_cities(df, cities_per_quartile=5):
+def select_study_cities(df: pd.DataFrame, cities_per_quartile: int = 5) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
     Selects cities for study using a stratified sampling approach:
     - Automatically includes state capital and largest city
@@ -181,7 +203,9 @@ def select_study_cities(df, cities_per_quartile=5):
         pd.DataFrame: Selected cities with their selection method and quartile
         dict: Statistics about the selection process
     """
-    import numpy as np
+
+    if cities_per_quartile < 1:
+        raise ValueError("cities_per_quartile must be at least 1")
     
     # Create empty DataFrame to store selections
     selected_cities = pd.DataFrame()
@@ -189,11 +213,14 @@ def select_study_cities(df, cities_per_quartile=5):
     
     for state in df['State'].unique():
         state_df = df[df['State'] == state].copy()
+        logger.info(f"Selecting cities for {state}...")
+        
+        state_df = state_df.reset_index(drop=True)  # Reset index for state DataFrame
         
         # Skip if insufficient data
         min_cities_required = 4 * cities_per_quartile + 2
         if len(state_df) < min_cities_required: 
-            print(f"Warning: Insufficient data for {state} ({len(state_df)} cities)."
+            logger.warning(f"Warning: Insufficient data for {state} ({len(state_df)} cities)."
                   f"With {cities_per_quartile} cities per quartile, need at least {min_cities_required} cities per state.")
             continue
             
@@ -203,26 +230,25 @@ def select_study_cities(df, cities_per_quartile=5):
         capital_city_name = map_state_to_capital.get(state) 
         if capital_city_name: 
             capital_city = state_df[state_df['City'] == capital_city_name] 
-            capital_city['selection_method'] = 'capital' 
-            state_selections = pd.concat([state_selections, capital_city]) 
-            state_df = state_df[state_df['City'] != capital_city_name]
+            capital_city = capital_city.assign(selection_method='capital')
+            state_selections = pd.concat([state_selections, capital_city], ignore_index=True)  # Reset index during concat
+            state_df = state_df[state_df['City'] != capital_city_name].reset_index(drop=True)  # Reset index after filtering
         
-        # 2. Add largest city by population (or second largest if capital is largest)
+        # 2. Add largest city by population
         top_2_cities = state_df.nlargest(2, '2023').copy()
         
         # Check if capital was found and is the largest city
         if not capital_city.empty and capital_city.index[0] == top_2_cities.index[0]:
-            # Take second largest city
             largest_city = top_2_cities.iloc[[1]]
-            largest_city['selection_method'] = 'largest (2nd)'
         else:
             largest_city = top_2_cities.iloc[[0]]
-            largest_city['selection_method'] = 'largest'
-            
-        state_selections = pd.concat([state_selections, largest_city])
+    
+        largest_city = largest_city.assign(selection_method='largest' if not capital_city.empty and capital_city.index[0] != top_2_cities.index[0] else 'largest (2nd)')
+        state_selections = pd.concat([state_selections, largest_city], ignore_index=True)  # Reset index during concat
         
         # 3. Calculate quartiles for remaining cities
-        remaining_cities = state_df[~state_df.index.isin(state_selections.index)].copy()
+        remaining_cities = state_df[~state_df.index.isin(largest_city.index)].copy()
+        remaining_cities = remaining_cities.reset_index(drop=True)  # Reset index after filtering
         remaining_cities['population_quartile'] = pd.qcut(
             remaining_cities['2023'], 
             q=4, 
@@ -239,8 +265,8 @@ def select_study_cities(df, cities_per_quartile=5):
             sample_size = min(cities_per_quartile, len(quartile_cities))
             if sample_size > 0:
                 sampled = quartile_cities.sample(n=sample_size).copy()
-                sampled['selection_method'] = f'random_{quartile}'
-                state_selections = pd.concat([state_selections, sampled])
+                sampled = sampled.assign(selection_method=f'random_{quartile}')
+                state_selections = pd.concat([state_selections, sampled], ignore_index=True)  # Reset index during concat
         
         # Store statistics
         selection_stats[state] = {
@@ -250,7 +276,7 @@ def select_study_cities(df, cities_per_quartile=5):
         }
         
         # Add to main selection DataFrame
-        selected_cities = pd.concat([selected_cities, state_selections])
+        selected_cities = pd.concat([selected_cities, state_selections], ignore_index=True)  # Reset index during final concat
     
     return selected_cities, selection_stats
 
@@ -340,6 +366,63 @@ def analyze_selection_coverage(selected_cities, original_df):
     
     return analysis
 
+def print_selection_analysis(analysis):
+    """
+    Prints a formatted analysis of city selection coverage and statistics.
+    
+    Args:
+        analysis (dict): Analysis dictionary from analyze_selection_coverage()
+        
+    Example:
+        analysis = analyze_selection_coverage(selected_df, original_df)
+        print_selection_analysis(analysis)
+    """
+    # Helper function for number formatting
+    def format_num(n):
+        if n is None:
+            return "N/A"
+        return f"{n:,.0f}"
+    
+    # Print overall coverage
+    print("\n=== POPULATION COVERAGE ===")
+    cov = analysis['population_coverage']
+    print(f"Total Population:     {format_num(cov['total_population'])}")
+    print(f"Selected Population:  {format_num(cov['selected_population'])}")
+    print(f"Coverage Percentage:  {cov['coverage_percentage']:.1f}%")
+
+    # Print size distribution
+    print("\n=== CITY SIZE DISTRIBUTION ===")
+    size = analysis['size_distribution']
+    print(f"Mean Population:   {format_num(size['mean_pop'])}")
+    print(f"Median Population: {format_num(size['median_pop'])}")
+    print(f"Minimum:          {format_num(size['min_pop'])}")
+    print(f"Maximum:          {format_num(size['max_pop'])}")
+
+    # Print geographic distribution
+    print("\n=== GEOGRAPHIC DISTRIBUTION ===")
+    print(f"Total States Covered: {analysis['geographic_distribution']['total_states']}")
+    
+    # Print state details
+    print("\n=== STATE-BY-STATE ANALYSIS ===")
+    for state, details in sorted(analysis['state_details'].items()):
+        print(f"\n{state}")
+        
+        # Capital info
+        cap = details['capital']
+        print(f"  Capital: {cap['name'] or 'N/A'} ({format_num(cap['population'])})")
+        
+        # Largest city info
+        largest = details['largest_city']
+        if largest['name']:
+            print(f"  {largest['type'].title()}: {largest['name']} ({format_num(largest['population'])})")
+        
+        # Quartile stats
+        if details['quartile_stats']:
+            print("  Quartile Statistics:")
+            for q, stats in details['quartile_stats'].items():
+                print(f"    {q}: {stats['count']} cities, "
+                      f"avg={format_num(stats['avg'])}, "
+                      f"median={format_num(stats['median'])}")
 
 def analyze_state_statistics(df):
     """
@@ -389,31 +472,59 @@ def analyze_state_statistics(df):
 
 # Main execution
 if __name__ == "__main__":
-    file_path = "SUB-IP-EST2023-POP.xlsx"
+    """Main entry point for the script."""
+    # Set up command line argument parsing
+    # file_path = "SUB-IP-EST2023-POP.xlsx"
+
+    parser = argparse.ArgumentParser(description='Process US Census data with configurable logging.')
+    
+    parser.add_argument(
+        '--input-file', 
+        default='SUB-IP-EST2023-POP.xlsx',
+        help='Path to the census Excel file (default: SUB-IP-EST2023-POP.xlsx)'
+    )
+
+    parser.add_argument(
+        '--log-level', 
+        default='INFO',
+        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+        help='Set the logging level'
+    )
+    
+    args = parser.parse_args()
+    
+    # Set up logging
+    setup_logger(args.log_level)
     
     # Prepare data
-    df = clean_and_prepare_data(file_path)
+    df = clean_and_prepare_data(args.input_file)
     
     # Calculate statistics
-    stats = analyze_state_statistics(df)
+    # stats = analyze_state_statistics(df)
     
-    # Print statistics for each state
-    for state, state_stats in stats.items():
-        print(f"\n{'='*50}")
-        print(f"Statistics for {state}:")
-        print(f"{'='*50}")
-        print(f"Number of cities: {state_stats['num_cities']}")
-        print(f"Average population (2023): {state_stats['avg_population_2023']:,.0f}")
-        print(f"Median population (2023): {state_stats['median_population_2023']:,.0f}")
-        print(f"Population standard deviation: {state_stats['std_population_2023']:,.0f}")
-        print(f"Total population (2023): {state_stats['total_population_2023']:,.0f}")
-        print(f"\nLargest city: {state_stats['largest_city']['name']} "
-              f"({state_stats['largest_city']['population']:,.0f} people)")
-        print(f"Smallest city: {state_stats['smallest_city']['name']} "
-              f"({state_stats['smallest_city']['population']:,.0f} people)")
-        print(f"\nAverage growth rate (2020-2023): {state_stats['avg_growth_rate']:.2f}%")
-        print(f"Fastest growing city: {state_stats['fastest_growing']['name']} "
-              f"({state_stats['fastest_growing']['rate']:.2f}%)")
+    # # Print statistics for each state
+    # for state, state_stats in stats.items():
+    #     print(f"\n{'='*50}")
+    #     print(f"Statistics for {state}:")
+    #     print(f"{'='*50}")
+    #     print(f"Number of cities: {state_stats['num_cities']}")
+    #     print(f"Average population (2023): {state_stats['avg_population_2023']:,.0f}")
+    #     print(f"Median population (2023): {state_stats['median_population_2023']:,.0f}")
+    #     print(f"Population standard deviation: {state_stats['std_population_2023']:,.0f}")
+    #     print(f"Total population (2023): {state_stats['total_population_2023']:,.0f}")
+    #     print(f"\nLargest city: {state_stats['largest_city']['name']} "
+    #           f"({state_stats['largest_city']['population']:,.0f} people)")
+    #     print(f"Smallest city: {state_stats['smallest_city']['name']} "
+    #           f"({state_stats['smallest_city']['population']:,.0f} people)")
+    #     print(f"\nAverage growth rate (2020-2023): {state_stats['avg_growth_rate']:.2f}%")
+    #     print(f"Fastest growing city: {state_stats['fastest_growing']['name']} "
+    #           f"({state_stats['fastest_growing']['rate']:.2f}%)")
+
+    # Select study cities
+    selected_cities, selection_stats = select_study_cities(df)
+    analysis = analyze_selection_coverage(selected_cities, df)
+    print_selection_analysis(analysis)
+
     
     # Create visualizations
     # create_visualizations(df)
