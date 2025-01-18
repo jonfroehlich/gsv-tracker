@@ -21,7 +21,7 @@ Vina, Alabama
 Waldo, Alabama
 Webb, Alabama
 Anaktuvuk Pass, Alaska
-Anchorage, Alaska
+# Anchorage, Alaska
 Atqasuk, Alaska
 Bettles, Alaska
 Chevak, Alaska
