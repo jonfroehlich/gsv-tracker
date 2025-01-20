@@ -197,14 +197,22 @@ def calculate_coverage_stats(df: pd.DataFrame) -> CoverageStats:
         ) * 111000  # Approximate conversion to meters
         
         successful_df_no_duplicates.loc[:, 'distance_to_query'] = distances
+        logger.debug(f"Distance: {distances}")
+        logger.debug(f"Distance is NA: {successful_df_no_duplicates['distance_to_query'].isna().all()}")
+        logger.debug(f"Distance std: {successful_df_no_duplicates['distance_to_query'].std()}")
+    
         
-        distance_stats = DistanceStats(
-            min_meters=float(successful_df_no_duplicates['distance_to_query'].min()),
-            max_meters=float(successful_df_no_duplicates['distance_to_query'].max()),
-            avg_meters=float(successful_df_no_duplicates['distance_to_query'].mean()),
-            median_meters=float(successful_df_no_duplicates['distance_to_query'].median()),
-            stdev_meters=float(successful_df_no_duplicates['distance_to_query'].std())
-        )
+        if not successful_df_no_duplicates['distance_to_query'].isna().all():
+
+            # If we have only one point, std will be NaN
+            std_val = successful_df_no_duplicates['distance_to_query'].std()
+            distance_stats = DistanceStats(
+                min_meters=float(successful_df_no_duplicates['distance_to_query'].min()),
+                max_meters=float(successful_df_no_duplicates['distance_to_query'].max()),
+                avg_meters=float(successful_df_no_duplicates['distance_to_query'].mean()),
+                median_meters=float(successful_df_no_duplicates['distance_to_query'].median()),
+                stdev_meters=0.0 if pd.isna(std_val) else float(std_val)  # Use 0.0 for single points
+            )
     
     return CoverageStats(
         num_points_with_panos=num_points_with_panos,
