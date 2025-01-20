@@ -14,6 +14,9 @@ from datetime import datetime
 import numpy as np
 import os
 from collections import Counter
+import logging
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class DistanceStats:
@@ -173,6 +176,8 @@ def calculate_coverage_stats(df: pd.DataFrame) -> CoverageStats:
 
     total_points_with_panos = df[df['status'] == 'OK']
     num_points_with_panos = len(total_points_with_panos)
+    logger.debug(f"Total points with panoramas: {num_points_with_panos}")
+    
     num_points_without_panos = len(df[df['status'] == 'ZERO_RESULTS'])
     num_points_with_errors = len(df[df['status'].isin([
         'ERROR', 'REQUEST_DENIED', 'INVALID_REQUEST',
@@ -181,10 +186,11 @@ def calculate_coverage_stats(df: pd.DataFrame) -> CoverageStats:
 
     successful_df_no_duplicates = total_points_with_panos.drop_duplicates(subset=['pano_id']).copy()
     num_points_with_unique_pano_ids = len(successful_df_no_duplicates)
+    logger.debug(f"Total points with panoramas and no duplicates: {num_points_with_unique_pano_ids}")
     num_points_without_unique_pano_ids = num_points_with_panos - len(successful_df_no_duplicates)
 
     distance_stats = None
-    if len(successful_df_no_duplicates) > 0:
+    if num_points_with_unique_pano_ids > 0:
         distances = np.sqrt(
             (successful_df_no_duplicates['query_lat'] - successful_df_no_duplicates['pano_lat'])**2 +
             (successful_df_no_duplicates['query_lon'] - successful_df_no_duplicates['pano_lon'])**2
