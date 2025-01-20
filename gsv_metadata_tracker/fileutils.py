@@ -9,6 +9,7 @@ import subprocess
 import webbrowser
 from .config import METADATA_DTYPES
 from .paths import get_default_data_dir, get_default_vis_dir
+from . import geoutils
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,86 @@ def get_list_of_city_csv_files(data_dir = None) -> List[str]:
 
     csv_files = glob.glob(os.path.join(data_dir, "**/*.csv.gz"), recursive=True)
     return csv_files
+
+def does_city_csv_file_exist(data_dir: str, city_query_str: str,     
+                             grid_width: float, grid_height: float,
+                             step_length: float) -> str | None:
+    """
+    Check if a city CSV file exists by trying different name permutations.
+    Uses location data to generate various possible filenames based on city, state, and country.
+    
+    Args:
+        data_dir: Directory to search for CSV files
+        city_query_str: Query string that may contain city, state, and/or country
+        grid_width: Width of search grid in meters
+        grid_height: Height of search grid in meters
+        step_length: Step size in meters
+        
+    Returns:
+        str | None: Full path to the matching file if found, None if no matching file exists
+        
+    Examples:
+        >>> does_city_csv_file_exist("/data", "Paris, France", 1000, 1000, 20)
+        '/data/paris--france_width_1000_height_1000_step_20.csv.gz'  # If file exists
+        >>> does_city_csv_file_exist("/data", "Springfield, IL, USA", 1000, 1000, 20)
+        '/data/springfield--il--usa_width_1000_height_1000_step_20.csv.gz'  # If file exists
+        >>> does_city_csv_file_exist("/data", "NonexistentCity", 1000, 1000, 20)
+        None  # If no matching file exists
+    """
+
+    # Get location data to help with name permutations
+    location = geoutils.get_city_location_data(city_query_str)
+    if not location:
+        logger.warning(f"Could not get location data for {city_query_str}")
+        # Try just the raw query string as a fallback
+        base_filename = generate_base_filename(city_query_str, grid_width, grid_height, step_length)
+        full_path = os.path.join(data_dir, f"{base_filename}.csv.gz")
+        return os.path.exists(full_path)
+
+    # Generate possible name permutations based on available location data
+    name_permutations = []
+    
+    city = location.city
+    state_code = location.state_code
+    state = location.state
+    country_code = location.country_code
+    country = location.country
+
+    if not city:
+        logger.warning(f"No city name found in location data for {city_query_str}")
+        return False
+
+    # Build permutations from most specific to least specific
+    if city and state_code and country_code:
+        name_permutations.append(f"{city}, {state_code}, {country_code}")
+    if city and state and country_code:
+        name_permutations.append(f"{city}, {state}, {country_code}")
+    if city and state_code and country:
+        name_permutations.append(f"{city}, {state_code}, {country}")
+    if city and state and country:
+        name_permutations.append(f"{city}, {state}, {country}")
+    if city and state_code:
+        name_permutations.append(f"{city}, {state_code}")
+    if city and state:
+        name_permutations.append(f"{city}, {state}")
+    if city and country_code:
+        name_permutations.append(f"{city}, {country_code}")
+    if city and country:
+        name_permutations.append(f"{city}, {country}")
+    if city:
+        name_permutations.append(city)
+
+    # Try each permutation
+    for city_query_str_to_test in name_permutations:
+        base_filename = generate_base_filename(city_query_str_to_test, grid_width, grid_height, step_length)
+        full_path = os.path.join(data_dir, f"{base_filename}.csv.gz")
+        logger.debug(f"Checking for file: {full_path}")
+        if os.path.exists(full_path):
+            logger.info(f"Found matching file: {full_path}")
+            return full_path
+
+    logger.info(f"No matching file found for {city_query_str} with any permutation")
+    return None
 
 def load_city_csv_file(csv_path: str) -> pd.DataFrame:
     """
