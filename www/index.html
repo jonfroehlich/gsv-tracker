@@ -670,7 +670,24 @@
                 
                 const compressed = await response.arrayBuffer();
                 const decompressed = pako.inflate(new Uint8Array(compressed), { to: 'string' });
-                const data = JSON.parse(decompressed);
+                
+                // JSON doesn't support special values like NaN and null in quite the same way JavaScript does
+                // So, we need some special case handling for things like NaN that occur in some files
+                // 
+                // Example .json of what we're addressing:
+                //
+                // "all_panos_age_stats": {
+                //         "count": 1,
+                //         "oldest_pano_date": "2017-03-01T00:00:00",
+                //         "newest_pano_date": "2017-03-01T00:00:00",
+                //         "avg_pano_age_years": 7.8927485804459465,
+                //         "median_pano_age_years": 7.8927485804459465,
+                //         "stdev_pano_age_years": NaN, 
+                // }
+                //
+                // Old code: const data = JSON.parse(decompressed);
+                // 
+                const data = JSON.parse(decompressed.replace(/:\s*(NaN|-?Infinity)\b/g, ': null'));
 
                 // Error checking for data structure
                 if (!data || !data.cities || !Array.isArray(data.cities)) {
