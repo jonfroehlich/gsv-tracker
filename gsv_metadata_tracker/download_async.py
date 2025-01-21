@@ -348,7 +348,8 @@ async def download_gsv_metadata_async(
         logger.info(f"Checking for existing archive file for: {city_name}, grid_width={grid_width}, grid_height={grid_height}, step_length={step_length}")
         existing_csv_file_with_path = does_city_csv_file_exist(download_path, city_name, grid_width, grid_height, step_length)
         if existing_csv_file_with_path:
-            logger.info(f"Found exiting archive file for {city_name}: {file_name_compressed_with_path}")
+            file_name_compressed_with_path = existing_csv_file_with_path
+            logger.info(f"Found existing archive file for {city_name}: {file_name_compressed_with_path}")
             df = load_city_csv_file(file_name_compressed_with_path)
             return {
                 "df": df,
