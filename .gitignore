@@ -20,3 +20,5 @@ data/alden--mn_width_1614_height_1623_step_20.json/alden--mn_width_1614_height_1
 cities/us_census_city_selection.log
 cities/~$SUB-IP-EST2023-POP.xlsx
 cities/SUB-IP-EST2023-POP.csv
+*.log
+/duplicates
