@@ -125,6 +125,11 @@ class EnhancedLocation:
         self._country_code = None
         self._state_code = None
         self._city_query_str = city_query_str
+        self._area = None
+        self._top_left = None
+        self._bot_right = None
+        self._width = None
+        self._height = None
 
 
         logger.debug(f"EnhancedLocation created for {location}")
@@ -177,6 +182,28 @@ class EnhancedLocation:
                     self._city = self._city_query_str
                 
                 logger.info(f"Extracted city from query string: {self._city}")
+
+            if 'boundingbox' in self._location.raw:
+                try:
+                    bbox = self._location.raw['boundingbox']
+                    logger.debug(f"Found bounding box data: {bbox}")
+                    
+                    # Nominatim returns boundingbox as [south, north, west, east]
+                    south, north, west, east = map(float, bbox)
+                    
+                    # Store corners as tuples (lat, lng)
+                    self._top_left = (north, west)
+                    self._bot_right = (south, east)
+                    
+                    # Calculate dimensions using geodesic distance
+                    self._width = geodesic((south, west), (south, east)).kilometers
+                    self._height = geodesic((south, west), (north, west)).kilometers
+                    self._area = self._width * self._height
+                    
+                    logger.debug(f"EnhancedLocation bounding box calculated: area={self._area:.2f}km², " 
+                                f"width={self._width:.2f}km, height={self._height:.2f}km")
+                except Exception as e:
+                    logger.warning(f"Error processing bounding box data: {e}")
             
     @property
     def country_code(self) -> Optional[str]:
@@ -236,6 +263,77 @@ class EnhancedLocation:
             - suburb: Used for city subdivisions in some areas
         """
         return self._city
+    
+    @property
+    def area(self) -> Optional[float]:
+        """
+        Get the area of the bounding box in square kilometers.
+        
+        Returns:
+            float or None: The area in km² if bounding box is available, None otherwise
+        """
+        return self._area
+
+    @property
+    def top_left(self) -> Optional[tuple]:
+        """
+        Get the top-left coordinates of the bounding box.
+        
+        Returns:
+            tuple or None: (latitude, longitude) tuple if available, None otherwise
+        """
+        return self._top_left
+
+    @property
+    def bottom_right(self) -> Optional[tuple]:
+        """
+        Get the bottom-right coordinates of the bounding box.
+        
+        Returns:
+            tuple or None: (latitude, longitude) tuple if available, None otherwise
+        """
+        return self._bot_right
+
+    @property
+    def width(self) -> Optional[float]:
+        """
+        Get the width of the bounding box in kilometers.
+        
+        Returns:
+            float or None: The width in km if bounding box is available, None otherwise
+        """
+        return self._width
+
+    @property
+    def height(self) -> Optional[float]:
+        """
+        Get the height of the bounding box in kilometers.
+        
+        Returns:
+            float or None: The height in km if bounding box is available, None otherwise
+        """
+        return self._height
+    
+    @property
+    def bbox_tuple(self) -> Optional[tuple]:
+        """
+        Get the bounding box coordinates in (north, south, east, west) format.
+        This format is compatible with libraries like osmnx for network analysis.
+        
+        Returns:
+            tuple or None: A tuple of (north, south, east, west) coordinates if 
+            bounding box is available, None otherwise
+            
+        Example:
+            >>> location = EnhancedLocation(...)
+            >>> north, south, east, west = location.bbox_tuple
+            >>> G = ox.graph_from_bbox(north, south, east, west, network_type='drive')
+        """
+        if self._top_left and self._bot_right:
+            north, west = self._top_left
+            south, east = self._bot_right
+            return (north, south, east, west)
+        return None
         
     def __getattr__(self, name):
         """
@@ -255,6 +353,57 @@ class EnhancedLocation:
         """
         return getattr(self._location, name)
     
+    def __detailed_str__(self) -> str:
+        """
+        Returns a detailed, formatted string representation of the location with
+        hierarchical components including coordinates and geographical bounds.
+        
+        Returns:
+            str: A multi-line formatted string containing detailed location information
+            
+        Example output:
+            City: San Francisco
+            State: California (CA)
+            Country: United States (US)
+            Center: (37.7749, -122.4194)
+            Bounding Box: 
+            Top-Left: (37.8199, -122.4784)
+            Bottom-Right: (37.7299, -122.3604)
+            Area: 121.4 km²
+        """
+        lines = []
+        
+        # Add city
+        if self._city:
+            lines.append(f"City: {self._city}")
+        
+        # Add state with code if available
+        if self._state:
+            state_str = self._state
+            if self._state_code:
+                state_str += f" ({self._state_code})"
+            lines.append(f"State: {state_str}")
+        
+        # Add country with code if available
+        if self._country:
+            country_str = self._country
+            if self._country_code:
+                country_str += f" ({self._country_code})"
+            lines.append(f"Country: {country_str}")
+        
+        # Add center coordinates
+        if hasattr(self._location, 'latitude') and hasattr(self._location, 'longitude'):
+            lines.append(f"Center: ({self._location.latitude:.4f}, {self._location.longitude:.4f})")
+        
+        # Add bounding box if available
+        if self._top_left and self._bot_right:
+            lines.append("Bounding Box:")
+            lines.append(f"  Top-Left: ({self._top_left[0]:.4f}, {self._top_left[1]:.4f})")
+            lines.append(f"  Bottom-Right: ({self._bot_right[0]:.4f}, {self._bot_right[1]:.4f})")
+            lines.append(f"Area: {self._area:.1f} km²")
+        
+        return "\n".join(lines) if lines else "Unknown Location"
+
     def __str__(self) -> str:
         """
         Returns a human-readable string representation of the location.
@@ -396,9 +545,6 @@ def get_city_location_data(
         if found_loc is not None:
             logging.info(f"Found coordinates for {city_query_str}: {found_loc.latitude}, {found_loc.longitude}")
             
-            print(found_loc.latitude, found_loc.longitude)
-            print(found_loc.address)
-
             enhancedLoc = EnhancedLocation(city_query_str, found_loc)
             logging.info(f"From query string '{city_query_str}', created '{enhancedLoc}'")
             return enhancedLoc
