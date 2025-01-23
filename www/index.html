@@ -272,8 +272,41 @@
             const currentYear = new Date().getFullYear();
             
             // Create and add histogram
+            // Note that we support two different histogram formats here
+            // First format has a nested "counts" object
+            //    "google_panos": {
+            //        "counts": {
+            //            "2007": 7,
+            //            "2009": 25,
+            //            // ...
+            //        }
+            //    }
+            // Second format has direct year keys
+            //
+            //    "google_panos": {
+            //    "2007": 8790,
+            //    "2008": 1848,
+            //    // ...
+            //    }
+            google_panos_histogram_by_year =  city.histogram_of_capture_dates_by_year.google_panos.counts || 
+                city.histogram_of_capture_dates_by_year.google_panos
+            
+            // Find min year from the data
+            const years = Object.keys(google_panos_histogram_by_year).map(Number);
+            const startYear = Math.min(...years);
+            // const endYear = Math.max(...years);
+
+            // Get current year
+            const endYear = new Date().getFullYear();
+
+            // Create new object with all years filled in (0 for missing years)
+            for (let year = startYear; year <= endYear; year++) {
+                google_panos_histogram_by_year_with_zeros[year] = google_panos_histogram_by_year[year] || 0;
+            }
+
+            console.log(google_panos_histogram_by_year_with_zeros);
             const histogramCanvas = createPopupHistogram(
-                city.histogram_of_capture_dates_by_year.google_panos,
+                google_panos_histogram_by_year_with_zeros,
                 currentYear
             );
             chartContainer.appendChild(histogramCanvas);
