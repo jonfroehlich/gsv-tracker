@@ -300,11 +300,11 @@
             const endYear = new Date().getFullYear();
 
             // Create new object with all years filled in (0 for missing years)
+            const google_panos_histogram_by_year_with_zeros = {};
             for (let year = startYear; year <= endYear; year++) {
                 google_panos_histogram_by_year_with_zeros[year] = google_panos_histogram_by_year[year] || 0;
             }
 
-            console.log(google_panos_histogram_by_year_with_zeros);
             const histogramCanvas = createPopupHistogram(
                 google_panos_histogram_by_year_with_zeros,
                 currentYear
