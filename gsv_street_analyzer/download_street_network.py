@@ -50,12 +50,29 @@ def download_street_network(city_name: str, save_dir: str = "data") -> Optional[
 
         # Download street network
         # https://osmnx.readthedocs.io/en/stable/user-reference.html#osmnx.graph.graph_from_bbox
+        # Parameters:
+        # bbox (tuple[float, float, float, float]) – Bounding box as (left, bottom, right, top). 
+        #       Coordinates should be in unprojected latitude-longitude degrees (EPSG:4326).
+        #
+        # network_type (str) – {“all”, “all_public”, “bike”, “drive”, “drive_service”, “walk”} 
+        #       What type of street network to retrieve if custom_filter is None.
+        #
+        # simplify (bool) – If True, simplify graph topology via the simplify_graph function.
+        #
+        # retain_all (bool) – If True, return the entire graph even if it is not connected. 
+        #       If False, retain only the largest weakly connected component.
+        #
+        # truncate_by_edge (bool) – If True, retain nodes the outside bounding box if at 
+        #       least one of the node’s neighbors lies within the bounding box.
+
+        # custom_filter (str | list[str] | None) – A custom ways filter to be used instead 
+        #       of the network_type presets, e.g. ‘[“power”~”line”]’ or ‘[“highway”~”motorway|trunk”]’. 
         G = ox.graph_from_bbox(
-            bbox=(west, south, east, north),  # Pass as single tuple
-            network_type='drive',
-            simplify=True,
-            retain_all=False,
-            truncate_by_edge=True,
+            bbox=(west, south, east, north),  
+            network_type='all',
+            simplify=False, # If False, get more detailed geometry
+            retain_all=True, # Get entire graph even if not connected
+            truncate_by_edge=True, # Retain nodes outside bounding box if neighbors are inside
             custom_filter=None
         )
         

@@ -119,20 +119,34 @@
                 const nodeElements = xmlDoc.querySelectorAll('node');
                 console.log(`Found ${nodeElements.length} nodes`);
                 
-                nodeElements.forEach(node => {
+                // nodeElements.forEach(node => {
+                //     const id = node.getAttribute('id');
+                //     const yData = node.querySelector('data[key="d4"]'); // Note: y is d4 in the XML
+                //     const xData = node.querySelector('data[key="d5"]'); // Note: x is d5 in the XML
+                    
+                //     if (yData && xData) {
+                //         const y = parseFloat(yData.textContent);
+                //         const x = parseFloat(xData.textContent);
+                //         if (!isNaN(y) && !isNaN(x)) {
+                //             nodes[id] = [y, x];  // Leaflet uses [lat, lng]
+                //             console.log(`Added node ${id} at ${y},${x}`);
+                //         }
+                //     }
+                // });
+
+                for (let node of nodeElements) {
                     const id = node.getAttribute('id');
-                    const yData = node.querySelector('data[key="d4"]'); // Note: y is d4 in the XML
-                    const xData = node.querySelector('data[key="d5"]'); // Note: x is d5 in the XML
+                    const yData = node.querySelector('data[key="d3"]');
+                    const xData = node.querySelector('data[key="d4"]');
                     
                     if (yData && xData) {
                         const y = parseFloat(yData.textContent);
                         const x = parseFloat(xData.textContent);
-                        if (!isNaN(y) && !isNaN(x)) {
-                            nodes[id] = [y, x];  // Leaflet uses [lat, lng]
-                            console.log(`Added node ${id} at ${y},${x}`);
+                        if (!isNaN(x) && !isNaN(y)) {
+                            nodes[id] = [y, x];
                         }
                     }
-                });
+                }
 
                 console.log(`Successfully parsed ${Object.keys(nodes).length} nodes with coordinates`);
 
@@ -141,6 +155,7 @@
                 const edgeElements = xmlDoc.querySelectorAll('edge');
                 console.log(`Found ${edgeElements.length} edges`);
                 
+                // Update in the loadStreetData function - replace the line creation part
                 edgeElements.forEach(edge => {
                     const source = edge.getAttribute('source');
                     const target = edge.getAttribute('target');
@@ -158,8 +173,28 @@
                     // Count street types
                     streetCounts[highway] = (streetCounts[highway] || 0) + 1;
 
-                    // Create a line between source and target nodes
-                    const line = L.polyline([nodes[source], nodes[target]], {
+                    // Get the geometry if it exists
+                    const geometryData = edge.querySelector('data[key="d14"]');
+                    let coordinates;
+                    
+                    if (geometryData && geometryData.textContent.startsWith('LINESTRING')) {
+                        // Parse the LINESTRING format: "LINESTRING (x1 y1, x2 y2, ...)"
+                        const coordPairs = geometryData.textContent
+                            .replace('LINESTRING (', '')
+                            .replace(')', '')
+                            .split(', ')
+                            .map(pair => {
+                                const [x, y] = pair.split(' ').map(Number);
+                                return [y, x];  // Switch to [lat, lng] for Leaflet
+                            });
+                        coordinates = coordPairs;
+                    } else {
+                        // Fallback to simple line if no geometry
+                        coordinates = [nodes[source], nodes[target]];
+                    }
+
+                    // Create the line with detailed geometry
+                    const line = L.polyline(coordinates, {
                         color: getStreetColor({ highway }),
                         weight: 2,
                         opacity: 0.7
