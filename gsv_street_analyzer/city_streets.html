@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>City Streets Visualization</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { 
+            position: absolute; 
+            top: 0; 
+            bottom: 0; 
+            width: 100%; 
+            z-index: 1; 
+        }
+        #chart-container {
+            position: absolute;
+            bottom: 40px;
+            right: 30px;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            width: 300px;
+            height: 200px;
+            z-index: 1000;
+        }
+        .legend {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            z-index: 1000;
+            min-width: 150px;
+            visibility: hidden;
+        }
+        .legend-item {
+            margin: 5px 0;
+            display: flex;
+            align-items: center;
+        }
+        .legend-color {
+            display: inline-block;
+            width: 20px;
+            height: 10px;
+            margin-right: 8px;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="chart-container">
+        <canvas id="streetTypeChart"></canvas>
+    </div>
+    <div class="legend" id="legend"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+    
+    <script>
+        // Street type colors for consistent visualization
+        const streetColors = {
+            'motorway': '#e31a1c',
+            'trunk': '#fb9a99',
+            'primary': '#dfdf22',
+            'secondary': '#33a02c',
+            'tertiary': '#1f78b4',
+            'residential': '#a6cee3',
+            'service': '#b2df8a',
+            'other': '#999999'
+        };
+
+        // Initialize the map
+        const map = L.map('map').setView([52.3676, 4.9041], 13); // Default to Amsterdam
+        // L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        //     attribution: '© OpenStreetMap contributors'
+        // }).addTo(map);
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '© OpenStreetMap contributors © CARTO',
+            maxZoom: 19
+        }).addTo(map);
+
+        // Create legend
+        const legend = document.getElementById('legend');
+        Object.entries(streetColors).forEach(([type, color]) => {
+            const item = document.createElement('div');
+            item.className = 'legend-item';
+            item.innerHTML = `
+                <span class="legend-color" style="background: ${color}"></span>
+                ${type.charAt(0).toUpperCase() + type.slice(1)}
+            `;
+            legend.appendChild(item);
+        });
+
+        // Function to get color based on street type
+        function getStreetColor(properties) {
+            const highway = properties.highway || 'other';
+            return streetColors[highway] || streetColors.other;
+        }
+
+        // Update just the loadStreetData function
+        // Update the loadStreetData function
+        async function loadStreetData(cityName) {
+            try {
+                const response = await fetch(`data/${cityName}_network.graphml`);
+                const xmlText = await response.text();
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(xmlText, "text/xml");
+                
+                // Debug logging
+                console.log("Loading nodes...");
+                
+                // Parse nodes to get coordinates
+                const nodes = {};
+                const nodeElements = xmlDoc.querySelectorAll('node');
+                console.log(`Found ${nodeElements.length} nodes`);
+                
+                nodeElements.forEach(node => {
+                    const id = node.getAttribute('id');
+                    const yData = node.querySelector('data[key="d4"]'); // Note: y is d4 in the XML
+                    const xData = node.querySelector('data[key="d5"]'); // Note: x is d5 in the XML
+                    
+                    if (yData && xData) {
+                        const y = parseFloat(yData.textContent);
+                        const x = parseFloat(xData.textContent);
+                        if (!isNaN(y) && !isNaN(x)) {
+                            nodes[id] = [y, x];  // Leaflet uses [lat, lng]
+                            console.log(`Added node ${id} at ${y},${x}`);
+                        }
+                    }
+                });
+
+                console.log(`Successfully parsed ${Object.keys(nodes).length} nodes with coordinates`);
+
+                // Parse edges and create features
+                const streetCounts = {};
+                const edgeElements = xmlDoc.querySelectorAll('edge');
+                console.log(`Found ${edgeElements.length} edges`);
+                
+                edgeElements.forEach(edge => {
+                    const source = edge.getAttribute('source');
+                    const target = edge.getAttribute('target');
+                    
+                    // Skip if we don't have coordinates for either node
+                    if (!nodes[source] || !nodes[target]) {
+                        console.log(`Skipping edge between ${source}-${target} due to missing coordinates`);
+                        return;
+                    }
+                    
+                    // Get highway type (d10 in the XML)
+                    const highwayData = edge.querySelector('data[key="d10"]');
+                    const highway = highwayData ? highwayData.textContent : 'other';
+                    
+                    // Count street types
+                    streetCounts[highway] = (streetCounts[highway] || 0) + 1;
+
+                    // Create a line between source and target nodes
+                    const line = L.polyline([nodes[source], nodes[target]], {
+                        color: getStreetColor({ highway }),
+                        weight: 2,
+                        opacity: 0.7
+                    }).addTo(map);
+
+                    // Add popup with street info
+                    const name = edge.querySelector('data[key="d18"]')?.textContent || 'N/A';  // d18 is name
+                    const ref = edge.querySelector('data[key="d17"]')?.textContent || '';      // d17 is ref
+                    const maxspeed = edge.querySelector('data[key="d16"]')?.textContent || ''; // d16 is maxspeed
+                    
+                    line.bindPopup(`
+                        Type: ${highway}<br>
+                        Name: ${name}${ref ? `<br>Ref: ${ref}` : ''}
+                        ${maxspeed ? `<br>Speed Limit: ${maxspeed}` : ''}
+                    `);
+                });
+
+                console.log('Street type counts:', streetCounts);
+
+                // Update chart with street type counts
+                updateChart(streetCounts);
+                
+                // Fit map to bounds
+                const coordinates = Object.values(nodes);
+                if (coordinates.length > 0) {
+                    const bounds = L.latLngBounds(coordinates);
+                    map.fitBounds(bounds);
+                    console.log('Set map bounds');
+                } else {
+                    console.error('No valid coordinates found in the data');
+                }
+                
+            } catch (error) {
+                console.error('Error loading street data:', error);
+                alert('Error loading street data. Please ensure the GraphML file exists.');
+            }
+        }
+
+        // Initialize and update the chart
+        let streetTypeChart;
+        function updateChart(streetCounts) {
+            const ctx = document.getElementById('streetTypeChart').getContext('2d');
+            
+            // Destroy existing chart if it exists
+            if (streetTypeChart) {
+                streetTypeChart.destroy();
+            }
+
+            // Sort the street types by count
+            const sortedEntries = Object.entries(streetCounts).sort((a, b) => b[1] - a[1]);
+            const labels = sortedEntries.map(([type]) => type);
+            const data = sortedEntries.map(([, count]) => count);
+
+            streetTypeChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Street Count by Type',
+                        data: data,
+                        backgroundColor: labels.map(type => 
+                            streetColors[type] || streetColors.other
+                        )
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',  // Make it a horizontal bar chart
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        title: {
+                            display: true,
+                            text: 'Street Types',
+                            color: 'black',
+                            font: {
+                                size: 16
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.1)'
+                            },
+                            ticks: {
+                                color: 'black'
+                            }
+                        },
+                        y: {
+                            grid: {
+                                display: false
+                            },
+                            ticks: {
+                                color: 'black'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Load data when page loads
+        // Replace 'amsterdam' with your city name
+        loadStreetData('alden');
+    </script>
+</body>
+</html>

@@ -82,8 +82,8 @@ def save_network(G: nx.MultiDiGraph, city_name: str, save_dir: str = "data"):
     graphml_path = save_path / f"{city_name}_network.graphml"
     ox.save_graphml(G, graphml_path)
     
-    # Save as GeoJSON for web visualization
-    geojson_path = save_path / f"{city_name}_network.geojson"
+    # Save as GeoPackage for web visualization
+    geojson_path = save_path / f"{city_name}_network.gpkg"
     ox.save_graph_geopackage(G, filepath=geojson_path, directed=True)
     
     logger.info(f"Saved network to {save_path}")
