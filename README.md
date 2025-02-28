@@ -2,7 +2,7 @@
 
 GSV Tracker is a Python tool for analyzing Google Street View coverage and temporal patterns in cities. It creates interactive visualizations showing when and where Street View imagery was captured, using asynchronous operations for efficient data collection.
 
-This research project began in 2021 by Professor Jon E. Froehlich and was also part of the [UC Berkeley Data Science Discovery Program](https://cdss.berkeley.edu/discovery/projects) in 2023 with students Joseph Chen, Wenjing Yi, and Jingfeng Yang.
+This research project began in 2021 by Professor Jon E. Froehlich and was also part of the [UC Berkeley Data Science Discovery Program](https://cdss.berkeley.edu/discovery/projects) in 2023 with students Joseph Chen, Wenjing Yi, and Jingfeng Yang. Here's the [original pitch sheet in Google Docs]([url](https://docs.google.com/document/d/1hfgvS_JHRmhkVtj_LBZ2qd_TO-50L6g0crlV8nTBy9s/edit?tab=t.0)).
 
 ## Installation
 
