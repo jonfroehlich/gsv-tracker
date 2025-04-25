@@ -22,3 +22,8 @@ cities/~$SUB-IP-EST2023-POP.xlsx
 cities/SUB-IP-EST2023-POP.csv
 *.log
 /duplicates
+data/aberdeen--wa_width_13677_height_8548_step_20.json/aberdeen--wa_width_13677_height_8548_step_20.json
+gsv_street_analyzer/cache/8eb3217d9f9a5c8e1bd6a0676bcc76953e1aed5c.json
+gsv_street_analyzer/cache/ba508de111ac1ff1db5969d99558624229c41661.json
+gsv_street_analyzer/data/Alden, MN_network.gpkg
+gsv_street_analyzer/data/alden_network-old.graphml
