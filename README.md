@@ -49,14 +49,14 @@ While we use mamba for creating and updating the environment, we still use conda
 
 Analyze a city's Street View coverage:
 ```bash
-gsv-tracker "City Name"
+python gsv_tracker.py "City Name"
 ```
 
 ### Preview Search Area
 
 Before downloading data, you can preview the search area:
 ```bash
-gsv-tracker "City Name" --check-boundary
+python gsv_tracker.py "City Name" --check-boundary
 ```
 This will generate and open a visualization of the intended search area without downloading any data.
 
