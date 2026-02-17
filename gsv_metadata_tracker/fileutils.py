@@ -188,7 +188,7 @@ def get_default_vis_dir() -> str:
     return vis_dir
 
 def sanitize_city_query_str(city_query_str: str) -> str:
-    """
+    r"""
     Sanitize a city query string for use in filenames. 
     
     Uses single dash (-) for spaces within location components and 
