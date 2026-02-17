@@ -24,6 +24,7 @@ import logging
 import os
 import asyncio
 import aiohttp
+from dotenv import load_dotenv
 from typing import Optional
 from .fileutils import get_default_vis_dir
 from .json_summarizer import generate_city_metadata_summary_as_json, generate_aggregate_summary_as_json
@@ -183,6 +184,9 @@ async def async_main():
        - As connections complete, new ones start until batch is done
     2. Then the next batch of 200 is prepared
     """
+    # Load environment variables from .env file immediately
+    load_dotenv()
+    
     args = parse_args()
     
     # Configure logging - this is sync but only happens once at startup
