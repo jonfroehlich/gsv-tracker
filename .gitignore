@@ -56,3 +56,4 @@ data/sheridan--wyoming_width_150531_height_49401_step_20.csv.gz
 data/terrell--texas_width_88640_height_97472_step_20.csv.gz
 data/walla-walla--washington_width_80512_height_67500_step_20.csv.gz
 data/washington--virginia_width_64885_height_37156_step_20.csv.gz
+.env
