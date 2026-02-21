@@ -1,119 +1,115 @@
 # GSV Tracker
 
-GSV Tracker is a Python tool for analyzing Google Street View coverage and temporal patterns in cities. It creates interactive visualizations showing when and where Street View imagery was captured, using asynchronous operations for efficient data collection.
+GSV Tracker is a Python tool for analyzing Google Street View (GSV) coverage and temporal patterns in cities. It creates interactive visualizations showing when and where Street View imagery was captured by efficiently sampling geographic grids and querying the GSV Static API.
 
 This research project began in 2021 by Professor Jon E. Froehlich and was also part of the [UC Berkeley Data Science Discovery Program](https://cdss.berkeley.edu/discovery/projects) in 2023 with students Joseph Chen, Wenjing Yi, and Jingfeng Yang. Here's the [original pitch sheet in Google Docs](https://docs.google.com/document/d/1hfgvS_JHRmhkVtj_LBZ2qd_TO-50L6g0crlV8nTBy9s/edit?tab=t.0).
 
-## Installation
+## 1. Setup and Installation
 
-We use Mamba rather than Conda for environment management because Mamba is significantly faster at resolving dependencies and installing packages. 
+We recommend using a standard Python virtual environment (`.venv`) to manage dependencies.
 
-1. Clone the repository:
+1. **Clone the repository:**
+
 ```bash
 git clone https://github.com/yourusername/gsv-tracker.git
 cd gsv-tracker
 ```
 
-2. Install mamba (if you haven't already):
+2. **Create a virtual environment:**
+
 ```bash
-conda install mamba -n base -c conda-forge
+python -m venv .venv
 ```
 
-3. Create and activate the environment using mamba:
+3. **Activate the environment:**
+
+**Mac/Linux:**
+
 ```bash
-mamba env create -f environment.yml
-conda activate gsv-tracker
+source .venv/bin/activate
 ```
 
-If you need to update your environment later, use:
-```bash
-mamba env update -f environment.yml
+**Windows:**
+
+```cmd
+.venv\Scripts\activate
 ```
 
-### Why Mamba?
+4. **Install dependencies:**
 
-This project recommends using Mamba instead of Conda for environment management. While both tools serve the same purpose, Mamba offers the following advantages:
+```bash
+pip install -r requirements.txt
+```
 
-- **Speed**: Mamba's C++ implementation is substantially faster than Conda's Python implementation, often resolving dependencies 5-10x faster ([source](https://github.com/mamba-org/mamba#the-fast-cross-platform-package-manager)).
-- **Memory Efficiency**: Mamba uses less memory when solving environments ([benchmark results](https://prefix.dev/blog/conda_vs_mamba)).
-- **Better Solver**: Mamba's dependency solver is more robust and less likely to get stuck in dependency conflicts ([documentation](https://mamba.readthedocs.io/en/latest/installation.html#why-mamba)).
-- **Drop-in Replacement**: Mamba is fully compatible with Conda environments and packages, making it a seamless alternative ([Anaconda blog](https://www.anaconda.com/blog/a-faster-conda-for-a-growing-community)).
+## 2. Available Scripts
 
-For more details on Mamba's advantages, see the [official Mamba documentation](https://mamba.readthedocs.io/en/latest/index.html) and this [performance comparison](https://prefix.dev/blog/conda_vs_mamba).
+The repository includes several scripts divided into core data collection tools and data utility scripts.
 
-While we use mamba for creating and updating the environment, we still use conda commands for environment activation and setting environment variables.
+### Core Data Collection Tools
 
-## Usage
+* **`gsv_tracker.py`**: The primary asynchronous data collection script. It is highly efficient and designed for large geographic areas.
+* **`gsv_tracker_single.py`**: A single-threaded version of the tracker. It is slower but ideal for testing, debugging, baseline comparisons, or running on systems with limited resources.
+* **`run_cities.py`**: A batch-processing wrapper that allows you to run `gsv_tracker.py` across multiple cities sequentially by reading configurations from a text file (e.g., `cities.txt`).
+
+### Data Utilities & Analysis
+
+* **`gsv_compare_data.py`**: Compares two GSV metadata files (e.g., outputs from the async vs. single-threaded trackers) to verify data consistency and pinpoint differences.
+* **`generate_json.py`**: Generates missing JSON metadata summary files for existing GSV data directories.
+* **`update_json_histograms.py`**: Updates existing city `JSON.gz` files to append new daily histogram statistics calculated from the raw CSV data.
+
+## 3. Usage Examples
 
 ### Basic Usage
 
-Analyze a city's Street View coverage:
+To analyze a city's Street View coverage using default settings (1000m x 1000m grid, 20m steps):
+
 ```bash
-python gsv_tracker.py "City Name"
+python gsv_tracker.py "Seattle, WA"
 ```
 
 ### Preview Search Area
 
-Before downloading data, you can preview the search area:
+Before executing a large download, you can generate an HTML map to preview your search boundary:
+
 ```bash
-python gsv_tracker.py "City Name" --check-boundary
+python gsv_tracker.py "Seattle, WA" --width 2000 --height 2000 --check-boundary
 ```
-This will generate and open a visualization of the intended search area without downloading any data.
 
-### Command Line Options
+### Tuning Concurrency (For Large Areas)
 
-Basic Options:
-- `city`: Name of the city to analyze (required)
-- `--width`: Search grid width in meters (default: 1000)
-- `--height`: Search grid height in meters (default: 1000)
-- `--step`: Distance between sample points in meters (default: 20)
-- `--force-size`: Force using provided dimensions instead of inferring from city boundaries
-- `--check-boundary`: Preview search area without downloading data
-- `--no-visual`: Skip generating visualizations
-- `--log-level`: Set logging level (DEBUG/INFO/WARNING/ERROR/CRITICAL)
+For larger queries, you can adjust the batch size and connection limits to optimize network usage against the Google API (500 requests/second limit):
 
-Concurrency Control:
-- `--batch-size`: Number of requests to prepare and queue at once (default: 200)
-  - Should be >= connection-limit
-  - Higher values use more memory but can be more efficient
-  - Google Street View Static API limit is 500 requests/second
-- `--connection-limit`: Maximum concurrent connections to the API (default: 100)
-  - Controls how many requests are actually in-flight at once
-  - Should be <= batch-size
-  - Conservative values prevent overwhelming the network/API
-- `--timeout`: Request timeout in seconds (default: 30)
+```bash
+python gsv_tracker.py "Portland, OR" --batch-size 200 --connection-limit 100
+```
 
-Recommended Concurrency Settings:
-- Conservative: `--batch-size 100 --connection-limit 50`
-- Moderate: `--batch-size 200 --connection-limit 100`
-- Aggressive: `--batch-size 400 --connection-limit 200`
+### Batch Processing Multiple Cities
 
-### Output Files
+Create a `cities.txt` file where each line is a standard command configuration:
 
-The tool generates several files:
-- `{city_name}_{width}x{height}_step{step}.csv.gz`: Compressed data file containing all GSV metadata
-- `{city_name}_{width}x{height}_step{step}_failed_points.csv`: List of points that failed to download after all retries
-- `{city_name}_{width}x{height}_step{step}.html`: Interactive map visualization (if not skipped)
-- `{city_name}_{width}x{height}_step{step}_search_boundary.html`: Search area preview (when using --check-boundary)
+```text
+# cities.txt
+Seattle, WA --width 2000 --height 2000 --step 25
+Portland, OR --width 1500 --height 1500
+Vancouver, BC
+```
 
-### Error Handling
+Then run the batch script:
 
-- Failed requests are automatically retried with exponential backoff
-- Points that fail after all retries are logged to a separate file for later analysis
-- Intermediate results are saved regularly, allowing for safe interruption and resumption
-- File operations use locking to prevent data corruption in case of concurrent access
-- Cross-platform compatibility ensured for Windows and Unix-like systems
+```bash
+python run_cities.py cities.txt --continue-on-error
+```
+
+## 4. Output Files
+
+Depending on your parameters, the tool generates the following files in your designated `--download-dir` (defaults to `./data`):
+
+* **`{city_name}_{width}x{height}_step{step}.csv.gz`**: The core compressed data file containing all downloaded GSV metadata.
+* **`{city_name}_{width}x{height}_step{step}.json.gz`**: A JSON summary of the metadata and temporal histograms.
+* **`{city_name}_{width}x{height}_step{step}_failed_points.csv`**: A log of coordinates that failed to download after all retry attempts.
+* **`{city_name}_{width}x{height}_step{step}.html`**: An interactive map visualization of the coverage (unless `--no-visual` is passed).
+* **`{city_name}_{width}x{height}_step{step}_search_boundary.html`**: A preview map generated when using the `--check-boundary` flag.
 
 ## License
 
 Distributed under the MIT License. See `LICENSE` for more information.
-
-## Acknowledgments
-
-- Google Street View Static API
-- OpenStreetMap and CARTO for map tiles
-- [Folium](https://python-visualization.github.io/folium/) for map visualization
-- [Chart.js](https://www.chartjs.org/) for interactive charts
-- [aiohttp](https://docs.aiohttp.org/) for asynchronous HTTP requests
-- [backoff](https://github.com/litl/backoff) for retry functionality
-- Some of this code was written with the assistance of Anthropic Claude and VSCode Copilot
