@@ -30,13 +30,17 @@ def load_config() -> Dict[str, Any]:
     if not config['api_key']:
         raise ValueError(
             "GMAPS_API_KEY not found in environment variables.\n\n"
-            "1. Please set the API key using:\n"
-            "  > conda env config vars set GMAPS_API_KEY=YOUR_API_KEY\n"
-            "2. You will then need to reactivate your environment for the changes to take effect.\n"
-            "  > conda activate gsv-tracker\n"
-            "3. To check the current environment variables, use:\n"
-            "  > conda env config vars list\n"
-            "\nIf you do not have a Google Maps API key, you can create one at https://console.cloud.google.com/apis/credentials\n"
+            "Option 1: Create a .env file in your project root:\n"
+            "  GMAPS_API_KEY=YOUR_API_KEY\n\n"
+            "Option 2: Set it as an environment variable:\n"
+            "  macOS/Linux:\n"
+            "    > export GMAPS_API_KEY=YOUR_API_KEY\n"
+            "  Windows (Command Prompt):\n"
+            "    > set GMAPS_API_KEY=YOUR_API_KEY\n"
+            "  Windows (PowerShell):\n"
+            "    > $env:GMAPS_API_KEY='YOUR_API_KEY'\n\n"
+            "If you do not have a Google Maps API key, you can create one at "
+            "https://console.cloud.google.com/apis/credentials\n"
             "You will need to enable the Street View Static API for the key."
         )
     
