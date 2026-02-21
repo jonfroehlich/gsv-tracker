@@ -136,9 +136,25 @@ def merge_capture_date_histograms(cities_data: List[Dict]) -> Dict[str, Dict[Uni
     all_panos_daily = {}
     google_panos_daily = {}
     
+    skipped_cities = []
     for city_data in cities_data:
-        logger.debug(f"Merging histograms for {city_data['city']['name']}, {city_data['city']['state']['name']}, {city_data['city']['country']['name']}")
-        
+        city_name = f"{city_data.get('city', {}).get('name', 'unknown')}, {city_data.get('city', {}).get('state', {}).get('abbreviation', '??')}"
+        logger.debug(f"Merging histograms for {city_name}")
+
+        # Check for required histogram fields (missing in older schema)
+        all_panos = city_data.get("all_panos", {})
+        google_panos = city_data.get("google_panos", {})
+        missing_fields = []
+        for section_name, section in [("all_panos", all_panos), ("google_panos", google_panos)]:
+            if "histogram_of_capture_dates_by_year" not in section:
+                missing_fields.append(f"{section_name}.histogram_of_capture_dates_by_year")
+            if "histogram_of_capture_dates" not in section:
+                missing_fields.append(f"{section_name}.histogram_of_capture_dates")
+
+        if missing_fields:
+            logger.warning(f"Skipping {city_name}: missing fields: {', '.join(missing_fields)}")
+            skipped_cities.append((city_name, missing_fields))
+            continue  
         # Handle all panos yearly data
         yearly_data = city_data["all_panos"]["histogram_of_capture_dates_by_year"]
         if isinstance(yearly_data, dict) and "counts" in yearly_data:
@@ -191,6 +207,14 @@ def merge_capture_date_histograms(cities_data: List[Dict]) -> Dict[str, Dict[Uni
             for date, count in daily_data.items():
                 google_panos_daily[date] = google_panos_daily.get(date, 0) + count
     
+    if skipped_cities:
+        logger.warning(f"\n{'='*60}")
+        logger.warning(f"Skipped {len(skipped_cities)} cities with outdated JSON schema:")
+        for name, fields in skipped_cities:
+            logger.warning(f"  {name}: missing {', '.join(fields)}")
+        logger.warning(f"To fix: delete their .json.gz files and rerun generate_json.py")
+        logger.warning(f"{'='*60}\n")
+
     # Sort all histograms
     return {
         "all_panos_yearly": dict(sorted(all_panos_yearly.items())),
