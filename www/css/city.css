@@ -1,0 +1,122 @@
+/**
+ * city.css
+ * Styles specific to the per-city detail page (city.html).
+ */
+
+/* ── Legend (Leaflet control, top-right) ────────────────────── */
+.legend {
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+  border-radius: 5px;
+}
+
+.legend h4 {
+  margin: 0;
+  line-height: 1.2;
+}
+
+.legend .subtitle {
+  color: #666;
+  margin-top: 2px;
+  margin-bottom: 8px;
+  line-height: 1.2;
+}
+
+.legend .year-item {
+  line-height: 24px;
+}
+
+.legend i {
+  width: 18px;
+  height: 18px;
+  float: left;
+  margin-right: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.legend i.inactive {
+  opacity: 0.2;
+}
+
+.legend i.active {
+  border: 1px solid black;
+}
+
+.legend .active-item {
+  font-weight: bold;
+}
+
+/* ── Back link ──────────────────────────────────────────────── */
+#back-link {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 4px;
+  z-index: 1000;
+  box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+  text-decoration: none;
+  color: #333;
+  font-family: sans-serif;
+  font-size: 14px;
+}
+
+#back-link:hover,
+#back-link:focus-visible {
+  background: rgba(255, 255, 255, 0.9);
+  color: #000;
+}
+
+/* ── Progress bar ───────────────────────────────────────────── */
+#progress-container {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 450px;
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+  display: none;
+}
+
+#progress-bar {
+  width: 100%;
+  height: 20px;
+  background-color: #f0f0f0;
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 10px 0;
+}
+
+#progress-fill {
+  height: 100%;
+  background-color: #4CAF50;
+  width: 0%;
+  transition: width 0.3s ease;
+}
+
+#progress-text {
+  text-align: center;
+  font-family: sans-serif;
+  margin-top: 5px;
+}
+
+/* ── Temporal chart (bottom-right) ──────────────────────────── */
+#temporal-plot-container {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  background: rgba(80, 80, 80, 0.9);
+  border-radius: 4px;
+  padding: 10px;
+  box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+  width: 400px;
+  height: 200px;
+}

@@ -1,0 +1,24 @@
+/**
+ * gsv-shared.css
+ * Common styles for the GSV City Explorer (index.html) and
+ * per-city detail view (city.html).
+ */
+
+/* ── Reset ──────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* ── Full-bleed Leaflet map ─────────────────────────────────── */
+#map {
+  position: absolute;
+  inset: 0;
+}

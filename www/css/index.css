@@ -1,0 +1,131 @@
+/**
+ * index.css
+ * Styles specific to the overview map page (index.html).
+ */
+
+/* ── Prevent body scroll (full-screen map) ──────────────────── */
+body {
+  overflow: hidden;
+}
+
+/* ── Stats banner (top-center) ──────────────────────────────── */
+#stats {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.75);
+  padding: 10px 20px;
+  border-radius: 5px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+  text-align: center;
+}
+
+/* ── Loading overlay ────────────────────────────────────────── */
+.loading {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 255, 255, 0.95);
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+  z-index: 2000;
+  text-align: center;
+}
+
+/* ── Chart panel (bottom-right) ─────────────────────────────── */
+.chart-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: rgba(255, 255, 255, 0.65);
+  padding: 10px;
+  border-radius: 8px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+  display: flex;
+  gap: 10px;
+}
+
+.scatter-plot-container {
+  width: 300px;
+  height: 300px;
+  position: relative;
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.75);
+}
+
+/* ── Legend (top-right) ─────────────────────────────────────── */
+.legend {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 5px;
+  z-index: 1000;
+}
+
+.legend h4 {
+  margin: 3px 0 7px;
+}
+
+.legend-item {
+  padding: 2px 4px;
+  font-size: 0.9em;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.legend-item:hover,
+.legend-item:focus-visible {
+  background-color: rgba(0, 0, 0, 0.05);
+  outline: none;
+}
+
+.legend-color {
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+/* ── Leaflet popup overrides ────────────────────────────────── */
+.leaflet-popup-content {
+  width: 400px !important;
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.popup-chart-container {
+  width: 100%;
+  height: 200px;
+  margin-top: 10px;
+  position: relative;
+}
+
+.popup-stats-list {
+  padding-left: 20px;
+  margin: 5px 0;
+}
+
+/* ── "View Detailed Analysis" button ────────────────────────── */
+.view-details-btn {
+  display: inline-block;
+  padding: 8px 16px;
+  background-color: #4CAF50;
+  color: white;
+  text-decoration: none;
+  border-radius: 4px;
+}
+
+.view-details-btn:hover,
+.view-details-btn:focus-visible {
+  background-color: #45a049;
+}
