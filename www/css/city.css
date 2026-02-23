@@ -5,15 +5,17 @@
 
 /* ── Legend (Leaflet control, top-right) ────────────────────── */
 .legend {
-  padding: 6px 8px;
-  background: rgba(255, 255, 255, 0.8);
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
   border-radius: 5px;
+  min-width: 180px;
 }
 
 .legend h4 {
-  margin: 0;
+  margin: 0 0 6px;
   line-height: 1.2;
+  font-size: 14px;
 }
 
 .legend .legend-meta {
@@ -21,14 +23,72 @@
   margin-top: 2px;
   margin-bottom: 0;
   line-height: 1.2;
+  font-size: 12px;
 }
 
+/* ── Legend data overview table ─────────────────────────────── */
+.legend-stats {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+  color: #333;
+}
+
+.legend-stats td {
+  padding: 2px 4px 2px 0;
+  line-height: 1.5;
+  vertical-align: baseline;
+}
+
+.legend-stats td:first-child {
+  color: #777;
+  padding-right: 10px;
+  white-space: nowrap;
+}
+
+.legend-stats td:last-child {
+  font-weight: 500;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Row group dividers (e.g. before date range, before collection date) */
+.legend-stats-divider td {
+  padding-top: 6px;
+  border-top: 1px solid #e0e0e0;
+}
+
+/* De-emphasize standard deviation */
+.legend-stats-sd {
+  font-weight: normal;
+  color: #888;
+}
+
+/* ── Divider between overview and year filter sections ───────── */
+.legend-divider {
+  border: none;
+  border-top: 1px solid #ddd;
+  margin: 8px 0;
+}
+
+/* ── Year filter section header ─────────────────────────────── */
+.legend-year-header {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #999;
+  margin-bottom: 4px;
+}
+
+/* ── Year filter rows ────────────────────────────────────────── */
 .legend .legend-meta + .year-item {
   margin-top: 8px;
 }
 
 .legend .year-item {
   line-height: 24px;
+  font-size: 13px;
 }
 
 .legend i {
@@ -50,6 +110,12 @@
 
 .legend .active-item {
   font-weight: bold;
+}
+
+/* De-emphasize pano counts in year rows */
+.year-count {
+  color: #888;
+  font-weight: normal;
 }
 
 /* ── Back link ──────────────────────────────────────────────── */

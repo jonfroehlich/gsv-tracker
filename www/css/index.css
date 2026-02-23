@@ -212,3 +212,10 @@ a.view-details-btn:focus-visible {
 .city-search-results li .search-match {
   font-weight: bold;
 }
+
+/* Add to index.css */
+.legend-item.selected {
+  background-color: rgba(0, 0, 0, 0.15);
+  font-weight: bold;
+  outline: 1px solid rgba(0, 0, 0, 0.3);
+}

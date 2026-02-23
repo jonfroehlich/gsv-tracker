@@ -140,6 +140,9 @@ function createTooltip(city) {
  * @param {number} maxAge - Maximum median age across all cities.
  * @param {Object[]} cities - Array of city records.
  */
+/**
+ * Populate the legend panel with one row per integer-age bucket.
+ */
 function createLegend(maxAge, cities) {
   const legend = document.getElementById("legend");
   const maxYears = Math.ceil(maxAge);
@@ -154,9 +157,7 @@ function createLegend(maxAge, cities) {
   for (let age = 0; age <= maxYears; age++) {
     const color = getColor(age);
     const n = ageCounts[age];
-    const label = n > 0
-      ? `(${n} ${n === 1 ? "city" : "cities"})`
-      : "(no cities)";
+    const label = n > 0 ? `(${n} ${n === 1 ? "city" : "cities"})` : "(no cities)";
 
     html += `
       <div class="legend-item" role="listitem" tabindex="0"
@@ -169,7 +170,20 @@ function createLegend(maxAge, cities) {
 
   // Click & keyboard handlers
   legend.querySelectorAll(".legend-item").forEach((item) => {
-    const handler = () => highlightCitiesByExactAge(parseInt(item.dataset.age, 10));
+    const handler = () => {
+      const isAlreadySelected = item.classList.contains("selected");
+      
+      // Clear selection from all items
+      legend.querySelectorAll(".legend-item").forEach(i => i.classList.remove("selected"));
+
+      if (isAlreadySelected) {
+        resetHighlights();
+      } else {
+        item.classList.add("selected");
+        highlightCitiesByExactAge(parseInt(item.dataset.age, 10));
+      }
+    };
+
     item.addEventListener("click", handler);
     item.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
@@ -217,10 +231,20 @@ function highlightCitiesByExactAge(targetAge, zoomToHighlightedCities = false) {
   mapRectangles.forEach((rect) => {
     const age = Math.floor(rect.city.google_panos_age_stats.median_pano_age_years);
     if (Math.abs(age - targetAge) <= tolerance) {
-      rect.setStyle({ fillOpacity: 0.8, weight: 2 });
-      highlightedCities.push(rect.city);
+      // Selected state
+      rect.setStyle({ 
+        fillOpacity: 0.8, 
+        weight: 2,
+        opacity: 1 
+      });
+      rect.bringToFront();
     } else {
-      rect.setStyle({ fillOpacity: 0.2, weight: 0.25 });
+      // Unselected state: significantly more "faded"
+      rect.setStyle({ 
+        fillOpacity: 0.1, // Very faint fill
+        weight: 0.1,       // Thin borders
+        opacity: 0.2       // Faded borders
+      });
     }
   });
 

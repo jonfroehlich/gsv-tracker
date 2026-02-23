@@ -16,7 +16,10 @@ const GSV_DATA_BASE_URL =
 /** Google Street View public launch date. */
 const GSV_LAUNCH_DATE = new Date("2007-05-25");
 
-/** Maximum age (in years) mapped to the dark-red end of the scale. */
+/**
+ * Maximum age (in years) mapped to the dark-red end of the color scale.
+ * Computed once at load time so the scale stays stable within a session.
+ */
 const MAX_COLOR_AGE_IN_YEARS =
   (Date.now() - GSV_LAUNCH_DATE.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
 
@@ -24,12 +27,16 @@ const MAX_COLOR_AGE_IN_YEARS =
  * Return a CSS `rgb()` color for a given panorama age using a
  * three-stop YlOrRd interpolation (light yellow → orange → dark red).
  *
- * @param {number} age - Panorama age in years.
- * @returns {string} CSS color value, e.g. `"rgb(253, 141, 60)"`.
+ * Stop 0 (age = 0):                    rgb(255, 255, 178)  — light yellow
+ * Stop 1 (age = MAX_COLOR_AGE / 2):    rgb(253, 141,  60)  — orange
+ * Stop 2 (age = MAX_COLOR_AGE_IN_YEARS): rgb(189,   0,  38) — dark red
+ *
+ * @param {number} age - Panorama age in years (≥ 0).
+ * @returns {string} CSS color string, e.g. `"rgb(253, 141, 60)"`.
  *
  * @example
- *   getColor(0);                      // yellow (newest)
- *   getColor(MAX_COLOR_AGE_IN_YEARS);  // dark red (oldest)
+ *   getColor(0);                        // "rgb(255, 255, 178)" — newest
+ *   getColor(MAX_COLOR_AGE_IN_YEARS);   // "rgb(189, 0, 38)"   — oldest
  */
 function getColor(age) {
   const ratio = Math.min(age / MAX_COLOR_AGE_IN_YEARS, 1);
@@ -44,19 +51,27 @@ function getColor(age) {
     const t = (ratio - 0.5) * 2;
     r = 253 - t * (253 - 189);
     g = 141 - t * 141;
-    b = 60 - t * (60 - 38);
+    b = 60  - t * (60  - 38);
   }
   return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
 }
 
 /**
- * Fetch a `.json.gz` file, inflate it with pako, and return the
- * parsed object. Handles bare `NaN` / `Infinity` literals that
- * standard JSON cannot represent (some data files include them).
+ * Fetch a `.json.gz` file, decompress it with pako, and return the
+ * parsed object.
+ *
+ * Handles bare `NaN` / `Infinity` literals that standard `JSON.parse`
+ * cannot represent (some GSV tracker data files include them as field
+ * values when a statistic is undefined or out of range).
+ *
+ * Note: pako is used here (rather than the native DecompressionStream)
+ * because this function loads small metadata JSON files where the full
+ * response is collected before parsing — the streaming pipeline in
+ * city.js uses DecompressionStream for the large CSV files.
  *
  * @param {string} url - Full URL to the `.json.gz` resource.
  * @returns {Promise<Object>} The parsed JSON payload.
- * @throws {Error} On HTTP error or decompression failure.
+ * @throws {Error} On HTTP error or decompression/parse failure.
  *
  * @example
  *   const cities = await fetchGzippedJson(GSV_DATA_BASE_URL + "cities.json.gz");
