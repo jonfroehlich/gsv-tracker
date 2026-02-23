@@ -20,6 +20,22 @@
     gtag("config", "G-ZSQGNSTEES");
   </script>
 
+  <div id="city-search" class="city-search" role="search" aria-label="Search cities">
+    <input id="city-search-input" type="text"
+           placeholder="Search for a city…"
+           autocomplete="off"
+           aria-label="Search for a city"
+           aria-controls="city-search-results"
+           aria-autocomplete="list"
+           role="combobox"
+           aria-expanded="false" />
+    <button id="city-search-reset" class="city-search-reset"
+            type="button" aria-label="Reset map view" title="Reset map view">
+      ✕
+    </button>
+    <ul id="city-search-results" class="city-search-results" role="listbox"></ul>
+  </div>
+
   <div id="map" role="application" aria-label="World map of GSV city coverage"></div>
 
   <div id="loading" class="loading" role="status" aria-live="polite">

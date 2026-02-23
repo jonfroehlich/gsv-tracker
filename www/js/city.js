@@ -23,6 +23,7 @@ let selectedDate = null;
 let cityNameGlobal = "";
 let stateNameGlobal = "";
 let totalPanosGlobal = 0;
+let collectionDateGlobal = "";
 
 // Reset selection when clicking the map background
 map.on("click", (e) => {
@@ -54,7 +55,8 @@ function updateLegend(years) {
 
   let html = `
     <h4>${cityNameGlobal}, ${stateNameGlobal}</h4>
-    <div class="subtitle">Total Panos: ${totalPanosGlobal.toLocaleString()}</div>
+    <div class="legend-meta">Data Collected: ${collectionDateGlobal || "Unknown"}</div>
+    <div class="legend-meta">Total Panos: ${totalPanosGlobal.toLocaleString()}</div>
   `;
 
   sortedYears.forEach((year) => {
@@ -510,6 +512,9 @@ async function loadData() {
     document.title = `Street View Data: ${cityName}, ${stateName}`;
     cityNameGlobal = cityName;
     stateNameGlobal = stateName;
+    collectionDateGlobal = stats.download?.end_time
+      ? new Date(stats.download.end_time).toLocaleDateString()
+      : "";
 
     // Region outline
     const bounds = stats.city.bounds;
@@ -535,7 +540,8 @@ async function loadData() {
         Newest pano: ${newestDate.toLocaleDateString()}<br>
         Median age: ${stats.google_panos.age_stats.median_pano_age_years.toFixed(1)} years<br>
         Average age: ${stats.google_panos.age_stats.avg_pano_age_years.toFixed(1)} years
-        (SD=${stats.google_panos.age_stats.stdev_pano_age_years.toFixed(1)} years)
+        (SD=${stats.google_panos.age_stats.stdev_pano_age_years.toFixed(1)} years)<br><br>
+        Data collected: ${stats.download?.end_time ? new Date(stats.download.end_time).toLocaleDateString() : "Unknown"}
       </div>
     `;
 

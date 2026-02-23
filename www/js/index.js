@@ -10,6 +10,7 @@
 const map = L.map("map").setView([0, 0], 2);
 const charts = { pano: null, area: null };
 const mapRectangles = [];
+let allCityBounds = null;
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
   attribution: "© OpenStreetMap contributors © CARTO",
@@ -80,6 +81,7 @@ function createTooltip(city) {
     <h3>${cityName}, ${city.state.name}, ${city.country.name}</h3>
     <strong>Coverage Statistics:</strong>
     <ul class="popup-stats-list">
+      <li>Data Collected: ${city.collection_info?.end_time ? new Date(city.collection_info.end_time).toLocaleDateString() : "Unknown"}</li>
       <li>Area: ${city.search_area_km2.toFixed(1)} km²</li>
       <li>Total Panoramas: ${panoStats.unique_panos.toLocaleString()}</li>
       <li>Google Panoramas: ${panoStats.unique_google_panos.toLocaleString()} (${googlePct}%)</li>
@@ -89,8 +91,8 @@ function createTooltip(city) {
       <li>Median Age: ${ageStats.median_pano_age_years ? ageStats.median_pano_age_years.toFixed(1) + " years" : "No data"}</li>
       <li>Average Age: ${ageStats.avg_pano_age_years ? ageStats.avg_pano_age_years.toFixed(1) + " years" : "No data"}
         ${ageStats.stdev_pano_age_years ? ` (SD=${ageStats.stdev_pano_age_years.toFixed(1)})` : ""}</li>
-      <li>Newest: ${ageStats.newest_date ? new Date(ageStats.newest_date).toLocaleDateString() : "No data"}</li>
-      <li>Oldest: ${ageStats.oldest_date ? new Date(ageStats.oldest_date).toLocaleDateString() : "No data"}</li>
+      <li>Newest: ${ageStats.newest_pano_date ? new Date(ageStats.newest_pano_date).toLocaleDateString() : "No data"}</li>
+      <li>Oldest: ${ageStats.oldest_pano_date ? new Date(ageStats.oldest_pano_date).toLocaleDateString() : "No data"}</li>
     </ul>
   `;
 
@@ -302,6 +304,204 @@ function resetHighlights() {
   });
 }
 
+// ── City search ──────────────────────────────────────────────
+
+/**
+ * Build the display label for a city record.
+ * @param {Object} city
+ * @returns {string}  e.g. "Seattle, Washington, United States"
+ */
+function getCityLabel(city) {
+  const name = city.city || city.state?.name || city.country.name;
+  const parts = [name];
+  if (city.state?.name && city.state.name !== name) parts.push(city.state.name);
+  if (city.country?.name) parts.push(city.country.name);
+  return parts.join(", ");
+}
+
+/**
+ * Select a city: highlight it on map & charts, zoom to it, and open
+ * its popup.
+ * @param {Object} city
+ */
+function selectCity(city) {
+  // Highlight across all visualizations
+  highlightCity(city);
+
+  // Animated zoom to the city rectangle with some padding
+  const b = city.bounds;
+  const latSpan = b.max_lat - b.min_lat;
+  const lonSpan = b.max_lon - b.min_lon;
+  const pad = Math.max(latSpan, lonSpan) * 3;
+  map.flyToBounds([
+    [b.min_lat - pad, b.min_lon - pad],
+    [b.max_lat + pad, b.max_lon + pad],
+  ], { duration: 1.2 });
+
+  // Open the popup after the animation finishes
+  const rect = mapRectangles.find((r) => r.city === city);
+  if (rect) {
+    map.once("moveend", () => rect.openPopup());
+  }
+}
+
+/**
+ * Initialise the city search autocomplete once city data is loaded.
+ * @param {Object[]} cities - Array of city records.
+ */
+function initCitySearch(cities) {
+  const input = document.getElementById("city-search-input");
+  const list = document.getElementById("city-search-results");
+  let activeIdx = -1;
+  let matches = [];
+
+  // Pre-compute labels and sort alphabetically
+  const entries = cities
+    .map((city) => ({ city, label: getCityLabel(city) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  /** Show or hide the dropdown. */
+  function showDropdown(show) {
+    list.classList.toggle("visible", show);
+    input.setAttribute("aria-expanded", String(show));
+  }
+
+  /** Render the current matches into the dropdown list. */
+  function renderMatches() {
+    list.innerHTML = "";
+    activeIdx = -1;
+
+    if (matches.length === 0) {
+      showDropdown(false);
+      return;
+    }
+
+    matches.forEach((entry, i) => {
+      const li = document.createElement("li");
+      li.setAttribute("role", "option");
+      li.setAttribute("tabindex", "-1");
+      li.id = `city-option-${i}`;
+      li.textContent = entry.label;
+      li.addEventListener("mousedown", (e) => {
+        e.preventDefault(); // keep focus on input
+        pickMatch(i);
+      });
+      li.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          pickMatch(i);
+        } else if (e.key === "ArrowDown") {
+          e.preventDefault();
+          const next = Math.min(i + 1, matches.length - 1);
+          setActive(next);
+          list.children[next].focus();
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          if (i === 0) {
+            input.focus();
+          } else {
+            setActive(i - 1);
+            list.children[i - 1].focus();
+          }
+        } else if (e.key === "Escape") {
+          showDropdown(false);
+          input.focus();
+        }
+      });
+      list.appendChild(li);
+    });
+
+    showDropdown(true);
+  }
+
+  /** Commit a selection by index. */
+  function pickMatch(idx) {
+    if (idx < 0 || idx >= matches.length) return;
+    const entry = matches[idx];
+    input.value = entry.label;
+    showDropdown(false);
+    selectCity(entry.city);
+  }
+
+  /** Set the visual active state for keyboard navigation. */
+  function setActive(idx) {
+    const items = list.querySelectorAll("li");
+    items.forEach((li) => li.classList.remove("active"));
+    activeIdx = idx;
+    if (idx >= 0 && idx < items.length) {
+      items[idx].classList.add("active");
+      items[idx].scrollIntoView({ block: "nearest" });
+      input.setAttribute("aria-activedescendant", items[idx].id);
+    } else {
+      input.removeAttribute("aria-activedescendant");
+    }
+  }
+
+  input.addEventListener("input", () => {
+    const query = input.value.trim().toLowerCase();
+    if (query.length === 0) {
+      matches = [];
+      renderMatches();
+      resetHighlights();
+      return;
+    }
+
+    // Filter: prefer starts-with, then contains
+    const startsWith = [];
+    const contains = [];
+    for (const entry of entries) {
+      const lower = entry.label.toLowerCase();
+      if (lower.startsWith(query)) startsWith.push(entry);
+      else if (lower.includes(query)) contains.push(entry);
+    }
+    matches = startsWith.concat(contains).slice(0, 15);
+    renderMatches();
+  });
+
+  input.addEventListener("keydown", (e) => {
+    if (!list.classList.contains("visible")) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive(Math.min(activeIdx + 1, matches.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive(Math.max(activeIdx - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (activeIdx >= 0) {
+        pickMatch(activeIdx);
+      } else if (matches.length > 0) {
+        pickMatch(0);
+      }
+    } else if (e.key === "Escape") {
+      showDropdown(false);
+    } else if (e.key === "Tab" && list.classList.contains("visible")) {
+      e.preventDefault();
+      const target = activeIdx >= 0 ? activeIdx : 0;
+      setActive(target);
+      list.children[target].focus();
+    }
+  });
+
+  // Close dropdown when clicking elsewhere
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#city-search")) {
+      showDropdown(false);
+    }
+  });
+
+  // Reset button: clear search, reset highlights, zoom to all cities
+  document.getElementById("city-search-reset").addEventListener("click", () => {
+    input.value = "";
+    matches = [];
+    showDropdown(false);
+    resetHighlights();
+    map.closePopup();
+    if (allCityBounds) map.flyToBounds(allCityBounds, { duration: 1.2 });
+  });
+}
+
 // ── Scatter plots ─────────────────────────────────────────────
 
 /**
@@ -482,13 +682,14 @@ async function loadData() {
     });
 
     createScatterPlots(cities);
+    initCitySearch(cities);
 
     // Fit map to all cities
-    const allBounds = cities.map((c) => [
+    allCityBounds = cities.map((c) => [
       [c.bounds.min_lat, c.bounds.min_lon],
       [c.bounds.max_lat, c.bounds.max_lon],
     ]);
-    map.fitBounds(allBounds);
+    map.fitBounds(allCityBounds);
   } catch (error) {
     console.error("Error loading data:", error);
     document.getElementById("loading").textContent =

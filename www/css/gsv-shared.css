@@ -21,4 +21,5 @@ body {
 #map {
   position: absolute;
   inset: 0;
+  background-color: #0f0f0f; /* Matches CARTO dark map tiles */
 }

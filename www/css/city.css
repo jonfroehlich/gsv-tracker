@@ -16,11 +16,15 @@
   line-height: 1.2;
 }
 
-.legend .subtitle {
+.legend .legend-meta {
   color: #666;
   margin-top: 2px;
-  margin-bottom: 8px;
+  margin-bottom: 0;
   line-height: 1.2;
+}
+
+.legend .legend-meta + .year-item {
+  margin-top: 8px;
 }
 
 .legend .year-item {
