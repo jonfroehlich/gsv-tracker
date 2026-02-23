@@ -17,7 +17,7 @@
 #
 # Prerequisites:
 #   - SSH access to the remote host (key-based auth recommended)
-#   - rsync installed locally and on the server
+#   - rsync installed locally and on the server. Requires rsync 3.1.0+ for --chmod support
 #
 # Platform notes:
 #   - macOS/Linux: works out of the box
@@ -147,7 +147,11 @@ if [[ -n "$SINGLE_FILE" ]]; then
   [[ -n "$DRY_RUN" ]] && echo "  Mode:   DRY RUN"
   echo ""
 
-  rsync -azh --progress $DRY_RUN $VERBOSE \
+  # Sync the single file with appropriate permissions (directories 2755, files 644)
+  # - D2755: Sets directories to drwxr-sr-x. The 2 preserves the SetGID bit (s), which 
+  #   ensures any new subdirectories correctly inherit the makelab group
+  # - F644: Sets files to -rw-r--r--, which is standard for web-accessible files
+  rsync -azh --chmod=D2755,F644 --progress $DRY_RUN $VERBOSE \
     "$SRC" \
     "${REMOTE_DEST}/${SINGLE_FILE}"
 else
@@ -160,7 +164,7 @@ else
   [[ -n "$DELETE" ]] && echo "  Delete: enabled (remote files not in local will be removed)"
   echo ""
 
-  rsync -azh --progress $DRY_RUN $VERBOSE $DELETE \
+  rsync -azh --chmod=D2755,F644 --progress $DRY_RUN $VERBOSE $DELETE \
     "${EXCLUDE_FLAGS[@]}" \
     "$LOCAL_DATA_DIR/" \
     "${REMOTE_DEST}/"
