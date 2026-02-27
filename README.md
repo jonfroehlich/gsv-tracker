@@ -110,6 +110,15 @@ Depending on your parameters, the tool generates the following files in your des
 * **`{city_name}_{width}x{height}_step{step}.html`**: An interactive map visualization of the coverage (unless `--no-visual` is passed).
 * **`{city_name}_{width}x{height}_step{step}_search_boundary.html`**: A preview map generated when using the `--check-boundary` flag.
 
+## Other Helpful Tools
+
+Other helpful GSV tools, include:
+
+Starting in 2022, [sv-map](https://sv-map.netlify.app/) archives blue Street View lines from Google Maps daily, so users can compare the evolution of Street View over time. sv-map downloads Street View coverage lines as **images**, up to a certain zoom level. To display historical coverage differences on the website, it highlights the difference in pixels between the images of different dates. 
+<img width="1506" height="856" alt="image" src="https://github.com/user-attachments/assets/1fd0b35d-ae57-4a29-90d8-b81be23246fd" />
+
+[Virtual Streets](https://virtualstreets.org/) provides a blog that describes new coverage to Google Street View
+
 ## License
 
 Distributed under the MIT License. See `LICENSE` for more information.
