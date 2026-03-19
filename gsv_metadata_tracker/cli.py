@@ -13,9 +13,6 @@ This script implements concurrent API requests using two key parameters:
    - Additional requests from the batch wait until a connection becomes available
    - This helps prevent overwhelming the network or API
    
-Think of batch_size like loading a magazine and connection_limit like the number
-of actual workers sending the requests. You might load 200 requests (batch_size)
-but only have 100 workers (connection_limit) sending them at a time.
 """
 
 import argparse
@@ -46,17 +43,27 @@ def parse_args():
     """
     Parse and validate command line arguments.
     
+    Supports two optional override mechanisms:
+    
+    1. --lat / --lng: Override geocoded city center coordinates. Useful when
+       the geocoder returns an incorrect location (e.g., province center
+       instead of city center).
+    
+    2. --width / --height: Override inferred city boundary dimensions. When
+       both are provided, they are used directly instead of inferring from
+       OpenStreetMap boundary data.
+    
     The concurrent processing is controlled by two key parameters:
     
     1. batch_size: Number of requests to prepare and queue at once
        - Larger batches use more memory but can be more efficient
        - Should be >= connection_limit
-       - Default: 200 requests per batch
+       - Default: 100 requests per batch
     
     2. connection_limit: Maximum number of concurrent connections
        - Limits actual simultaneous requests to the API
        - Helps prevent overwhelming network/API
-       - Default: 100 concurrent connections
+       - Default: 50 concurrent connections
        
     For the Google Street View Static API (30,000 requests/minute limit):
     - Conservative: batch_size=100, connection_limit=50
@@ -87,21 +94,34 @@ def parse_args():
     parser.add_argument(
         '--width', 
         type=float, 
-        default=1000,
-        help='Search grid width in meters (default used if city boundary inference fails)'
+        default=None,
+        help='Search grid width in meters. If both --width and --height are provided, '
+             'they override inferred city boundaries. (Default if inference fails: 1000m)'
     )
     
     parser.add_argument(
         '--height', 
         type=float, 
-        default=1000,
-        help='Search grid height in meters (default used if city boundary inference fails)'
+        default=None,
+        help='Search grid height in meters. If both --width and --height are provided, '
+             'they override inferred city boundaries. (Default if inference fails: 1000m)'
     )
-    
+
+    # Optional explicit center coordinates (useful when geocoding returns wrong location)
     parser.add_argument(
-        '--force-size', 
-        action='store_true',
-        help='Force using provided width and height instead of inferred city boundaries'
+        '--lat',
+        type=float,
+        default=None,
+        help='Latitude of city center. Must be used with --lng. '
+             'Overrides geocoded coordinates when provided.'
+    )
+
+    parser.add_argument(
+        '--lng',
+        type=float,
+        default=None,
+        help='Longitude of city center. Must be used with --lat. '
+             'Overrides geocoded coordinates when provided.'
     )
     
     parser.add_argument(
@@ -139,12 +159,12 @@ def parse_args():
         help='Timeout in seconds for each individual API request'
     )
 
-    # Add new boundary check argument
+    # Add boundary check argument
     parser.add_argument(
-        '--check-boundary',
+        '--check-boundary', '--check-size',
         action='store_true',
         help='Generate visualization of search area without downloading data. '
-             'Useful for verifying the area before starting a download.'
+            'Useful for verifying the area before starting a download.'
     )
     
     parser.add_argument(
@@ -163,6 +183,14 @@ def parse_args():
     
     args = parser.parse_args()
     
+    # Validate that --lat and --lng are provided together
+    if (args.lat is None) != (args.lng is None):
+        parser.error("--lat and --lng must be used together")
+
+    # Validate that --width and --height are provided together
+    if (args.width is None) != (args.height is None):
+        parser.error("--width and --height must be used together")
+
     # Validate concurrent processing parameters
     if args.connection_limit > args.batch_size:
         parser.error("connection-limit cannot be larger than batch-size")
@@ -206,17 +234,29 @@ async def async_main():
 
         vis_path = get_default_vis_dir()
         os.makedirs(vis_path, exist_ok=True)
-        
-        if not city_loc_data:
-            logging.error(f"Could not find coordinates for {args.city}")
+
+        # Resolve center coordinates: user-provided --lat/--lng take priority
+        if args.lat is not None:
+            center_lat = args.lat
+            center_lng = args.lng
+            print(f"Using user-provided coordinates: {center_lat}, {center_lng}")
+        elif city_loc_data:
+            center_lat = city_loc_data.latitude
+            center_lng = city_loc_data.longitude
+        else:
+            logging.error(f"Could not find coordinates for {args.city}. "
+                          f"Use --lat and --lng to provide them manually.")
             sys.exit(1)
 
-        search_grid_width, search_grid_height = get_search_dimensions(
-            args.city,
-            args.width,
-            args.height,
-            args.force_size
-        )
+        # Resolve search dimensions: explicit --width/--height override inference
+        if args.width is not None:
+            search_grid_width = args.width
+            search_grid_height = args.height
+            print(f"Using provided dimensions: {search_grid_width:.1f}m x {search_grid_height:.1f}m")
+        else:
+            search_grid_width, search_grid_height = get_search_dimensions(
+                args.city, 1000, 1000
+            )
 
         print(f"The search dimensions for {args.city} are {search_grid_width:.1f}m x {search_grid_height:.1f}m")
 
@@ -228,8 +268,8 @@ async def async_main():
             # Create preview map using your display_search_area function
             search_area_map = display_search_area(
                 args.city,
-                city_loc_data.latitude,
-                city_loc_data.longitude,
+                center_lat,
+                center_lng,
                 search_grid_width,
                 search_grid_height,
                 args.step
@@ -248,14 +288,14 @@ async def async_main():
             
             return 0
             
-        logging.info(f"Analyzing {args.city} at {city_loc_data.latitude}, {city_loc_data.longitude}")
+        logging.info(f"Analyzing {args.city} at {center_lat}, {center_lng}")
         logging.info(f"Using batch_size={args.batch_size}, connection_limit={args.connection_limit}")
         
         # Pass both concurrency parameters to the download function
         dict_results = await download_gsv_metadata_async(
             city_name=args.city,
-            center_lat=city_loc_data.latitude,
-            center_lon=city_loc_data.longitude,
+            center_lat=center_lat,
+            center_lon=center_lng,
             grid_width=search_grid_width,
             grid_height=search_grid_height,
             step_length=args.step,
@@ -275,10 +315,16 @@ async def async_main():
         # Create .json summary file
         logging.debug(f"The DataFrame has {len(df)} rows with types {df.dtypes}")
         csv_filename_with_path = dict_results["filename_with_path"]
+        # Extract city/state/country metadata, with fallbacks if geocoding
+        # returned incomplete data or user provided coordinates manually
+        city_name = city_loc_data.city if city_loc_data else args.city.split(',')[0].strip()
+        state_name = city_loc_data.state if city_loc_data else None
+        country_name = city_loc_data.country if city_loc_data else None
+
         generate_city_metadata_summary_as_json(csv_filename_with_path, df,
-                                               city_loc_data.city,
-                                               city_loc_data.state,
-                                               city_loc_data.country,
+                                               city_name,
+                                               state_name,
+                                               country_name,
                                                search_grid_width, search_grid_height, 
                                                args.step)
         

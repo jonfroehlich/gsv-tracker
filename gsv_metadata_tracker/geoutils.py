@@ -607,17 +607,14 @@ def get_bounding_box_size(df: pd.DataFrame) -> tuple[float, float]:
 def get_search_dimensions(
     city_name: str, 
     default_width: float, 
-    default_height: float, 
-    force_size: bool
+    default_height: float
 ) -> tuple[float, float]:
     """
     Calculate the width and height dimensions for a city search area.
     
-    This function attempts to determine appropriate search dimensions either by:
-    1. Using the provided default dimensions if force_size is True
-    2. Calculating dimensions based on the city's geographic boundaries using
-       OpenStreetMap data if available
-    3. Falling back to default dimensions if boundary data cannot be obtained
+    Attempts to determine search dimensions by calculating them from the city's
+    geographic boundaries using OpenStreetMap data. Falls back to the provided
+    default dimensions if boundary data cannot be obtained.
     
     The dimensions are calculated using geodesic distances:
     - Width is measured along the middle latitude of the bounding box
@@ -625,52 +622,48 @@ def get_search_dimensions(
     
     Args:
         city_name: Name of the city to look up boundaries for
-        default_width: Default width in meters to use if forced or if lookup fails
-        default_height: Default height in meters to use if forced or if lookup fails
-        force_size: If True, uses default dimensions regardless of available boundary data
+        default_width: Default width in meters if boundary lookup fails
+        default_height: Default height in meters if boundary lookup fails
     
     Returns:
         tuple[float, float]: A tuple of (width_meters, height_meters) representing
         the search area dimensions
         
     Example:
-        >>> width, height = get_search_dimensions("Paris", 5000, 5000, False)
+        >>> width, height = get_search_dimensions("Paris", 5000, 5000)
         Using inferred city boundaries for Paris: 11532m x 8377m
         Search area for Paris: 96.6 square km
     """
     
     width, height = default_width, default_height
     
-    if force_size:
-        print(f"Using forced dimensions: {default_width}m x {default_height}m")
-    else:
-        try:
-            location = get_city_location_data(city_name)
-            if location and 'boundingbox' in location.raw:
-                # boundingbox is [south, north, west, east]
-                bbox = location.raw['boundingbox']
-                # Convert string coordinates to float
-                south, north, west, east = map(float, bbox)
-                
-                # Calculate width using middle latitude
-                mid_lat = (north + south) / 2
-                west_point = (mid_lat, west)
-                east_point = (mid_lat, east)
-                width = geodesic(west_point, east_point).meters
-                
-                # Calculate height
-                sw_point = (south, west)
-                nw_point = (north, west)
-                height = geodesic(sw_point, nw_point).meters
-                
-                print(f"Using inferred city boundaries for {city_name}: {width:.0f}m x {height:.0f}m")
-                logger.info(f"Using inferred city boundaries for {city_name}: {width:.0f}m x {height:.0f}m")
-            else:
-                print(f"Could not find boundary data for {city_name}, using defaults")
-                logger.warning(f"Could not find boundary data for {city_name}, using defaults")
-        except Exception as e:
-            print(f"Failed to infer city boundaries: {str(e)}")
-            logger.error(f"Failed to infer city boundaries: {str(e)}")
+    try:
+        location = get_city_location_data(city_name)
+        if location and 'boundingbox' in location.raw:
+            # boundingbox is [south, north, west, east]
+            bbox = location.raw['boundingbox']
+            # Convert string coordinates to float
+            south, north, west, east = map(float, bbox)
+            
+            # Calculate width using middle latitude
+            mid_lat = (north + south) / 2
+            west_point = (mid_lat, west)
+            east_point = (mid_lat, east)
+            width = geodesic(west_point, east_point).meters
+            
+            # Calculate height
+            sw_point = (south, west)
+            nw_point = (north, west)
+            height = geodesic(sw_point, nw_point).meters
+            
+            print(f"Using inferred city boundaries for {city_name}: {width:.0f}m x {height:.0f}m")
+            logger.info(f"Using inferred city boundaries for {city_name}: {width:.0f}m x {height:.0f}m")
+        else:
+            print(f"Could not find boundary data for {city_name}, using defaults")
+            logger.warning(f"Could not find boundary data for {city_name}, using defaults")
+    except Exception as e:
+        print(f"Failed to infer city boundaries: {str(e)}")
+        logger.error(f"Failed to infer city boundaries: {str(e)}")
     
     area = (width * height) / 1000000.0  # Convert to square km
     print(f"Search area for {city_name}: {area:,.1f} square km")
