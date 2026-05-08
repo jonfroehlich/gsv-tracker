@@ -72,7 +72,7 @@ python gsv_tracker.py "Seattle, WA"
 Before executing a large download, you can generate an HTML map to preview your search boundary:
 
 ```bash
-python gsv_tracker.py "Seattle, WA" --width 2000 --height 2000 --check-boundary
+python gsv_tracker.py "Seattle, WA" --check-boundary
 ```
 
 ### Tuning Concurrency (For Large Areas)
