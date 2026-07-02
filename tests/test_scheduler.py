@@ -90,3 +90,32 @@ def test_budget_math():
     cfg = SchedulerConfig(daily_request_budget=10_000)
     # A 2000x2000/20 city needs 101*101 = 10201 requests > budget
     assert (2000 // 20 + 1) ** 2 > cfg.daily_request_budget
+
+
+def test_oversized_city_does_not_starve_queue(conn, monkeypatch):
+    """A city whose estimate exceeds the entire daily budget must be
+    skipped (not break the loop), so smaller cities behind it still run.
+    Regression: 82 real cities have grids too large for any daily budget;
+    stalest-first ordering would otherwise block collection forever."""
+    from gsv_metadata_tracker import scheduler as sched
+
+    huge = _register(conn, 'Huge', width=200_000, height=200_000, step=20)
+    small = _register(conn, 'Small', width=1000, height=1000, step=20)
+    db.assign_schedule(conn, 90)
+    # Make Huge the stalest (never run) — both are due
+    conn.execute("UPDATE schedule_state SET last_success_at = NULL")
+    conn.commit()
+
+    ran = []
+    monkeypatch.setattr(sched, '_run_one_city',
+                        lambda cfg, city, today: ran.append(city.city_id) or True)
+    monkeypatch.setattr(sched.db, 'connect', lambda path: conn)
+    monkeypatch.setattr(sched.time, 'sleep', lambda s: None)
+    monkeypatch.setattr(sched, 'generate_aggregate_v2', lambda c, d: None)
+
+    cfg = SchedulerConfig(daily_request_budget=10_000, publish_enabled=False)
+    rc = sched.cmd_run_due(cfg)
+
+    assert huge not in ran      # skipped: never fits any budget
+    assert small in ran         # not starved by the huge city ahead of it
+    assert rc == 0

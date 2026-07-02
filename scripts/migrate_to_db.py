@@ -224,9 +224,14 @@ def main() -> int:
 
     plan_rows = []          # (city_id, baseline FileInfo, aliases, variant files)
     for city_id, files in sorted(by_city.items()):
-        # Canonical geometry: that of the newest file for this city
-        newest = max(files, key=lambda f: f.run_date)
-        canonical_geom = newest.geometry
+        # Canonical geometry: that of the LARGEST capture for this city
+        # (by compressed size, tie-break newest). Junk/degenerate test
+        # files can be newer and even reverse-geocode to a real city's
+        # identity (e.g. a 4-point "balance--tennessee" file resolving to
+        # Nashville) — size, not recency, identifies the real capture.
+        biggest = max(files, key=lambda f: (os.path.getsize(f.csv_path),
+                                            f.run_date))
+        canonical_geom = biggest.geometry
         group = [f for f in files if f.geometry == canonical_geom]
         variants = [f for f in files if f.geometry != canonical_geom]
 

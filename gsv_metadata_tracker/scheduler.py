@@ -221,20 +221,36 @@ def cmd_run_due(cfg: SchedulerConfig, dry_run: bool = False,
             budget_left -= est if est <= budget_left else 0
         return 0
 
-    processed = succeeded = 0
+    processed = succeeded = skipped_budget = 0
     for city in due:
         if processed >= cfg.max_cities_per_day:
             logger.info("Daily city cap reached; stopping for today")
             break
 
         est = estimate_requests(city)
+        if est > cfg.daily_request_budget:
+            # This city can NEVER fit the daily budget — skipping (not
+            # breaking) so it can't starve every smaller city behind it
+            # in the stalest-first queue. Needs a manual run or a config
+            # change; surfaced loudly so it doesn't rot silently.
+            logger.warning(
+                f"{city.city_id}: ~{est:,} estimated requests exceeds the "
+                f"entire daily budget ({cfg.daily_request_budget:,}). "
+                f"Skipping — run manually with gsv_tracker.py --force, "
+                f"raise daily_request_budget, or set enabled=0.")
+            skipped_budget += 1
+            continue
+
         used = db.get_api_usage(conn, today)
         if used + est > cfg.daily_request_budget:
+            # Doesn't fit in what's LEFT today — try the next (smaller)
+            # city rather than ending the day; this one rolls to tomorrow
+            # when the budget is fresh.
             logger.info(
-                f"Budget stop: {used:,} used + ~{est:,} estimated for "
-                f"{city.city_id} exceeds {cfg.daily_request_budget:,}. "
-                f"Remaining cities roll to tomorrow.")
-            break
+                f"{city.city_id} (~{est:,} req) doesn't fit remaining "
+                f"budget ({cfg.daily_request_budget - used:,} left); skipping.")
+            skipped_budget += 1
+            continue
 
         ok = _run_one_city(cfg, city, today)
         processed += 1
@@ -249,7 +265,8 @@ def cmd_run_due(cfg: SchedulerConfig, dry_run: bool = False,
         if processed < len(due):
             time.sleep(cfg.sleep_between_cities_s)
 
-    logger.info(f"Done: {succeeded}/{processed} cities succeeded")
+    logger.info(f"Done: {succeeded}/{processed} cities succeeded"
+                + (f"; {skipped_budget} deferred for budget" if skipped_budget else ""))
 
     # Regenerate the aggregate once for the whole batch
     if succeeded > 0:
