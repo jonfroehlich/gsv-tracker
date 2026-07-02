@@ -18,38 +18,32 @@ from .analysis import (
 
 logger = logging.getLogger(__name__)
 
-# Define constants for age statistics structure
-EMPTY_AGE_STATS = {
-    "count": 0,
-    "oldest_pano_date": None,
-    "newest_pano_date": None,
-    "avg_pano_age_years": None,
-    "median_pano_age_years": None,
-    "stdev_pano_age_years": None,
-    "age_percentiles_years": None,
-    "valid_dates_count": 0,
-    "invalid_dates_count": 0
-}
+def sanitize_for_json(obj: Any) -> Any:
+    """
+    Recursively replace NaN/Infinity float values with None so the result
+    is valid strict JSON (json.dump with allow_nan=False would otherwise
+    raise, and allow_nan=True emits literal NaN which JSON.parse rejects).
+    """
+    if isinstance(obj, dict):
+        return {k: sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [sanitize_for_json(v) for v in obj]
+    if isinstance(obj, float) and not np.isfinite(obj):
+        return None
+    return obj
 
-EMPTY_PERCENTILES = {
-    "p10": None,
-    "p25": None,
-    "p75": None,
-    "p90": None
-}
-    
 def find_missing_json_files(data_dir: str) -> List[str]:
     """
     Find all csv.gz files that don't have corresponding JSON.gz files.
-    
+
     Args:
         data_dir: Directory to search for files
-        
+
     Returns:
         List of paths to csv.gz files needing JSON metadata
     """
-    csv_files = get_list_of_city_csv_files()
-    
+    csv_files = get_list_of_city_csv_files(data_dir)
+
     missing_json = []
     for csv_file in csv_files:
         json_file = csv_file.rsplit('.csv.gz', 1)[0] + '.json.gz'
@@ -82,10 +76,10 @@ def generate_missing_city_json_files(data_dir: str) -> None:
     for csv_path in tqdm(missing_json_files, desc="Generating metadata .json files"):
         try:
             params = parse_filename(csv_path)
-            city_query_str = params['city_query_str']
-            search_width = params['width_meters']
-            search_height = params['height_meters']
-            step = params['step_meters']
+            city_query_str = params.city_query_str
+            search_width = params.width_meters
+            search_height = params.height_meters
+            step = params.step_meters
 
             logger.debug(f"Parsed filename into city: {city_query_str}, width: {search_width}, height: {search_height}, step: {step}")
             
@@ -232,13 +226,17 @@ def generate_city_metadata_summary_as_json(
     grid_width: float,
     grid_height: float,
     step_length: float,
-    force_recreate_file: bool = False
+    force_recreate_file: bool = False,
+    run_date: Optional[Any] = None,
+    is_baseline: bool = False,
+    change_from_previous_run: Optional[Dict[str, Any]] = None
 ) -> str:
     """
-    Generate and save download statistics for an individual city to a JSON file (compressed).
+    Generate and save download statistics for an individual city run to a
+    compressed JSON file (schema v2).
 
     Returns the .json.gz filename with path
-    
+
     Args:
         csv_gz_path: Full path to the compressed CSV file (including filename)
         df: DataFrame containing the GSV data
@@ -249,6 +247,13 @@ def generate_city_metadata_summary_as_json(
         grid_height: Height of search grid in meters
         step_length: Distance between sample points in meters
         force_recreate_file: forces the recreation of the .json file (defaults False)
+        run_date: datetime.date of the collection run. Age statistics are
+            computed relative to this date (so regeneration is deterministic
+            and cross-run age comparisons are meaningful). When None, ages
+            fall back to generation wall-clock time.
+        is_baseline: True for legacy pre-temporal-tracking snapshots
+        change_from_previous_run: summary dict of the diff vs the previous
+            run (see cli.py), or None for a city's first run
     """
     logger.debug(f"Generating metadata summary for {city_name}, {state_name}, {country_name} from {csv_gz_path}")
 
@@ -297,9 +302,9 @@ def generate_city_metadata_summary_as_json(
         logger.error(f"Error calculating duration: {str(e)}")
         duration_seconds = None
 
-    # Use the analysis module for statistics calculations
-    now = pd.Timestamp.now()
-    
+    # Ages are pinned to run_date when known so the output is deterministic
+    now = pd.Timestamp(run_date) if run_date is not None else pd.Timestamp.now()
+
     # Calculate all pano statistics
     all_pano_stats = calculate_pano_stats(df, now)
     google_pano_stats = calculate_pano_stats(df, now, copyright_filter='Google')
@@ -312,6 +317,12 @@ def generate_city_metadata_summary_as_json(
         key=lambda x: x[1], reverse=True)[:10])
 
     metadata = {
+        "schema_version": 2,
+        "run": {
+            "run_date": (run_date.isoformat() if run_date is not None else None),
+            "is_baseline": is_baseline
+        },
+        "change_from_previous_run": change_from_previous_run,
         "data_file": {
             "filename": os.path.basename(csv_gz_path),
             "format": "csv.gz",
@@ -363,12 +374,135 @@ def generate_city_metadata_summary_as_json(
         },
     }
     
-    # Save compressed JSON
+    # Save compressed JSON (sanitize first: NaN is not valid JSON)
     with gzip.open(json_filename_with_path, 'wt', encoding='utf-8') as f:
-        json.dump(metadata, f, indent=2)
+        json.dump(sanitize_for_json(metadata), f, indent=2, allow_nan=False)
 
     logger.info(f"Saved compressed JSON to: {json_filename_with_path}")
     return json_filename_with_path
+
+def _load_city_json(json_path: str) -> Optional[Dict[str, Any]]:
+    """Load a per-run city json.gz, returning None on any failure."""
+    try:
+        with gzip.open(json_path, 'rt', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Error reading {json_path}: {e}")
+        return None
+
+
+def generate_aggregate_v2(conn, data_dir: str) -> Dict[str, Any]:
+    """
+    Generate the schema-v2 aggregate cities.json.gz from the SQLite catalog.
+
+    Unlike the legacy directory-scan aggregate, this walks the runs catalog:
+    one entry per city (grouped), with a `latest` block for the map display,
+    a slim `runs[]` history, and a `change` block summarizing the diff
+    between the two most recent runs. Global capture-date histograms merge
+    each city's LATEST run only (so re-running a city never double-counts).
+
+    Args:
+        conn: open catalog connection (db.connect)
+        data_dir: directory holding the per-run json.gz files; the aggregate
+            is written here as cities.json.gz
+
+    Returns:
+        The aggregate summary dict.
+    """
+    from . import db  # local import to keep module import order simple
+
+    cities_out = []
+    latest_run_jsons = []  # raw per-run JSON of each city's latest run, for histogram merge
+
+    for city in tqdm(db.get_all_cities(conn), desc="Aggregating cities", unit="city"):
+        runs = db.get_runs_for_city(conn, city.city_id)
+        if not runs:
+            continue
+        latest = runs[-1]
+
+        latest_json = None
+        if latest.json_filename:
+            latest_json = _load_city_json(os.path.join(data_dir, latest.json_filename))
+        if latest_json is None:
+            logger.warning(f"Skipping {city.city_id}: missing/unreadable per-run JSON "
+                           f"({latest.json_filename})")
+            continue
+        latest_run_jsons.append(latest_json)
+
+        csv_path = os.path.join(data_dir, latest.csv_filename)
+        csv_size = os.path.getsize(csv_path) if os.path.exists(csv_path) else None
+
+        # Change summary vs the previous run (None for a city's first run)
+        change = None
+        diff_row = db.get_diff_for_run(conn, latest.run_id)
+        if diff_row is not None and len(runs) >= 2:
+            change = {
+                "from": runs[-2].run_date,
+                "to": latest.run_date,
+                "panos_added": diff_row["panos_added"],
+                "panos_removed": diff_row["panos_removed"],
+                "capture_date_changed": diff_row["capture_date_changed"],
+                "coverage_delta_pct": diff_row["coverage_delta_pct"],
+                "diff_file": diff_row["detail_filename"],
+            }
+
+        cities_out.append({
+            "city_id": city.city_id,
+            "city": latest_json["city"],
+            "latest": {
+                "run_date": latest.run_date,
+                "is_baseline": latest.is_baseline,
+                "data_file": {
+                    "filename": latest.csv_filename,
+                    "size_bytes": csv_size,
+                },
+                "json_file": latest.json_filename,
+                "search_area_km2": latest_json["search_grid"]["area_km2"],
+                # From the DB, not the per-run JSON: legacy baseline JSONs
+                # predate the unique-pano coverage definition, and all DB
+                # rows were computed with the current definition
+                "coverage_rate_percent": latest.coverage_rate_pct,
+                "panorama_counts": {
+                    "unique_panos": latest_json["all_panos"]["duplicate_stats"]["total_unique_panos"],
+                    "unique_google_panos": latest_json["google_panos"]["duplicate_stats"]["total_unique_panos"],
+                },
+                "all_panos_age_stats": latest_json["all_panos"]["age_stats"],
+                "google_panos_age_stats": latest_json["google_panos"]["age_stats"],
+                "collection_info": latest_json["download"],
+                "histogram_of_capture_dates_by_year": {
+                    "all_panos": latest_json["all_panos"]["histogram_of_capture_dates_by_year"],
+                    "google_panos": latest_json["google_panos"]["histogram_of_capture_dates_by_year"],
+                },
+            },
+            "runs": [{
+                "run_date": r.run_date,
+                "is_baseline": r.is_baseline,
+                "data_file": r.csv_filename,
+                "json_file": r.json_filename,
+                "unique_google_panos": r.unique_google_panos,
+                "coverage_rate_percent": r.coverage_rate_pct,
+                "median_pano_age_years": r.median_pano_age_years,
+            } for r in runs],
+            "change": change,
+        })
+
+    merged_histograms = merge_capture_date_histograms(latest_run_jsons)
+
+    summary = {
+        "schema_version": 2,
+        "generated_at": pd.Timestamp.now(tz='UTC').isoformat(),
+        "cities_count": len(cities_out),
+        "histogram_of_capture_dates": merged_histograms,
+        "cities": cities_out,
+    }
+
+    output_path = os.path.join(data_dir, 'cities.json.gz')
+    with gzip.open(output_path, 'wt', encoding='utf-8') as f:
+        json.dump(sanitize_for_json(summary), f, indent=2, allow_nan=False)
+    logger.info(f"Wrote v2 aggregate for {len(cities_out)} cities to {output_path}")
+
+    return summary
+
 
 def generate_aggregate_summary_as_json(json_dir: str) -> Dict[str, Any]:
     """
@@ -473,9 +607,9 @@ def generate_aggregate_summary_as_json(json_dir: str) -> Dict[str, Any]:
         "cities": cities_data
     }
     
-    # Save the aggregate summary as compressed JSON
+    # Save the aggregate summary as compressed JSON (sanitize first: NaN is not valid JSON)
     output_path = os.path.join(json_dir, 'cities.json.gz')
     with gzip.open(output_path, 'wt', encoding='utf-8') as f:
-        json.dump(summary, f, indent=2)
-    
+        json.dump(sanitize_for_json(summary), f, indent=2, allow_nan=False)
+
     return summary

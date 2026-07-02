@@ -4,6 +4,7 @@ import us  # for US states
 from typing import Optional, Dict, Tuple
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
+from geopy.extra.rate_limiter import RateLimiter
 from geopy.location import Location
 from geopy.distance import geodesic
 import pandas as pd
@@ -12,7 +13,11 @@ from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
-NOMINATIM_USER_AGENT = "gsv_metadata_tracker"
+# Nominatim usage policy requires an identifiable user agent and max 1 req/sec
+NOMINATIM_USER_AGENT = "gsv_metadata_tracker (jonf@cs.uw.edu)"
+
+_geolocator = Nominatim(user_agent=NOMINATIM_USER_AGENT, timeout=10)
+_rate_limited_geocode = RateLimiter(_geolocator.geocode, min_delay_seconds=1.1)
 
 def get_state_abbreviation(state_name: Optional[str]) -> Optional[str]:
     """
@@ -502,16 +507,11 @@ def get_city_location_data(
         return None
         
     try:
-        geolocator = Nominatim(
-            user_agent=NOMINATIM_USER_AGENT,
-            timeout=10
-        )
-        
         # If center coordinates provided, use them for disambiguation
         found_loc = None
         if center_lat is not None and center_lng is not None:
             # Get multiple location results
-            locations = geolocator.geocode(
+            locations = _rate_limited_geocode(
                 city_query_str,
                 language="en",
                 addressdetails=True,
@@ -534,9 +534,9 @@ def get_city_location_data(
                 )
                 found_loc = closest_location
 
-        if not found_loc:    
+        if not found_loc:
             # If no center coordinates or no results found, fall back to basic search
-            found_loc = geolocator.geocode(
+            found_loc = _rate_limited_geocode(
                 city_query_str,
                 language="en",
                 addressdetails=True

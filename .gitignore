@@ -15,3 +15,9 @@ cities/SUB-IP-EST2023-POP.csv
 *.log
 /duplicates
 .env
+/logs/
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+.pytest_cache/

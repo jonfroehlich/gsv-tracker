@@ -1,5 +1,4 @@
 import pandas as pd
-import requests
 import time
 from datetime import datetime, timezone
 import logging
@@ -15,9 +14,7 @@ from filelock import FileLock
 from pathlib import Path
 import backoff
 
-from .geoutils import get_city_location_data
-from .fileutils import generate_base_filename, load_city_csv_file, does_city_csv_file_exist
-from .json_summarizer import generate_aggregate_summary_as_json
+from .fileutils import load_city_csv_file
 from .config import METADATA_DTYPES
 
 logger = logging.getLogger(__name__)
@@ -174,17 +171,16 @@ async def process_batch_async(
     api_key: str,
     progress_queue: asyncio.Queue,
     base_file_path: str,
-    write_header: bool,
     timeout: aiohttp.ClientTimeout,
     connection_limit: int,
     failed_points_queue: asyncio.Queue
 ) -> List[Dict]:
     """
-    Process a batch of points asynchronously and save results safely.
+    Process a batch of points asynchronously and append results to the
+    in-progress CSV under a file lock (so a second process on the same city
+    can't interleave writes).
     """
     results = []
-    batch_id = int(time.time() * 1000)
-    temp_file = f"{base_file_path}.batch_{batch_id}.tmp"
     lock_file = f"{base_file_path}.lock"
     
     try:
@@ -243,47 +239,36 @@ async def process_batch_async(
                 batch_results.append(result)
                 await progress_queue.put(1)
         
-        # Save batch results to temporary file
+        # Append batch results to the in-progress CSV under a file lock
         df_batch = pd.DataFrame(batch_results)  # First create the DataFrame
         df_batch = df_batch.astype(METADATA_DTYPES)  # Then apply the dtypes
 
-        try:
-            df_batch.to_csv(temp_file, index=False)
-        except PermissionError as e:
-            logger.error("df_batch.to_csv failed: " + create_helpful_permission_error(temp_file))
-            raise PermissionError("df_batch.to_csv failed: " + create_helpful_permission_error(temp_file))
-        
-        # Create a proper lock file
         lock = FileLock(lock_file, timeout=10)
         try:
-            with lock:            
+            with lock:
                 if os.path.exists(base_file_path):
                     df_batch.to_csv(base_file_path, mode='a', header=False, index=False)
                 else:
                     df_batch.to_csv(base_file_path, index=False)
-        except PermissionError as e:
-            raise PermissionError("FileLock failure: " + create_helpful_permission_error(base_file_path))        
+        except PermissionError:
+            raise PermissionError("FileLock failure: " + create_helpful_permission_error(base_file_path))
         finally:
-            # Clean up temp files
-            for file in [temp_file, lock_file]:
-                try:
-                    if os.path.exists(file):
-                        os.remove(file)
-                except FileNotFoundError:
-                    pass
-        
-        results.extend(batch_results)
-        
-    except Exception as e:
-        # Clean up temporary files in case of error
-        for file in [temp_file, lock_file]:
             try:
-                if os.path.exists(file):
-                    os.remove(file)
-            except Exception as cleanup_error:
-                logger.error(f"Error cleaning up {file}: {cleanup_error}")
+                if os.path.exists(lock_file):
+                    os.remove(lock_file)
+            except FileNotFoundError:
+                pass
+
+        results.extend(batch_results)
+
+    except Exception as e:
+        try:
+            if os.path.exists(lock_file):
+                os.remove(lock_file)
+        except Exception as cleanup_error:
+            logger.error(f"Error cleaning up {lock_file}: {cleanup_error}")
         raise DownloadError(f"Error processing batch: {str(e)}")
-    
+
     return results
 
 async def download_gsv_metadata_async(
@@ -294,7 +279,7 @@ async def download_gsv_metadata_async(
     grid_height: float,
     step_length: float,
     api_key: str,
-    download_path: str,
+    output_csv_gz_path: str,
     batch_size: int = 50,
     connection_limit: int = 50,
     request_timeout: float = 30.0,
@@ -302,62 +287,54 @@ async def download_gsv_metadata_async(
 ) -> Dict[str, Any]:
     """
     Fetch GSV metadata for a city using async/await pattern with safe intermediate file saving.
-    
+
+    The caller decides the output filename (run-skip policy and dated naming
+    live in the CLI/scheduler layer, not here). If a partial download exists
+    for the same output path (a sibling .downloading file), it is resumed.
+
     Args:
-        city_name: Name of the city
+        city_name: Name of the city (for logging/progress display only)
         center_lat: Center latitude
         center_lon: Center longitude
         grid_width: Width of search grid in meters
         grid_height: Height of search grid in meters
         step_length: Distance between sample points in meters
         api_key: Google Street View API key
-        download_path: Path to save data files
+        output_csv_gz_path: Full path of the .csv.gz file to write
         batch_size: Number of requests to prepare and queue at once
         connection_limit: Maximum number of concurrent connections to the API
         request_timeout: Timeout for each request in seconds
         max_retries: Maximum number of retry attempts for failed points
-    
+
     Returns:
-        DataFrame containing the GSV metadata
+        Dict with:
+            df: DataFrame containing the GSV metadata
+            filename_with_path: the written .csv.gz path
+            api_requests: number of API requests actually issued this call
+            started_at / finished_at: UTC ISO 8601 timestamps
     """
     start_time = time.time()
-    
+    started_at = datetime.now(timezone.utc).isoformat()
+    api_requests = 0
+
     logger.info(f"Examining street view data for {city_name} centered at {center_lat},{center_lon}" +
                 f" with a grid of {grid_width/1000:.1f}km x {grid_height/1000:.1f}km and step_length={step_length} meters")
     logger.info(f"Using batch_size={batch_size}, connection_limit={connection_limit}")
-    
+
     # Set up timeout
     timeout = aiohttp.ClientTimeout(total=request_timeout)
-    
-    # Create download directory if it doesn't exist
-    Path(download_path).mkdir(parents=True, exist_ok=True)
-    
-    # Define file names using base filename
-    base_filename = generate_base_filename(city_name, grid_width, grid_height, step_length)
-    file_name = base_filename + ".csv"
-    file_name_downloading = file_name + ".downloading"
-    file_name_compressed = file_name + ".gz"
-    file_name_with_path = os.path.join(download_path, file_name)
-    file_name_downloading_with_path = os.path.join(download_path, file_name_downloading)
-    file_name_compressed_with_path = os.path.join(download_path, file_name_compressed)
-    failed_points_file = os.path.join(download_path, f"{base_filename}_failed_points.csv")
+
+    # Derive working file paths from the requested output path
+    if not output_csv_gz_path.endswith('.csv.gz'):
+        raise ValueError(f"output_csv_gz_path must end in .csv.gz, got: {output_csv_gz_path}")
+    file_name_compressed_with_path = output_csv_gz_path
+    file_name_with_path = output_csv_gz_path[:-len('.gz')]          # .csv
+    file_name_downloading_with_path = file_name_with_path + ".downloading"
+    failed_points_file = output_csv_gz_path[:-len('.csv.gz')] + "_failed_points.csv"
+
+    Path(os.path.dirname(os.path.abspath(output_csv_gz_path))).mkdir(parents=True, exist_ok=True)
 
     try:
-        # Check if compressed file exists. If it does, read it in and return the df
-        # if os.path.exists(file_name_compressed_with_path):
-        logger.info(f"Checking for existing archive file for: {city_name}, grid_width={grid_width}, grid_height={grid_height}, step_length={step_length}")
-        existing_csv_file_with_path = does_city_csv_file_exist(download_path, city_name, grid_width, grid_height, step_length)
-        if existing_csv_file_with_path:
-            file_name_compressed_with_path = existing_csv_file_with_path
-            logger.info(f"Found existing archive file for {city_name}: {file_name_compressed_with_path}")
-            df = load_city_csv_file(file_name_compressed_with_path)
-            return {
-                "df": df,
-                "filename_with_path": file_name_compressed_with_path
-            }
-
-        logger.info(f"Existing archive file not found. Preparing to download data for: {city_name}, grid_width={grid_width}, grid_height={grid_height}, step_length={step_length}")
-
         # Calculate grid dimensions
         width_steps = int(grid_width / step_length)
         height_steps = int(grid_height / step_length)
@@ -382,6 +359,10 @@ async def download_gsv_metadata_async(
         
         if len(remaining_points) == 0:
             logger.info("All points already processed.")
+            if not os.path.exists(file_name_downloading_with_path):
+                raise DownloadError(
+                    f"Grid produced no points to download and no partial file "
+                    f"exists (grid {grid_width}x{grid_height}m, step {step_length}m)")
             os.rename(file_name_downloading_with_path, file_name_with_path)
         else:
             # Initialize queues
@@ -395,21 +376,19 @@ async def download_gsv_metadata_async(
                 desc=f"Downloading GSV pano data for {city_name}")
             
             # Process initial points in batches
-            write_header = not os.path.exists(file_name_downloading_with_path)
             for i in range(0, len(remaining_points), batch_size):
                 batch_points = remaining_points[i:i + batch_size]
+                api_requests += len(batch_points)
                 await process_batch_async(
-                    batch_points, 
-                    api_key, 
-                    progress_queue, 
+                    batch_points,
+                    api_key,
+                    progress_queue,
                     file_name_downloading_with_path,
-                    write_header,
                     timeout,
                     connection_limit,
                     failed_points_queue
                 )
-                write_header = False
-                
+
                 # Update progress bar
                 while not progress_queue.empty():
                     await progress_queue.get()
@@ -430,12 +409,12 @@ async def download_gsv_metadata_async(
                     logger.info(f"Retrying {len(failed_points)} failed points")
                     for i in range(0, len(failed_points), batch_size):
                         batch_points = failed_points[i:i + batch_size]
+                        api_requests += len(batch_points)
                         await process_batch_async(
                             batch_points,
                             api_key,
                             progress_queue,
                             file_name_downloading_with_path,
-                            False,  # Never need header for retries
                             timeout,
                             connection_limit,
                             failed_points_queue
@@ -476,13 +455,17 @@ async def download_gsv_metadata_async(
  
         end_time = time.time()
         elapsed_time = end_time - start_time
-        logger.info(f"Downloaded {len(df)} rows in {elapsed_time:.2f} seconds")
+        logger.info(f"Downloaded {len(df)} rows in {elapsed_time:.2f} seconds "
+                    f"({api_requests} API requests this session)")
         logger.info(f"Data compressed and saved to {file_name_compressed_with_path}")
-        
+
         return {
                 "df": df,
-                "filename_with_path": file_name_compressed_with_path
+                "filename_with_path": file_name_compressed_with_path,
+                "api_requests": api_requests,
+                "started_at": started_at,
+                "finished_at": datetime.now(timezone.utc).isoformat()
             }
-        
+
     except Exception as e:
-        raise DownloadError(f"Download failed: {str(e)}")
+        raise DownloadError(f"Download failed: {str(e)}") from e

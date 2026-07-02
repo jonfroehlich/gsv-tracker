@@ -161,7 +161,8 @@ def calculate_age_stats(df: pd.DataFrame, now: pd.Timestamp) -> AgeStats:
         newest_pano_date=df_with_dates['capture_date'].max().isoformat() if len(df_with_dates) > 0 else None,
         avg_pano_age_years=float(ages.mean()) if len(ages) > 0 else None,
         median_pano_age_years=float(ages.median()) if len(ages) > 0 else None,
-        stdev_pano_age_years=float(ages.std()) if len(ages) > 0 else None,
+        # std() with a single sample returns NaN (ddof=1), which is not valid JSON
+        stdev_pano_age_years=float(ages.std()) if len(ages) > 1 else None,
         age_percentiles_years={
             "p10": float(ages.quantile(0.1)) if len(ages) > 0 else None,
             "p25": float(ages.quantile(0.25)) if len(ages) > 0 else None,
@@ -512,6 +513,47 @@ def calculate_yearly_distribution(df: pd.DataFrame) -> YearlyDistribution:
     return YearlyDistribution(
         counts={int(year): int(count) for year, count in year_counts.items()}
     )
+
+def calculate_run_stats(df: pd.DataFrame, run_date) -> Dict[str, Any]:
+    """
+    Compute the per-run summary stats stored in the runs catalog table.
+
+    Ages are computed relative to run_date (not wall-clock now), so the
+    stored stats are deterministic and comparable across runs.
+
+    Args:
+        df: loaded run DataFrame (load_city_csv_file format)
+        run_date: datetime.date of the collection run
+
+    Returns:
+        Dict matching db.register_run keyword arguments (stats subset).
+    """
+    now = pd.Timestamp(run_date)
+
+    status_ok = int((df['status'] == 'OK').sum())
+    status_zero = int((df['status'] == 'ZERO_RESULTS').sum())
+    status_other = int(len(df) - status_ok - status_zero)
+
+    ok = df[df['status'] == 'OK']
+    unique = ok.drop_duplicates(subset=['pano_id'])
+    is_google = unique['copyright_info'].str.contains('Google', case=False, na=False)
+    google_unique = unique[is_google]
+
+    age_stats = calculate_age_stats(unique.copy(), now)
+    coverage = calculate_coverage_stats(df)
+
+    return {
+        'total_points': len(df),
+        'status_ok': status_ok,
+        'status_zero_results': status_zero,
+        'status_other': status_other,
+        'unique_panos': len(unique),
+        'unique_google_panos': len(google_unique),
+        'coverage_rate_pct': coverage.coverage_rate,
+        'oldest_capture_date': age_stats.oldest_pano_date,
+        'newest_capture_date': age_stats.newest_pano_date,
+        'median_pano_age_years': age_stats.median_pano_age_years,
+    }
 
 def analyze_gsv_status(df: pd.DataFrame) -> Dict[str, Any]:
     """

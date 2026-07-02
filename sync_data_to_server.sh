@@ -37,12 +37,27 @@ REMOTE_DATA_DIR="${GSV_REMOTE_DATA_DIR:-/cse/web/research/makelab/public/gsv-tra
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOCAL_DATA_DIR="${SCRIPT_DIR}/data"
 
-# Files to exclude from sync (temp/intermediate files)
+# Publish only the compressed data artifacts. Order matters for rsync
+# filters: the *.gz includes are added first so the bare *.csv / *.json
+# excludes below don't swallow them. Logs, the SQLite catalog, and
+# temp/intermediate files never leave this machine.
+INCLUDE_PATTERNS=(
+  "*.csv.gz"
+  "*.json.gz"
+)
 EXCLUDE_PATTERNS=(
   "*.lock"
   "*.downloading"
   "*.backup"
   "*.html"
+  "*.log"
+  "*.tmp"
+  "*.batch_*"
+  "*.db"
+  "*.db-wal"
+  "*.db-shm"
+  "*.csv"
+  "*.json"
 )
 
 # ──────────────────────────────────────────────
@@ -114,8 +129,11 @@ if ! command -v rsync &> /dev/null; then
   exit 1
 fi
 
-# Build exclude flags
+# Build filter flags (includes first so *.csv.gz survives the *.csv exclude)
 EXCLUDE_FLAGS=()
+for pattern in "${INCLUDE_PATTERNS[@]}"; do
+  EXCLUDE_FLAGS+=(--include "$pattern")
+done
 for pattern in "${EXCLUDE_PATTERNS[@]}"; do
   EXCLUDE_FLAGS+=(--exclude "$pattern")
 done

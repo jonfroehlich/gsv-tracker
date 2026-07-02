@@ -1,122 +1,82 @@
 #!/usr/bin/env python3
 """
-GSV Metadata Comparison Tool.
+GSV run comparison tool.
 
-This script compares two Google Street View (GSV) metadata files to verify data consistency
-between different collection methods (e.g., single-threaded vs async downloads).
-
-Key features:
-- Handles gzipped CSV files
-- Compares coordinate data with appropriate floating-point tolerance
-- Accounts for different row orders by sorting
-- Provides both summary and detailed comparison options
-- Handles NULL values appropriately across all columns
+Compares two GSV metadata files for the same city and reports what changed:
+panoramas added/removed, capture-date changes, and (when both files sampled
+the same grid) coverage transitions. This is a thin CLI over
+gsv_metadata_tracker.diff.compute_run_diff — the same engine the tracker
+uses to diff consecutive scheduled runs.
 
 Usage:
-    python gsv_compare_data.py file1.gz file2.gz [--verbose]
-
-Arguments:
-    file1.gz        First GSV metadata file (gzipped CSV)
-    file2.gz        Second GSV metadata file (gzipped CSV)
-    --verbose, -v   Show detailed differences including status counts
+    python gsv_compare_data.py old.csv.gz new.csv.gz [--verbose] [--out diff.csv.gz]
 
 Exit codes:
-    0: Files contain equivalent data
-    1: Files contain differences
+    0: No pano-level changes between the files
+    1: Files differ (see report)
     2: Error occurred during comparison
-
-Example:
-    python gsv_compare_data.py async_seattle.gz simple_seattle.gz --verbose
 """
 
-import pandas as pd
-import gzip
-import logging
-from pathlib import Path
 import argparse
-from typing import Tuple, List
+import logging
+import sys
 
-def load_gsv_data(file_path: str) -> pd.DataFrame:
-    """Load GSV data from a gzipped CSV file."""
-    with gzip.open(file_path, 'rt') as f:
-        df = pd.read_csv(f, parse_dates=['capture_date'])
-    return df
+from gsv_metadata_tracker.diff import compute_run_diff, write_diff_detail
+from gsv_metadata_tracker.fileutils import load_city_csv_file
 
-def compare_dataframes(df1: pd.DataFrame, df2: pd.DataFrame) -> Tuple[bool, List[str]]:
-    """
-    Compare two GSV metadata DataFrames for equality.
-    
-    Returns:
-        Tuple of (is_equal, list of differences)
-    """
-    differences = []
-    
-    # Check number of rows
-    if len(df1) != len(df2):
-        differences.append(f"Row count mismatch: {len(df1)} vs {len(df2)}")
-        return False, differences
-    
-    # Sort both DataFrames by query coordinates to ensure comparable order
-    df1 = df1.sort_values(['query_lat', 'query_lon']).reset_index(drop=True)
-    df2 = df2.sort_values(['query_lat', 'query_lon']).reset_index(drop=True)
-    
-    # Compare each column
-    columns_to_compare = [
-        'query_lat', 'query_lon', 'pano_lat', 'pano_lon',
-        'pano_id', 'status'
-    ]
-    
-    for col in columns_to_compare:
-        if col in ['query_lat', 'query_lon', 'pano_lat', 'pano_lon']:
-            # Compare floating point values with tolerance
-            if not (df1[col].fillna(-999).round(6) == df2[col].fillna(-999).round(6)).all():
-                differences.append(f"Differences found in {col}")
-        else:
-            # Compare other columns exactly
-            if not (df1[col].fillna('') == df2[col].fillna('')).all():
-                differences.append(f"Differences found in {col}")
-    
-    return len(differences) == 0, differences
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description='Compare two GSV metadata files')
-    parser.add_argument('file1', help='Path to first GSV metadata file (.gz)')
-    parser.add_argument('file2', help='Path to second GSV metadata file (.gz)')
-    parser.add_argument('--verbose', '-v', action='store_true', help='Show detailed differences')
+    parser.add_argument('file_old', help='Path to the earlier GSV metadata file (.csv.gz)')
+    parser.add_argument('file_new', help='Path to the later GSV metadata file (.csv.gz)')
+    parser.add_argument('--verbose', '-v', action='store_true',
+                        help='Show per-file status counts and change detail rows')
+    parser.add_argument('--out', metavar='DIFF.csv.gz',
+                        help='Write the detailed change rows to a gzipped CSV')
     args = parser.parse_args()
-    
+
     logging.basicConfig(level=logging.INFO)
-    
+
     try:
-        # Load both files
-        logging.info(f"Loading {args.file1}...")
-        df1 = load_gsv_data(args.file1)
-        logging.info(f"Loading {args.file2}...")
-        df2 = load_gsv_data(args.file2)
-        
-        # Compare the DataFrames
-        is_equal, differences = compare_dataframes(df1, df2)
-        
-        if is_equal:
-            print("✅ Files contain equivalent data")
-            return 0
+        logging.info(f"Loading {args.file_old}...")
+        df_old = load_city_csv_file(args.file_old)
+        logging.info(f"Loading {args.file_new}...")
+        df_new = load_city_csv_file(args.file_new)
+
+        diff = compute_run_diff(df_old, df_new)
+
+        print(f"\nComparison: {args.file_old} -> {args.file_new}")
+        print("=" * 60)
+        print(f"Panos added:            {diff.panos_added:,}")
+        print(f"Panos removed:          {diff.panos_removed:,}")
+        print(f"Panos persisted:        {diff.panos_persisted:,}")
+        print(f"Capture date changed:   {diff.capture_date_changed:,}")
+        if diff.grid_aligned:
+            print(f"Points gained coverage: {diff.points_gained_coverage:,}")
+            print(f"Points lost coverage:   {diff.points_lost_coverage:,}")
+            print(f"Coverage delta:         {diff.coverage_delta_pct:+.2f} pct points")
         else:
-            print("❌ Files contain differences:")
-            for diff in differences:
-                print(f"  - {diff}")
-            if args.verbose:
-                print("\nDetailed comparison:")
-                print(f"File 1 ({args.file1}):")
-                print(f"  - Total rows: {len(df1)}")
-                print(f"  - Status counts:\n{df1['status'].value_counts()}")
-                print(f"\nFile 2 ({args.file2}):")
-                print(f"  - Total rows: {len(df2)}")
-                print(f"  - Status counts:\n{df2['status'].value_counts()}")
-            return 1
-            
+            print("Query grids differ; coverage transitions not computed.")
+
+        if args.verbose:
+            print(f"\nFile 1 ({args.file_old}): {len(df_old):,} rows")
+            print(df_old['status'].value_counts().to_string())
+            print(f"\nFile 2 ({args.file_new}): {len(df_new):,} rows")
+            print(df_new['status'].value_counts().to_string())
+            if diff.has_changes:
+                print("\nChange detail:")
+                print(diff.detail.to_string(index=False, max_rows=50))
+
+        if args.out:
+            write_diff_detail(diff, args.out)
+            print(f"\nWrote detail rows to {args.out}")
+
+        return 1 if diff.has_changes else 0
+
     except Exception as e:
         logging.error(f"Error comparing files: {str(e)}")
         return 2
+
 
 if __name__ == '__main__':
     sys.exit(main())

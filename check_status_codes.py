@@ -1,16 +1,37 @@
 import pandas as pd
-import gzip
 import argparse
 import sys
 import os
 from pathlib import Path
-from typing import Tuple, Dict, Optional, List
-from gsv_metadata_tracker.analysis import (
-    analyze_gsv_status,
-    format_status_table,
-    format_record_counts_table,
-    format_query_limit_table
-)
+from typing import Tuple, Optional, List
+from tabulate import tabulate
+from gsv_metadata_tracker.analysis import analyze_gsv_status
+
+def format_status_table(df: pd.DataFrame) -> str:
+    """Format status code counts and percentages as a table."""
+    stats = analyze_gsv_status(df)
+    rows = [
+        [status, f"{count:,}", f"{stats['status_percentages'][status]:.1f}%"]
+        for status, count in sorted(
+            stats['status_counts'].items(), key=lambda x: x[1], reverse=True)
+    ]
+    return tabulate(rows, headers=["Status", "Count", "Percent"],
+                    tablefmt="simple", numalign="right")
+
+def format_record_counts_table(valid_records: int, malformed_count: int) -> str:
+    """Format valid/malformed record counts as a table."""
+    rows = [
+        ["Valid records", f"{valid_records:,}"],
+        ["Malformed lines", f"{malformed_count:,}"],
+    ]
+    return tabulate(rows, headers=["Metric", "Count"],
+                    tablefmt="simple", numalign="right")
+
+def format_query_limit_table(files_with_limits: List[Tuple[str, int]]) -> str:
+    """Format files containing OVER_QUERY_LIMIT statuses as a table."""
+    rows = [[path, f"{count:,}"] for path, count in files_with_limits]
+    return tabulate(rows, headers=["File", "OVER_QUERY_LIMIT count"],
+                    tablefmt="simple", numalign="right")
 
 def read_csv_file(filepath: str) -> Tuple[Optional[pd.DataFrame], List[str]]:
     """
@@ -132,7 +153,6 @@ def main():
         
         if df is not None:
             # Analyze and print status distribution
-            status_stats = analyze_gsv_status(df)
             print("\nStatus Code Distribution Across Queries:")
             print(format_status_table(df))
             

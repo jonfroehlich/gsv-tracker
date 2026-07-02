@@ -1,0 +1,16 @@
+# GSV Tracker daily collection service (user unit).
+# Install: see deploy/README.md
+[Unit]
+Description=GSV Tracker: collect today's due cities
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/gsv-tracker
+# GMAPS_API_KEY lives here (same format as the repo .env: KEY=value)
+EnvironmentFile=%h/gsv-tracker/.env
+ExecStart=%h/gsv-tracker/.venv/bin/python -m gsv_metadata_tracker.scheduler run-due --config %h/gsv-tracker/config/scheduler.toml
+# A full day of cities can legitimately take hours
+TimeoutStartSec=12h
+Nice=10

@@ -1,0 +1,41 @@
+# GSV Tracker scheduler configuration.
+#
+# This example is checked into git; the production copy on makelab1 can
+# diverge (pass --config to point at it, or edit this file in place there).
+# Parsed with stdlib tomllib (Python 3.11+).
+
+[schedule]
+# Each city is re-collected roughly every cycle_days; grace_days lets a city
+# run slightly early so the stagger stays smooth.
+cycle_days = 90
+grace_days = 7
+
+# Hard daily ceiling on GSV metadata API requests across all cities. The
+# metadata endpoint is free but rate-limited; keep this comfortably below
+# your quota. ~1,144 cities/90 days at ~15-25k points each ≈ 200-300k/day.
+daily_request_budget = 250000
+max_cities_per_day = 20
+
+# A city is skipped after this many consecutive failures until re-enabled.
+max_consecutive_failures = 5
+city_timeout_minutes = 180
+
+[download]
+# Conservative defaults; see cli.py docstring for tuning guidance.
+batch_size = 100
+connection_limit = 50
+request_timeout_s = 30.0
+# Pause between cities to spread load.
+sleep_between_cities_s = 60
+
+[paths]
+# Absolute paths recommended for the systemd deployment. Defaults (when
+# omitted) are relative to the repo: ./data, ./data/gsv_tracker.db, ./logs
+#data_dir = "/homes/gws/jonf/gsv-tracker/data"
+#db_path  = "/homes/gws/jonf/gsv-tracker/data/gsv_tracker.db"
+#log_dir  = "/homes/gws/jonf/gsv-tracker/logs"
+
+[publish]
+# When true, run the publish script after each successful daily batch.
+enabled = false
+#publish_script = "/homes/gws/jonf/gsv-tracker/sync_data_to_server.sh"

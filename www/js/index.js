@@ -77,11 +77,35 @@ function createTooltip(city) {
   const ageStats = city.google_panos_age_stats;
   const googlePct = ((panoStats.unique_google_panos / panoStats.unique_panos) * 100).toFixed(1);
 
+  // Snapshot history line (schema v2): "3 snapshots since 2025-01-17"
+  let snapshotsHtml = "";
+  if (city.runs && city.runs.length > 0) {
+    const n = city.runs.length;
+    snapshotsHtml = `<li>Snapshots: ${n} (since ${city.runs[0].run_date})</li>`;
+  }
+
+  // Change-since-last-run line (schema v2), colored by direction
+  let changeHtml = "";
+  if (city.change) {
+    const ch = city.change;
+    const added = ch.panos_added ?? 0;
+    const removed = ch.panos_removed ?? 0;
+    changeHtml = `
+      <div style="margin-top:12px"><strong>Since ${ch.from}:</strong></div>
+      <ul class="popup-stats-list">
+        <li><span style="color:#2e7d32">+${added.toLocaleString()} new</span> /
+            <span style="color:#c62828">−${removed.toLocaleString()} removed</span> panoramas</li>
+        ${ch.capture_date_changed ? `<li>${ch.capture_date_changed.toLocaleString()} panos re-dated</li>` : ""}
+        ${ch.coverage_delta_pct != null ? `<li>Coverage: ${ch.coverage_delta_pct >= 0 ? "+" : ""}${ch.coverage_delta_pct.toFixed(2)} pct points</li>` : ""}
+      </ul>`;
+  }
+
   container.innerHTML = `
     <h3>${cityName}, ${city.state.name}, ${city.country.name}</h3>
     <strong>Coverage Statistics:</strong>
     <ul class="popup-stats-list">
-      <li>Data Collected: ${city.collection_info?.end_time ? new Date(city.collection_info.end_time).toLocaleDateString() : "Unknown"}</li>
+      <li>Data Collected: ${city.latest_run_date || (city.collection_info?.end_time ? new Date(city.collection_info.end_time).toLocaleDateString() : "Unknown")}</li>
+      ${snapshotsHtml}
       <li>Area: ${city.search_area_km2.toFixed(1)} km²</li>
       <li>Total Panoramas: ${panoStats.unique_panos.toLocaleString()}</li>
       <li>Google Panoramas: ${panoStats.unique_google_panos.toLocaleString()} (${googlePct}%)</li>
@@ -94,6 +118,7 @@ function createTooltip(city) {
       <li>Newest: ${ageStats.newest_pano_date ? new Date(ageStats.newest_pano_date).toLocaleDateString() : "No data"}</li>
       <li>Oldest: ${ageStats.oldest_pano_date ? new Date(ageStats.oldest_pano_date).toLocaleDateString() : "No data"}</li>
     </ul>
+    ${changeHtml}
   `;
 
   // Histogram chart
@@ -663,17 +688,12 @@ function createScatterPlots(cities) {
 async function loadData() {
   try {
     const data = await fetchGzippedJson(GSV_DATA_BASE_URL + "cities.json.gz");
-
-    if (!data?.cities || !Array.isArray(data.cities)) {
-      throw new Error("Invalid data format: missing cities array");
-    }
-
-    const cities = data.cities;
+    const { meta, cities } = adaptCitiesPayload(data);
 
     // Stats banner
     document.getElementById("stats").innerHTML = `
       <strong>GSV City Coverage Analysis</strong><br>
-      ${data.cities_count} cities analyzed | Updated: ${new Date(data.creation_timestamp).toLocaleString()}
+      ${meta.citiesCount} cities analyzed | Updated: ${new Date(meta.generatedAt).toLocaleString()}
     `;
 
     document.getElementById("loading").style.display = "none";

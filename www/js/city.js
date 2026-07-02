@@ -38,6 +38,9 @@ let collectionDateGlobal = "";
 let statsGlobal = null;
 let oldestDateGlobal = null;
 let newestDateGlobal = null;
+let runsGlobal = [];        // this city's run history from the v2 aggregate
+let currentFileGlobal = ""; // csv.gz filename of the run being displayed
+let changeGlobal = null;    // change_from_previous_run block of this run
 
 // ── Map interaction ────────────────────────────────────────────
 
@@ -75,11 +78,12 @@ function updateLegend(years) {
 
   if (statsGlobal) {
     const s = statsGlobal;
+    const fmt = (v) => (v != null ? v.toFixed(1) : "—");
     const oldest = oldestDateGlobal?.toLocaleDateString() ?? "—";
     const newest = newestDateGlobal?.toLocaleDateString() ?? "—";
-    const median = s.google_panos.age_stats.median_pano_age_years.toFixed(1);
-    const avg    = s.google_panos.age_stats.avg_pano_age_years.toFixed(1);
-    const sd     = s.google_panos.age_stats.stdev_pano_age_years.toFixed(1);
+    const median = fmt(s.google_panos.age_stats.median_pano_age_years);
+    const avg    = fmt(s.google_panos.age_stats.avg_pano_age_years);
+    const sd     = fmt(s.google_panos.age_stats.stdev_pano_age_years);
 
     html += `
       <table class="legend-stats" aria-label="Dataset statistics">
@@ -126,7 +130,40 @@ function updateLegend(years) {
     html += `<p class="legend-meta">Total panos: ${totalPanosGlobal.toLocaleString()}</p>`;
   }
 
-  // ── Section 2: Interactive year filter ────────────────────
+  // ── Section 2: Snapshot history (v2 temporal data) ────────
+  if (runsGlobal.length > 1) {
+    const options = runsGlobal
+      .slice()
+      .reverse() // newest first
+      .map((r) => {
+        const selected = r.data_file === currentFileGlobal ? " selected" : "";
+        return `<option value="${r.data_file}"${selected}>${r.run_date}${r.is_baseline ? " (baseline)" : ""}</option>`;
+      })
+      .join("");
+    html += `
+      <div class="legend-divider"></div>
+      <div class="legend-year-header">
+        <label for="run-select">Snapshot (${runsGlobal.length} runs)</label>
+      </div>
+      <select id="run-select" aria-label="Select collection snapshot"
+              style="width:100%;margin-top:4px"
+              onchange="switchRun(this.value)">${options}</select>`;
+  }
+
+  if (changeGlobal) {
+    const ch = changeGlobal;
+    html += `
+      <div class="legend-divider"></div>
+      <div class="legend-year-header">Since ${ch.from_run_date}</div>
+      <p class="legend-meta" style="margin:4px 0 0">
+        <span style="color:#7bd88f">+${(ch.panos_added ?? 0).toLocaleString()} new</span> /
+        <span style="color:#ff8a80">−${(ch.panos_removed ?? 0).toLocaleString()} removed</span>
+        ${ch.capture_date_changed ? `<br>${ch.capture_date_changed.toLocaleString()} panos re-dated` : ""}
+        ${ch.coverage_delta_pct != null ? `<br>Coverage ${ch.coverage_delta_pct >= 0 ? "+" : ""}${ch.coverage_delta_pct.toFixed(2)} pct pts` : ""}
+      </p>`;
+  }
+
+  // ── Section 3: Interactive year filter ────────────────────
   if (sortedYears.length > 0) {
     html += `
       <div class="legend-divider"></div>
@@ -150,6 +187,18 @@ function updateLegend(years) {
   }
 
   div.innerHTML = html;
+}
+
+/**
+ * Navigate to another snapshot of the same city (full reload keeps the
+ * streaming pipeline simple — each run is its own csv.gz/json.gz pair).
+ *
+ * @param {string} dataFile - csv.gz filename of the selected run.
+ */
+function switchRun(dataFile) {
+  if (dataFile && dataFile !== currentFileGlobal) {
+    window.location.href = `city.html?file=${encodeURIComponent(dataFile)}`;
+  }
 }
 
 /**
@@ -232,10 +281,10 @@ function parseLocationQuery(query, citiesData) {
     const stateIds = new Set();
     const countryIds = new Set();
     citiesData.cities.forEach((c) => {
-      if (c.city.state?.code) stateIds.add(c.city.state.code.toLowerCase());
-      if (c.city.state?.name) stateIds.add(c.city.state.name.toLowerCase());
-      if (c.city.country?.code) countryIds.add(c.city.country.code.toLowerCase());
-      if (c.city.country?.name) countryIds.add(c.city.country.name.toLowerCase());
+      if (c.state?.code) stateIds.add(c.state.code.toLowerCase());
+      if (c.state?.name) stateIds.add(c.state.name.toLowerCase());
+      if (c.country?.code) countryIds.add(c.country.code.toLowerCase());
+      if (c.country?.name) countryIds.add(c.country.name.toLowerCase());
     });
 
     const isState = stateIds.has(id);
@@ -276,19 +325,19 @@ function findBestMatchingCity(parsedQuery, citiesData, maxDistance = 3) {
   citiesData.cities.forEach((cityData) => {
     const cityDist = levenshteinDistance(
       parsedQuery.city.toLowerCase(),
-      cityData.city.toLowerCase()
+      (cityData.city || "").toLowerCase()
     );
     let total = cityDist * 2;
 
     if (parsedQuery.state) {
-      const codeDist = levenshteinDistance(parsedQuery.state.toLowerCase(), (cityData.city.state?.code || "").toLowerCase());
-      const nameDist = levenshteinDistance(parsedQuery.state.toLowerCase(), (cityData.city.state?.name || "").toLowerCase());
+      const codeDist = levenshteinDistance(parsedQuery.state.toLowerCase(), (cityData.state?.code || "").toLowerCase());
+      const nameDist = levenshteinDistance(parsedQuery.state.toLowerCase(), (cityData.state?.name || "").toLowerCase());
       total += Math.min(codeDist, nameDist);
     }
 
     if (parsedQuery.country) {
-      const codeDist = levenshteinDistance(parsedQuery.country.toLowerCase(), (cityData.city.country?.code || "").toLowerCase());
-      const nameDist = levenshteinDistance(parsedQuery.country.toLowerCase(), (cityData.city.country?.name || "").toLowerCase());
+      const codeDist = levenshteinDistance(parsedQuery.country.toLowerCase(), (cityData.country?.code || "").toLowerCase());
+      const nameDist = levenshteinDistance(parsedQuery.country.toLowerCase(), (cityData.country?.name || "").toLowerCase());
       total += Math.min(codeDist, nameDist);
     }
 
@@ -303,9 +352,9 @@ function findBestMatchingCity(parsedQuery, citiesData, maxDistance = 3) {
   if (bestDistance > maxDistance) {
     scored.sort((a, b) => a.totalDistance - b.totalDistance);
     const suggestions = scored.slice(0, 3).map((s) => ({
-      city: s.city.city.name,
-      state: s.city.city.state?.code,
-      country: s.city.city.country?.code,
+      city: s.city.city,
+      state: s.city.state?.code,
+      country: s.city.country?.code,
     }));
     return {
       match: null,
@@ -557,10 +606,22 @@ async function loadData() {
 
     let targetFile = csvFile;
 
-    // Resolve city query → filename via cities.json.gz
+    // Fetch the aggregate: needed to resolve ?city= queries, and (v2) to
+    // find this city's run history for the snapshot selector.
+    let citiesData = null;
+    try {
+      progressText.textContent = "Loading city index…";
+      const raw = await fetchGzippedJson(GSV_DATA_BASE_URL + "cities.json.gz");
+      citiesData = adaptCitiesPayload(raw);
+    } catch (e) {
+      // The ?file= path can still work without the aggregate
+      console.warn("Could not load cities.json.gz:", e);
+    }
+
+    // Resolve city query → filename via the aggregate
     if (!csvFile && decodedCityQuery) {
+      if (!citiesData) throw new Error("City index unavailable; cannot resolve ?city= query");
       progressText.textContent = `Finding city data for: ${decodedCityQuery}`;
-      const citiesData = await fetchGzippedJson(GSV_DATA_BASE_URL + "cities.json.gz");
       const parsedQuery = parseLocationQuery(decodedCityQuery, citiesData);
       const result = findBestMatchingCity(parsedQuery, citiesData);
       if (!result.match) {
@@ -571,10 +632,21 @@ async function loadData() {
       targetFile = result.match.data_file.filename;
     }
 
+    currentFileGlobal = targetFile;
+
+    // Locate this city's run history (v2 aggregate) for the snapshot selector
+    if (citiesData) {
+      const record = citiesData.cities.find((c) =>
+        c.data_file?.filename === targetFile ||
+        (c.runs || []).some((r) => r.data_file === targetFile));
+      if (record) runsGlobal = record.runs || [];
+    }
+
     // Load city-specific JSON metadata
     progressText.textContent = "Loading city metadata…";
     const metadataUrl = GSV_DATA_BASE_URL + targetFile.replace(".csv.gz", ".json.gz");
     const stats = await fetchGzippedJson(metadataUrl);
+    changeGlobal = stats.change_from_previous_run || null;
 
     const totalBytes = stats.data_file.size_bytes;
     const fileSizeMB = (totalBytes / (1024 * 1024)).toFixed(1);

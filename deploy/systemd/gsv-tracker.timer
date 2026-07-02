@@ -1,0 +1,13 @@
+# Nightly trigger for gsv-tracker.service (user unit).
+[Unit]
+Description=Run GSV Tracker collection nightly
+
+[Timer]
+# 2am Pacific with a randomized delay so restarts don't thundering-herd
+OnCalendar=*-*-* 02:00:00 America/Los_Angeles
+RandomizedDelaySec=15m
+# Run on next boot/login if a scheduled run was missed
+Persistent=true
+
+[Install]
+WantedBy=timers.target

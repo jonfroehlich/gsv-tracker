@@ -6,7 +6,7 @@ This script provides a wrapper around the GSV Metadata Tracker to process multip
 Each line in the input file represents a complete command line style configuration for a city.
 
 Example cities.txt format:
-    Seattle, WA --width 2000 --height 2000 --step 25 --force-size
+    Seattle, WA --width 2000 --height 2000 --step 25
     Portland, OR --width 1500 --height 1500
     Vancouver, BC
 """
@@ -14,12 +14,12 @@ Example cities.txt format:
 import subprocess
 import sys
 import shlex
-from typing import List, Optional, Dict
+from typing import List, Optional
 from pathlib import Path
 import argparse
 import logging
 from datetime import datetime
-from gsv_metadata_tracker.fileutils import get_default_data_dir
+from gsv_metadata_tracker.paths import get_default_data_dir, get_project_root
 
 def parse_city_line(line: str) -> Optional[List[str]]:
     """
@@ -35,8 +35,8 @@ def parse_city_line(line: str) -> Optional[List[str]]:
         List[str] if valid line, None if comment or empty
         
     Examples:
-        >>> parse_city_line("Seattle, WA --width 2000 --height 2000 --step 25 --force-size")
-        ["Seattle, WA", "--width", "2000", "--height", "2000", "--step", "25", "--force-size"]
+        >>> parse_city_line("Seattle, WA --width 2000 --height 2000 --step 25")
+        ["Seattle, WA", "--width", "2000", "--height", "2000", "--step", "25"]
         >>> parse_city_line("Grand Marais, MN")
         ["Grand Marais, MN"]
         >>> parse_city_line("# This is a comment")
@@ -91,7 +91,7 @@ def parse_args() -> argparse.Namespace:
         epilog='''Examples:
   python run_cities.py cities.txt
   python run_cities.py cities.txt --batch-size 200 --connection-limit 100
-  python run_cities.py cities.txt --output-dir ./data --log-level DEBUG'''
+  python run_cities.py cities.txt --download-dir ./data --log-level DEBUG'''
     )
     
     parser.add_argument(
@@ -158,14 +158,12 @@ def setup_logging(args: argparse.Namespace) -> str:
     # Create output directory if specified
     if args.download_dir:
         Path(args.download_dir).mkdir(parents=True, exist_ok=True)
-    
-    # Create log filename with timestamp
+
+    # Logs go to logs/, never data/ (data/ is synced to the public web server)
+    log_dir = Path(get_project_root()) / 'logs'
+    log_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_filename = f'gsv_tracker_{timestamp}.log'
-    if args.download_dir:
-        log_path = Path(args.download_dir) / log_filename
-    else:
-        log_path = Path(log_filename)
+    log_path = log_dir / f'gsv_tracker_{timestamp}.log'
         
     # Configure logging
     logging.basicConfig(
@@ -181,8 +179,8 @@ def setup_logging(args: argparse.Namespace) -> str:
 
 def run_gsv_tracker(city_args: List[str], global_args: argparse.Namespace) -> bool:
     """Run the GSV Metadata Tracker for a specific city."""
-    # Base command with script name
-    cmd = ["python", "gsv_tracker.py"]
+    # Use the same interpreter (and venv) that launched this script
+    cmd = [sys.executable, "gsv_tracker.py"]
     
     # Add city name - join all parts until we hit an argument starting with --
     city_name_parts = []
@@ -206,7 +204,8 @@ def run_gsv_tracker(city_args: List[str], global_args: argparse.Namespace) -> bo
     cmd.extend([
         '--batch-size', str(global_args.batch_size),
         '--connection-limit', str(global_args.connection_limit),
-        '--log-level', global_args.log_level
+        '--log-level', global_args.log_level,
+        '--download-dir', str(global_args.download_dir)
     ])
     
     if global_args.no_visual:
