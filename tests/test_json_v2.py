@@ -12,7 +12,8 @@ from gsv_metadata_tracker.fileutils import load_city_csv_file
 from gsv_metadata_tracker.json_summarizer import (
     generate_aggregate_v2, generate_city_metadata_summary_as_json,
     sanitize_for_json)
-from tests.conftest import make_city_df, write_city_csv_gz
+from tests.conftest import (make_city_df, make_mapillary_city_df,
+                            write_city_csv_gz)
 
 
 def strict_load(path):
@@ -64,13 +65,42 @@ def test_v2_fields_and_age_pinned_to_run_date(data_dir):
     data = strict_load(json_path)
 
     assert data['schema_version'] == 2
+    assert data['provider'] == 'gsv'
     assert data['run'] == {'run_date': '2026-01-15', 'is_baseline': False}
     assert data['change_from_previous_run']['panos_added'] == 1
+    assert 'google_panos' in data
 
     # Ages relative to run_date: panos captured exactly 6 and 4 years earlier
     ages = data['all_panos']['age_stats']
     assert ages['avg_pano_age_years'] == pytest.approx(5.0, abs=0.01)
     assert ages['median_pano_age_years'] == pytest.approx(5.0, abs=0.01)
+
+
+def test_mapillary_run_json(data_dir):
+    run_date = date(2026, 1, 15)
+    csv_path = os.path.join(
+        data_dir, 'duo--city_width_100_height_100_step_20_mapillary_2026-01-15.csv.gz')
+    # 4 panos on 2 grid points (2 each) + 1 empty point: exercises the
+    # rows-vs-grid-points distinction that only exists for Mapillary
+    write_city_csv_gz(make_mapillary_city_df(
+        [('m1', '2021-03-01'), ('m2', '2022-03-01'),
+         ('m3', '2023-03-01'), ('m4', '2024-03-01')],
+        run_date=run_date, panos_per_point=2), csv_path)
+    df = load_city_csv_file(csv_path)
+    json_path = generate_city_metadata_summary_as_json(
+        csv_path, df, 'Duo', None, 'Testland', 100, 100, 20,
+        force_recreate_file=True, run_date=run_date, provider='mapillary')
+    data = strict_load(json_path)
+
+    assert data['provider'] == 'mapillary'
+    assert 'google_panos' not in data  # all rows are already provider panos
+    assert data['all_panos']['duplicate_stats']['total_unique_panos'] == 4
+    # search points count grid points, not pano rows
+    assert data['search_grid']['total_search_points'] == 3
+    assert data['data_file']['rows'] == 5
+    # contributor breakdown replaces the single '© Google' photographer
+    assert all(k.startswith('© Mapillary contributor')
+               for k in data['all_panos']['top_10_photographers'])
 
 
 def test_aggregate_v2_groups_runs_and_reports_change(conn, data_dir):

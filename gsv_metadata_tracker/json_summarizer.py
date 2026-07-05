@@ -229,7 +229,8 @@ def generate_city_metadata_summary_as_json(
     force_recreate_file: bool = False,
     run_date: Optional[Any] = None,
     is_baseline: bool = False,
-    change_from_previous_run: Optional[Dict[str, Any]] = None
+    change_from_previous_run: Optional[Dict[str, Any]] = None,
+    provider: str = 'gsv'
 ) -> str:
     """
     Generate and save download statistics for an individual city run to a
@@ -239,7 +240,7 @@ def generate_city_metadata_summary_as_json(
 
     Args:
         csv_gz_path: Full path to the compressed CSV file (including filename)
-        df: DataFrame containing the GSV data
+        df: DataFrame containing the run data
         city_name: Name of the city
         state_name: Name of the state (if one exists)
         country_name: Name of the country
@@ -254,6 +255,10 @@ def generate_city_metadata_summary_as_json(
         is_baseline: True for legacy pre-temporal-tracking snapshots
         change_from_previous_run: summary dict of the diff vs the previous
             run (see cli.py), or None for a city's first run
+        provider: imagery provider. GSV runs additionally get the
+            'google_panos' block (the Google-copyright subset of all_panos);
+            for other providers all rows are already provider imagery, so
+            only 'all_panos' is emitted.
     """
     logger.debug(f"Generating metadata summary for {city_name}, {state_name}, {country_name} from {csv_gz_path}")
 
@@ -307,8 +312,9 @@ def generate_city_metadata_summary_as_json(
 
     # Calculate all pano statistics
     all_pano_stats = calculate_pano_stats(df, now)
-    google_pano_stats = calculate_pano_stats(df, now, copyright_filter='Google')
-    
+    google_pano_stats = (calculate_pano_stats(df, now, copyright_filter='Google')
+                         if provider == 'gsv' else None)
+
     # Calculate coverage statistics
     coverage_stats = calculate_coverage_stats(df)
 
@@ -318,6 +324,7 @@ def generate_city_metadata_summary_as_json(
 
     metadata = {
         "schema_version": 2,
+        "provider": provider,
         "run": {
             "run_date": (run_date.isoformat() if run_date is not None else None),
             "is_baseline": is_baseline
@@ -350,7 +357,10 @@ def generate_city_metadata_summary_as_json(
             "height_meters": grid_height,
             "step_length_meters": step_length,
             "diagonal_meters": diagonal_meters,
-            "total_search_points": len(df),
+            # Unique query points, not len(df): Mapillary runs have one row
+            # per pano, so several rows can share a grid point
+            "total_search_points": int(
+                df[['query_lat', 'query_lon']].drop_duplicates().shape[0]),
             "area_km2": (grid_width * grid_height) / 1_000_000
         },
         "download": {
@@ -366,14 +376,16 @@ def generate_city_metadata_summary_as_json(
             "histogram_of_capture_dates": asdict(all_pano_stats.daily_distribution),
             "top_10_photographers": top_10_photographers,
         },
-        "google_panos": {
+    }
+    if google_pano_stats is not None:
+        metadata["google_panos"] = {
             "duplicate_stats": asdict(google_pano_stats.duplicate_stats),
             "age_stats": asdict(google_pano_stats.age_stats),
             "histogram_of_capture_dates_by_year": asdict(google_pano_stats.yearly_distribution),
             "histogram_of_capture_dates": asdict(google_pano_stats.daily_distribution)
-        },
-    }
-    
+        }
+
+
     # Save compressed JSON (sanitize first: NaN is not valid JSON)
     with gzip.open(json_filename_with_path, 'wt', encoding='utf-8') as f:
         json.dump(sanitize_for_json(metadata), f, indent=2, allow_nan=False)

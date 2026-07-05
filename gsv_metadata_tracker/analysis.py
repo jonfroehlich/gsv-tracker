@@ -514,7 +514,8 @@ def calculate_yearly_distribution(df: pd.DataFrame) -> YearlyDistribution:
         counts={int(year): int(count) for year, count in year_counts.items()}
     )
 
-def calculate_run_stats(df: pd.DataFrame, run_date) -> Dict[str, Any]:
+def calculate_run_stats(df: pd.DataFrame, run_date,
+                        provider: str = 'gsv') -> Dict[str, Any]:
     """
     Compute the per-run summary stats stored in the runs catalog table.
 
@@ -524,6 +525,10 @@ def calculate_run_stats(df: pd.DataFrame, run_date) -> Dict[str, Any]:
     Args:
         df: loaded run DataFrame (load_city_csv_file format)
         run_date: datetime.date of the collection run
+        provider: imagery provider. The Google-copyright breakdown only
+            makes sense for GSV runs; other providers store NULL for
+            unique_google_panos (their unique_panos already counts only
+            provider imagery).
 
     Returns:
         Dict matching db.register_run keyword arguments (stats subset).
@@ -536,8 +541,10 @@ def calculate_run_stats(df: pd.DataFrame, run_date) -> Dict[str, Any]:
 
     ok = df[df['status'] == 'OK']
     unique = ok.drop_duplicates(subset=['pano_id'])
-    is_google = unique['copyright_info'].str.contains('Google', case=False, na=False)
-    google_unique = unique[is_google]
+    unique_google_panos = None
+    if provider == 'gsv':
+        is_google = unique['copyright_info'].str.contains('Google', case=False, na=False)
+        unique_google_panos = int(is_google.sum())
 
     age_stats = calculate_age_stats(unique.copy(), now)
     coverage = calculate_coverage_stats(df)
@@ -548,7 +555,7 @@ def calculate_run_stats(df: pd.DataFrame, run_date) -> Dict[str, Any]:
         'status_zero_results': status_zero,
         'status_other': status_other,
         'unique_panos': len(unique),
-        'unique_google_panos': len(google_unique),
+        'unique_google_panos': unique_google_panos,
         'coverage_rate_pct': coverage.coverage_rate,
         'oldest_capture_date': age_stats.oldest_pano_date,
         'newest_capture_date': age_stats.newest_pano_date,
@@ -587,26 +594,28 @@ def analyze_gsv_status(df: pd.DataFrame) -> Dict[str, Any]:
         }
     }
 
-def print_df_summary(df: pd.DataFrame, now: Optional[pd.Timestamp] = None) -> None:
+def print_df_summary(df: pd.DataFrame, now: Optional[pd.Timestamp] = None,
+                     provider: str = 'gsv') -> None:
     """
     Print a comprehensive summary of download results.
-    
+
     Args:
-        df: DataFrame containing the downloaded GSV metadata
+        df: DataFrame containing the downloaded metadata
         now: Optional timestamp for age calculations (defaults to current time)
+        provider: imagery provider; the Google-only breakdown is printed
+            only for GSV runs (other providers' rows are all provider panos)
     """
     # Use provided timestamp or current time
     timestamp = now if now is not None else pd.Timestamp.now()
-    
-    # Calculate statistics for all panoramas and Google panoramas
+
     all_stats = calculate_pano_stats(df, timestamp)
-    google_stats = calculate_pano_stats(df, timestamp, copyright_filter='Google')
-    
-    # Print summaries
+
     print("\nAll Panoramas")
     print("=" * 40)
     all_stats.print_summary()
-    
-    print("\nGoogle Panoramas Only")
-    print("=" * 40)
-    google_stats.print_summary()
+
+    if provider == 'gsv':
+        google_stats = calculate_pano_stats(df, timestamp, copyright_filter='Google')
+        print("\nGoogle Panoramas Only")
+        print("=" * 40)
+        google_stats.print_summary()

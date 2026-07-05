@@ -347,6 +347,26 @@ def test_download_rejects_non_csv_gz_path(tmp_path):
             'X', *SEATTLE, 100, 100, 20, 'tok', str(tmp_path / 'out.csv')))
 
 
+def test_run_stats_for_mapillary_have_no_google_count():
+    # calculate_run_stats feeds db.register_run: for mapillary runs the
+    # Google-copyright breakdown must be NULL, not zero-by-accident
+    from gsv_metadata_tracker.analysis import calculate_run_stats
+    from tests.conftest import make_city_df, make_mapillary_city_df
+    from datetime import date
+
+    m_df = make_mapillary_city_df(
+        [('m1', '2021-03-01'), ('m2', '2022-03-01'), ('m3', '2023-03-01')],
+        panos_per_point=3)
+    stats = calculate_run_stats(m_df, date(2026, 1, 15), provider='mapillary')
+    assert stats['unique_panos'] == 3
+    assert stats['unique_google_panos'] is None
+    assert stats['status_ok'] == 3 and stats['status_zero_results'] == 1
+
+    g_df = make_city_df([('p1', '2021-03-01')])
+    g_stats = calculate_run_stats(g_df, date(2026, 1, 15))
+    assert g_stats['unique_google_panos'] == 1  # gsv path unchanged
+
+
 def test_download_pano_outside_grid_is_dropped(monkeypatch, tmp_path):
     # A pano inside the fetched tiles but beyond the grid margin must not
     # produce a row (the tile covers far more area than a small grid)

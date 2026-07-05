@@ -43,6 +43,7 @@ from . import (
     create_visualization_map,
     display_search_area,
     download_gsv_metadata_async,
+    download_mapillary_metadata_async,
     open_in_browser
 )
 
@@ -75,6 +76,15 @@ def parse_args():
     parser.add_argument(
         'city',
         help='City name to analyze'
+    )
+
+    parser.add_argument(
+        '--provider',
+        choices=['gsv', 'mapillary'],
+        default='gsv',
+        help='Imagery provider to collect. Each provider keeps its own '
+             'independent run series (dated files, diffs, skip policy) on '
+             'the same frozen city grid.'
     )
 
     parser.add_argument(
@@ -290,10 +300,11 @@ def _resolve_geometry(conn, args):
 
 
 def _compute_and_record_diff(conn, city_row, prev_run, run_id, run_date,
-                             df_new, download_dir):
+                             df_new, download_dir, provider='gsv'):
     """
-    Diff the new run against the previous one, persist the summary row (and
-    detail csv.gz when there are changes), and return the JSON change block.
+    Diff the new run against the previous one of the same provider, persist
+    the summary row (and detail csv.gz when there are changes), and return
+    the JSON change block.
     """
     prev_csv_path = os.path.join(download_dir, prev_run.csv_filename)
     if not os.path.exists(prev_csv_path):
@@ -306,7 +317,8 @@ def _compute_and_record_diff(conn, city_row, prev_run, run_id, run_date,
     detail_filename = None
     if diff.has_changes:
         detail_filename = generate_diff_filename(
-            city_row.city_id, prev_run.run_date, run_date.isoformat())
+            city_row.city_id, prev_run.run_date, run_date.isoformat(),
+            provider=provider)
         write_diff_detail(diff, os.path.join(download_dir, detail_filename))
 
     db.record_diff(
@@ -369,7 +381,7 @@ async def async_main():
     db_path = args.db_path or db.get_default_db_path(args.download_dir)
 
     try:
-        config = load_config()
+        config = load_config(args.provider)
         conn = db.connect(db_path)
 
         vis_path = get_default_vis_dir()
@@ -386,54 +398,71 @@ async def async_main():
               f"step {city_row.step_m}m, centered at "
               f"{city_row.center_lat:.5f}, {city_row.center_lon:.5f}")
 
-        # Skip policy: honor --min-days-since-last-run unless --force
-        latest = db.get_latest_run(conn, city_row.city_id)
+        # Skip policy: honor --min-days-since-last-run unless --force.
+        # Each provider is an independent run series.
+        latest = db.get_latest_run(conn, city_row.city_id, args.provider)
         if latest is not None:
             days_since = (run_date - date.fromisoformat(latest.run_date)).days
             if latest.run_date == run_date.isoformat():
-                print(f"A run already exists for {city_row.city_id} on {run_date} "
-                      f"({latest.csv_filename}); nothing to do. "
+                print(f"A {args.provider} run already exists for {city_row.city_id} "
+                      f"on {run_date} ({latest.csv_filename}); nothing to do. "
                       f"Use --run-date to record a different date.")
                 return 0
             if not args.force and days_since < args.min_days_since_last_run:
-                print(f"SKIP: latest run for {city_row.city_id} is {days_since} days old "
-                      f"({latest.run_date}), newer than --min-days-since-last-run="
-                      f"{args.min_days_since_last_run}. Use --force to collect anyway.")
+                print(f"SKIP: latest {args.provider} run for {city_row.city_id} is "
+                      f"{days_since} days old ({latest.run_date}), newer than "
+                      f"--min-days-since-last-run={args.min_days_since_last_run}. "
+                      f"Use --force to collect anyway.")
                 return 0
 
         # Dated, immutable output file for this run
         run_base = generate_run_filename(
             city_row.city_id, city_row.grid_width_m, city_row.grid_height_m,
-            city_row.step_m, run_date)
+            city_row.step_m, run_date, provider=args.provider)
         output_csv_gz_path = os.path.join(args.download_dir, f"{run_base}.csv.gz")
 
-        logging.info(f"Collecting run {run_date} for {city_row.city_id}")
-        logging.info(f"Using batch_size={args.batch_size}, connection_limit={args.connection_limit}")
+        logging.info(f"Collecting {args.provider} run {run_date} for {city_row.city_id}")
 
-        dict_results = await download_gsv_metadata_async(
-            city_name=city_row.display_name,
-            center_lat=city_row.center_lat,
-            center_lon=city_row.center_lon,
-            grid_width=city_row.grid_width_m,
-            grid_height=city_row.grid_height_m,
-            step_length=city_row.step_m,
-            api_key=config['api_key'],
-            output_csv_gz_path=output_csv_gz_path,
-            batch_size=args.batch_size,
-            connection_limit=args.connection_limit,
-            request_timeout=args.timeout
-        )
+        if args.provider == 'mapillary':
+            dict_results = await download_mapillary_metadata_async(
+                city_name=city_row.display_name,
+                center_lat=city_row.center_lat,
+                center_lon=city_row.center_lon,
+                grid_width=city_row.grid_width_m,
+                grid_height=city_row.grid_height_m,
+                step_length=city_row.step_m,
+                access_token=config['access_token'],
+                output_csv_gz_path=output_csv_gz_path,
+                request_timeout=args.timeout
+            )
+        else:
+            logging.info(f"Using batch_size={args.batch_size}, "
+                         f"connection_limit={args.connection_limit}")
+            dict_results = await download_gsv_metadata_async(
+                city_name=city_row.display_name,
+                center_lat=city_row.center_lat,
+                center_lon=city_row.center_lon,
+                grid_width=city_row.grid_width_m,
+                grid_height=city_row.grid_height_m,
+                step_length=city_row.step_m,
+                api_key=config['api_key'],
+                output_csv_gz_path=output_csv_gz_path,
+                batch_size=args.batch_size,
+                connection_limit=args.connection_limit,
+                request_timeout=args.timeout
+            )
         df = dict_results["df"]
 
-        # Record API usage in the daily budget ledger
-        db.add_api_usage(conn, run_date, dict_results["api_requests"])
+        # Record API usage in the daily per-provider budget ledger
+        db.add_api_usage(conn, run_date, dict_results["api_requests"],
+                         provider=args.provider)
 
         print("\nDownload Summary for", city_row.display_name)
         print("=" * 50)
-        print_df_summary(df)
+        print_df_summary(df, provider=args.provider)
 
         # Catalog the run
-        stats = calculate_run_stats(df, run_date)
+        stats = calculate_run_stats(df, run_date, provider=args.provider)
         duration = None
         started = dict_results.get("started_at")
         finished = dict_results.get("finished_at")
@@ -445,6 +474,7 @@ async def async_main():
             city_id=city_row.city_id,
             run_date=run_date,
             csv_filename=os.path.basename(output_csv_gz_path),
+            provider=args.provider,
             started_at=started,
             finished_at=finished,
             duration_seconds=duration,
@@ -452,12 +482,14 @@ async def async_main():
             **stats,
         )
 
-        # Diff against the previous run, if any
+        # Diff against the previous run of the same provider, if any
         change_block = None
-        prev_run = db.get_previous_run(conn, city_row.city_id, run_date)
+        prev_run = db.get_previous_run(conn, city_row.city_id, run_date,
+                                       provider=args.provider)
         if prev_run is not None:
             change_block = _compute_and_record_diff(
-                conn, city_row, prev_run, run_id, run_date, df, args.download_dir)
+                conn, city_row, prev_run, run_id, run_date, df,
+                args.download_dir, provider=args.provider)
 
         # Per-run summary JSON (schema v2, ages pinned to run_date)
         json_path = generate_city_metadata_summary_as_json(
@@ -468,7 +500,8 @@ async def async_main():
             city_row.grid_width_m, city_row.grid_height_m, city_row.step_m,
             force_recreate_file=True,
             run_date=run_date,
-            change_from_previous_run=change_block)
+            change_from_previous_run=change_block,
+            provider=args.provider)
         db.update_run_json_filename(conn, run_id, os.path.basename(json_path))
 
         if not args.no_publish_json:
