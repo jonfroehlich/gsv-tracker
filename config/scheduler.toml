@@ -10,15 +10,35 @@
 cycle_days = 90
 grace_days = 7
 
+# max_cities_per_day counts cities, not runs — a city due for both
+# providers runs both back-to-back with the same run date.
+max_cities_per_day = 20
+
+# A (city, provider) pair is skipped after this many consecutive failures
+# until re-enabled.
+max_consecutive_failures = 5
+city_timeout_minutes = 180
+
+# Legacy fallback: when no [providers.*] sections exist below, this is the
+# GSV daily budget and only GSV is collected.
+daily_request_budget = 250000
+
+# Per-provider daily request budgets. Each provider keeps its own run
+# series, budget ledger, and failure tracking; both are collected for a
+# city on the same day so cross-provider snapshots align.
+[providers.gsv]
+enabled = true
 # Hard daily ceiling on GSV metadata API requests across all cities. The
 # metadata endpoint is free but rate-limited; keep this comfortably below
 # your quota. ~1,144 cities/90 days at ~15-25k points each ≈ 200-300k/day.
 daily_request_budget = 250000
-max_cities_per_day = 20
 
-# A city is skipped after this many consecutive failures until re-enabled.
-max_consecutive_failures = 5
-city_timeout_minutes = 180
+[providers.mapillary]
+enabled = true
+# Counted in z14 vector-tile requests (each tile carries every image's
+# metadata for a ~2 km square — a city is typically 10-100 tiles).
+# Mapillary caps tile requests at 50,000/day per application.
+daily_request_budget = 40000
 
 [download]
 # Conservative defaults; see cli.py docstring for tuning guidance.
