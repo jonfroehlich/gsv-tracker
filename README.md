@@ -1,19 +1,45 @@
 # GSV Tracker
 
-GSV Tracker is a Python tool for analyzing Google Street View (GSV) coverage and temporal patterns in cities **over time**. It samples geographic grids around city centers, queries the GSV Static API metadata endpoint, and produces dated snapshots per city — computing what changed between snapshots (panoramas added/removed, capture dates updated, coverage deltas) and rendering interactive visualizations of when and where Street View imagery was captured.
+GSV Tracker is a Python tool for analyzing street-level imagery coverage and temporal patterns in cities **over time** — Google Street View (GSV) and, as of 2026, [Mapillary](https://www.mapillary.com/) 360° panoramas. It samples geographic grids around city centers, queries each provider's metadata API, and produces dated snapshots per city — computing what changed between snapshots (panoramas added/removed, capture dates updated, coverage deltas) and rendering interactive visualizations of when and where imagery was captured.
 
 This research project began in 2021 by Professor Jon E. Froehlich and was also part of the [UC Berkeley Data Science Discovery Program](https://cdss.berkeley.edu/discovery/projects) in 2023 with students Joseph Chen, Wenjing Yi, and Jingfeng Yang. Here's the [original pitch sheet in Google Docs](https://docs.google.com/document/d/1hfgvS_JHRmhkVtj_LBZ2qd_TO-50L6g0crlV8nTBy9s/edit?tab=t.0). The [v1.0.0 release](https://github.com/jonfroehlich/gsv-tracker/releases/tag/v1.0.0) of this tool supported our [GeoIndustry 2025 paper](https://doi.org/10.1145/3764919.3770883) on GSV coverage and socioeconomic indicators (see also [GSVantage](https://github.com/makeabilitylab/GSVantage)).
 
 ## How temporal tracking works
 
 Every collection run of a city produces an immutable dated snapshot
-(`{city}_width_W_height_H_step_S_YYYY-MM-DD.csv.gz`). A SQLite catalog
+(`{city}_width_W_height_H_step_S_YYYY-MM-DD.csv.gz`; Mapillary runs add a
+provider token: `..._step_S_mapillary_YYYY-MM-DD.csv.gz`). A SQLite catalog
 (`data/gsv_tracker.db`) records each city's identity and **frozen grid
 geometry** (so future runs sample the exact same points), every run's
-stats, and run-to-run diffs. Re-running a city sooner than
+stats, and run-to-run diffs — each provider keeps its own independent run
+series on the same grid. Re-running a (city, provider) sooner than
 `--min-days-since-last-run` (default 80) days is skipped unless you pass
 `--force`. A scheduler (see `deploy/README.md`) staggers ~13 cities/day so
-the full corpus re-collects roughly quarterly without exceeding API limits.
+the full corpus re-collects roughly quarterly without exceeding API limits;
+a city due for both providers runs them back-to-back with the same run date
+so cross-provider snapshots align.
+
+## Imagery providers
+
+| | Google Street View (`--provider gsv`, default) | Mapillary (`--provider mapillary`) |
+|---|---|---|
+| API model | One metadata request per grid point ("nearest pano to X?") | Bulk z14 vector tiles (~10–100 requests per city) |
+| What's kept | The nearest pano per grid point | **Every** 360° pano (`is_pano`), assigned to its nearest grid point; flat phone photos are excluded |
+| Credential | `GMAPS_API_KEY` ([console.cloud.google.com](https://console.cloud.google.com/apis/credentials), Street View Static API enabled) | `MAPILLARY_ACCESS_TOKEN` (free client token from [mapillary.com/dashboard/developers](https://www.mapillary.com/dashboard/developers)) |
+
+Both go in `.env` in the project root; each command only requires the
+credential of the provider it collects.
+
+**Comparing numbers across providers.** Both providers use the identical
+frozen grid, so *coverage rate* (% of grid points with a pano) is directly
+comparable. Raw *pano counts* are not: GSV counts are a grid **sample**
+(one nearest pano per point — dense imagery is undercounted), while
+Mapillary counts are a **census** of every pano in the area.
+
+**Attribution.** Mapillary metadata is used under their
+[terms](https://www.mapillary.com/terms) (CC BY-SA); anything derived from
+it must visibly credit Mapillary, which the bundled web frontend does
+automatically.
 
 ## 1. Setup and Installation
 
@@ -79,6 +105,17 @@ To analyze a city's Street View coverage using default settings (1000m x 1000m g
 python gsv_tracker.py "Seattle, WA"
 ```
 
+### Collecting Mapillary
+
+Same command, different provider (requires `MAPILLARY_ACCESS_TOKEN`):
+
+```bash
+python gsv_tracker.py "Seattle, WA" --provider mapillary
+```
+
+A Mapillary run reuses the city's frozen grid and takes seconds — a whole
+city is a few dozen tile requests rather than one request per grid point.
+
 ### Preview Search Area
 
 Before executing a large download, you can generate an HTML map to preview your search boundary:
@@ -114,13 +151,13 @@ python run_cities.py cities.txt --continue-on-error
 
 ## 4. Output Files
 
-Each run generates the following files in your designated `--download-dir` (defaults to `./data`), where `{base}` is `{city_id}_width_{W}_height_{H}_step_{S}_{YYYY-MM-DD}`:
+Each run generates the following files in your designated `--download-dir` (defaults to `./data`), where `{base}` is `{city_id}_width_{W}_height_{H}_step_{S}_{YYYY-MM-DD}` (Mapillary runs insert a `mapillary` token before the date):
 
-* **`{base}.csv.gz`**: The core compressed data file containing all downloaded GSV metadata for this run.
+* **`{base}.csv.gz`**: The core compressed data file containing all downloaded metadata for this run (identical 9-column schema for both providers).
 * **`{base}.json.gz`**: A JSON summary (schema v2) with coverage/age statistics, temporal histograms, and the change-vs-previous-run block.
-* **`{base}_failed_points.csv`**: A log of coordinates that failed to download after all retry attempts.
-* **`{city_id}_diff_{FROM}_to_{TO}.csv.gz`**: Per-pano change detail between two runs (written when changes exist).
-* **`cities.json.gz`**: The aggregate consumed by the web frontend — one entry per city with its latest stats, run history, and change summary.
+* **`{base}_failed_points.csv`**: A log of coordinates that failed to download after all retry attempts (GSV runs only).
+* **`{city_id}_diff_{FROM}_to_{TO}.csv.gz`**: Per-pano change detail between two runs of the same provider (written when changes exist; Mapillary diffs insert a `mapillary` token after `_diff`).
+* **`cities.json.gz`**: The aggregate consumed by the web frontend (schema v3) — one entry per city, grouped by provider, with each provider's latest stats, run history, and change summary.
 * **`gsv_tracker.db`**: The SQLite catalog (cities, runs, diffs, schedule state). Local only; never published.
 * **`vis/{base}.html`**: An interactive map visualization of the run (unless `--no-visual` is passed).
 
