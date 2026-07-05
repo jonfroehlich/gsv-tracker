@@ -112,95 +112,74 @@ def generate_missing_city_json_files(data_dir: str) -> None:
     
     logger.info(f"Metadata generation completed for {cnt_generated_json_files} file(s).")
 
+def _merge_histogram_into(histogram, accumulator, year_keys: bool) -> None:
+    """
+    Add one city's capture-date histogram into an accumulator dict.
+
+    Accepts both the current {"counts": {...}} shape and the bare-dict shape
+    of older per-run JSONs. Yearly histograms use int keys, daily use ISO
+    date strings.
+    """
+    counts = histogram.get("counts", histogram) if isinstance(histogram, dict) else {}
+    for key, count in counts.items():
+        if year_keys:
+            try:
+                key = int(key)
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Error converting year '{key}' to integer: {e}")
+                continue
+        accumulator[key] = accumulator.get(key, 0) + count
+
+
 def merge_capture_date_histograms(cities_data: List[Dict]) -> Dict[str, Dict[Union[int, str], int]]:
     """
-    Merge yearly and daily histograms from multiple cities.
-    
-    Args:
-        cities_data: List of city data dictionaries
-        
+    Merge yearly and daily histograms from multiple cities' per-run JSONs.
+
+    The google_panos section is optional (absent for non-GSV providers and
+    merged only when present); cities missing the all_panos histograms
+    (very old schema) are skipped with a warning.
+
     Returns:
-        Dictionary containing merged histograms for all panos and google panos.
-        Yearly histograms use integer years as keys, daily histograms use ISO date strings.
+        Dict with all_panos_yearly / google_panos_yearly / all_panos_daily /
+        google_panos_daily merged histograms. Yearly histograms use integer
+        years as keys, daily histograms use ISO date strings.
     """
     logger.debug(f"Merging capture date histograms for {len(cities_data)} cities")
 
-    all_panos_yearly = {}
-    google_panos_yearly = {}
-    all_panos_daily = {}
-    google_panos_daily = {}
-    
+    merged = {
+        "all_panos_yearly": {},
+        "google_panos_yearly": {},
+        "all_panos_daily": {},
+        "google_panos_daily": {},
+    }
+
     skipped_cities = []
     for city_data in cities_data:
         city_name = f"{city_data.get('city', {}).get('name', 'unknown')}, {city_data.get('city', {}).get('state', {}).get('abbreviation', '??')}"
         logger.debug(f"Merging histograms for {city_name}")
 
-        # Check for required histogram fields (missing in older schema)
         all_panos = city_data.get("all_panos", {})
-        google_panos = city_data.get("google_panos", {})
-        missing_fields = []
-        for section_name, section in [("all_panos", all_panos), ("google_panos", google_panos)]:
-            if "histogram_of_capture_dates_by_year" not in section:
-                missing_fields.append(f"{section_name}.histogram_of_capture_dates_by_year")
-            if "histogram_of_capture_dates" not in section:
-                missing_fields.append(f"{section_name}.histogram_of_capture_dates")
-
+        missing_fields = [
+            f"all_panos.{f}" for f in ("histogram_of_capture_dates_by_year",
+                                       "histogram_of_capture_dates")
+            if f not in all_panos]
         if missing_fields:
             logger.warning(f"Skipping {city_name}: missing fields: {', '.join(missing_fields)}")
             skipped_cities.append((city_name, missing_fields))
-            continue  
-        # Handle all panos yearly data
-        yearly_data = city_data["all_panos"]["histogram_of_capture_dates_by_year"]
-        if isinstance(yearly_data, dict) and "counts" in yearly_data:
-            for year, count in yearly_data["counts"].items():
-                try:
-                    year_int = int(year) if isinstance(year, str) else year
-                    all_panos_yearly[year_int] = all_panos_yearly.get(year_int, 0) + count
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error converting year '{year}' to integer: {str(e)}")
-        else:
-            for year, count in yearly_data.items():
-                try:
-                    year_int = int(year) if isinstance(year, str) else year
-                    all_panos_yearly[year_int] = all_panos_yearly.get(year_int, 0) + count
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error converting year '{year}' to integer: {str(e)}")
-            
-        # Handle google panos yearly data
-        yearly_data = city_data["google_panos"]["histogram_of_capture_dates_by_year"]
-        if isinstance(yearly_data, dict) and "counts" in yearly_data:
-            for year, count in yearly_data["counts"].items():
-                try:
-                    year_int = int(year) if isinstance(year, str) else year
-                    google_panos_yearly[year_int] = google_panos_yearly.get(year_int, 0) + count
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error converting year '{year}' to integer: {str(e)}")
-        else:
-            for year, count in yearly_data.items():
-                try:
-                    year_int = int(year) if isinstance(year, str) else year
-                    google_panos_yearly[year_int] = google_panos_yearly.get(year_int, 0) + count
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error converting year '{year}' to integer: {str(e)}")
-            
-        # Handle all panos daily data
-        daily_data = city_data["all_panos"]["histogram_of_capture_dates"]
-        if isinstance(daily_data, dict) and "counts" in daily_data:
-            for date, count in daily_data["counts"].items():
-                all_panos_daily[date] = all_panos_daily.get(date, 0) + count
-        else:
-            for date, count in daily_data.items():
-                all_panos_daily[date] = all_panos_daily.get(date, 0) + count
-            
-        # Handle google panos daily data
-        daily_data = city_data["google_panos"]["histogram_of_capture_dates"]
-        if isinstance(daily_data, dict) and "counts" in daily_data:
-            for date, count in daily_data["counts"].items():
-                google_panos_daily[date] = google_panos_daily.get(date, 0) + count
-        else:
-            for date, count in daily_data.items():
-                google_panos_daily[date] = google_panos_daily.get(date, 0) + count
-    
+            continue
+
+        _merge_histogram_into(all_panos["histogram_of_capture_dates_by_year"],
+                              merged["all_panos_yearly"], year_keys=True)
+        _merge_histogram_into(all_panos["histogram_of_capture_dates"],
+                              merged["all_panos_daily"], year_keys=False)
+
+        google_panos = city_data.get("google_panos")
+        if google_panos:
+            _merge_histogram_into(google_panos.get("histogram_of_capture_dates_by_year", {}),
+                                  merged["google_panos_yearly"], year_keys=True)
+            _merge_histogram_into(google_panos.get("histogram_of_capture_dates", {}),
+                                  merged["google_panos_daily"], year_keys=False)
+
     if skipped_cities:
         logger.warning(f"\n{'='*60}")
         logger.warning(f"Skipped {len(skipped_cities)} cities with outdated JSON schema:")
@@ -209,13 +188,7 @@ def merge_capture_date_histograms(cities_data: List[Dict]) -> Dict[str, Dict[Uni
         logger.warning(f"To fix: delete their .json.gz files and rerun generate_json.py")
         logger.warning(f"{'='*60}\n")
 
-    # Sort all histograms
-    return {
-        "all_panos_yearly": dict(sorted(all_panos_yearly.items())),
-        "google_panos_yearly": dict(sorted(google_panos_yearly.items())),
-        "all_panos_daily": dict(sorted(all_panos_daily.items())),
-        "google_panos_daily": dict(sorted(google_panos_daily.items()))
-    }
+    return {key: dict(sorted(value.items())) for key, value in merged.items()}
 
 def generate_city_metadata_summary_as_json(
     csv_gz_path: str,
@@ -403,15 +376,99 @@ def _load_city_json(json_path: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _build_provider_summary(runs, latest_json, data_dir, conn) -> Dict[str, Any]:
+    """
+    Build one provider's {latest, runs, change} block for a city's
+    aggregate record. `runs` is that provider's run series (oldest first)
+    and `latest_json` the loaded per-run JSON of its newest run.
+    """
+    from . import db  # local import to keep module import order simple
+
+    latest = runs[-1]
+    csv_path = os.path.join(data_dir, latest.csv_filename)
+    csv_size = os.path.getsize(csv_path) if os.path.exists(csv_path) else None
+
+    panorama_counts = {
+        "unique_panos": latest_json["all_panos"]["duplicate_stats"]["total_unique_panos"],
+    }
+    histograms_by_year = {
+        "all_panos": latest_json["all_panos"]["histogram_of_capture_dates_by_year"],
+    }
+    latest_block = {
+        "run_date": latest.run_date,
+        "is_baseline": latest.is_baseline,
+        "data_file": {
+            "filename": latest.csv_filename,
+            "size_bytes": csv_size,
+        },
+        "json_file": latest.json_filename,
+        "search_area_km2": latest_json["search_grid"]["area_km2"],
+        # From the DB, not the per-run JSON: legacy baseline JSONs
+        # predate the unique-pano coverage definition, and all DB
+        # rows were computed with the current definition
+        "coverage_rate_percent": latest.coverage_rate_pct,
+        "panorama_counts": panorama_counts,
+        "all_panos_age_stats": latest_json["all_panos"]["age_stats"],
+        "collection_info": latest_json["download"],
+        "histogram_of_capture_dates_by_year": histograms_by_year,
+    }
+    # GSV runs carry the Google-copyright breakdown; other providers don't
+    google_panos = latest_json.get("google_panos")
+    if google_panos:
+        panorama_counts["unique_google_panos"] = \
+            google_panos["duplicate_stats"]["total_unique_panos"]
+        latest_block["google_panos_age_stats"] = google_panos["age_stats"]
+        histograms_by_year["google_panos"] = \
+            google_panos["histogram_of_capture_dates_by_year"]
+
+    # Change summary vs the previous run (None for the first run)
+    change = None
+    diff_row = db.get_diff_for_run(conn, latest.run_id)
+    if diff_row is not None and len(runs) >= 2:
+        change = {
+            "from": runs[-2].run_date,
+            "to": latest.run_date,
+            "panos_added": diff_row["panos_added"],
+            "panos_removed": diff_row["panos_removed"],
+            "capture_date_changed": diff_row["capture_date_changed"],
+            "coverage_delta_pct": diff_row["coverage_delta_pct"],
+            "diff_file": diff_row["detail_filename"],
+        }
+
+    return {
+        "latest": latest_block,
+        "runs": [{
+            "run_date": r.run_date,
+            "is_baseline": r.is_baseline,
+            "data_file": r.csv_filename,
+            "json_file": r.json_filename,
+            "unique_panos": r.unique_panos,
+            "unique_google_panos": r.unique_google_panos,
+            "coverage_rate_percent": r.coverage_rate_pct,
+            "median_pano_age_years": r.median_pano_age_years,
+        } for r in runs],
+        "change": change,
+    }
+
+
 def generate_aggregate_v2(conn, data_dir: str) -> Dict[str, Any]:
     """
-    Generate the schema-v2 aggregate cities.json.gz from the SQLite catalog.
+    Generate the aggregate cities.json.gz (schema v3) from the SQLite
+    catalog. (The function name predates the provider dimension; it is the
+    catalog-driven successor to the legacy directory-scan aggregate.)
 
-    Unlike the legacy directory-scan aggregate, this walks the runs catalog:
-    one entry per city (grouped), with a `latest` block for the map display,
-    a slim `runs[]` history, and a `change` block summarizing the diff
-    between the two most recent runs. Global capture-date histograms merge
-    each city's LATEST run only (so re-running a city never double-counts).
+    One entry per city, grouped by provider:
+
+        { "city_id": ..., "city": {...},
+          "providers": {
+              "gsv":       { "latest": {...}, "runs": [...], "change": {...} },
+              "mapillary": { ... } } }
+
+    Each provider block has a `latest` summary for the map display, a slim
+    `runs[]` history, and a `change` block summarizing the diff between the
+    provider's two most recent runs. Global capture-date histograms are
+    keyed by provider and merge each city's LATEST run only (so re-running
+    a city never double-counts).
 
     Args:
         conn: open catalog connection (db.connect)
@@ -424,84 +481,48 @@ def generate_aggregate_v2(conn, data_dir: str) -> Dict[str, Any]:
     from . import db  # local import to keep module import order simple
 
     cities_out = []
-    latest_run_jsons = []  # raw per-run JSON of each city's latest run, for histogram merge
+    # Raw per-run JSON of each city's latest run per provider, for the merge
+    latest_run_jsons_by_provider: Dict[str, List[Dict]] = {}
 
     for city in tqdm(db.get_all_cities(conn), desc="Aggregating cities", unit="city"):
-        runs = db.get_runs_for_city(conn, city.city_id)
-        if not runs:
+        runs_by_provider: Dict[str, list] = {}
+        for run in db.get_runs_for_city(conn, city.city_id, provider=None):
+            runs_by_provider.setdefault(run.provider, []).append(run)
+
+        providers_out = {}
+        city_block = None
+        for provider in sorted(runs_by_provider, key=lambda p: p != 'gsv'):
+            runs = runs_by_provider[provider]
+            latest = runs[-1]
+            latest_json = None
+            if latest.json_filename:
+                latest_json = _load_city_json(os.path.join(data_dir, latest.json_filename))
+            if latest_json is None:
+                logger.warning(
+                    f"Skipping {city.city_id} [{provider}]: missing/unreadable "
+                    f"per-run JSON ({latest.json_filename})")
+                continue
+            providers_out[provider] = _build_provider_summary(
+                runs, latest_json, data_dir, conn)
+            latest_run_jsons_by_provider.setdefault(provider, []).append(latest_json)
+            if city_block is None:  # gsv first, so GSV's city block wins
+                city_block = latest_json["city"]
+
+        if not providers_out:
             continue
-        latest = runs[-1]
-
-        latest_json = None
-        if latest.json_filename:
-            latest_json = _load_city_json(os.path.join(data_dir, latest.json_filename))
-        if latest_json is None:
-            logger.warning(f"Skipping {city.city_id}: missing/unreadable per-run JSON "
-                           f"({latest.json_filename})")
-            continue
-        latest_run_jsons.append(latest_json)
-
-        csv_path = os.path.join(data_dir, latest.csv_filename)
-        csv_size = os.path.getsize(csv_path) if os.path.exists(csv_path) else None
-
-        # Change summary vs the previous run (None for a city's first run)
-        change = None
-        diff_row = db.get_diff_for_run(conn, latest.run_id)
-        if diff_row is not None and len(runs) >= 2:
-            change = {
-                "from": runs[-2].run_date,
-                "to": latest.run_date,
-                "panos_added": diff_row["panos_added"],
-                "panos_removed": diff_row["panos_removed"],
-                "capture_date_changed": diff_row["capture_date_changed"],
-                "coverage_delta_pct": diff_row["coverage_delta_pct"],
-                "diff_file": diff_row["detail_filename"],
-            }
-
         cities_out.append({
             "city_id": city.city_id,
-            "city": latest_json["city"],
-            "latest": {
-                "run_date": latest.run_date,
-                "is_baseline": latest.is_baseline,
-                "data_file": {
-                    "filename": latest.csv_filename,
-                    "size_bytes": csv_size,
-                },
-                "json_file": latest.json_filename,
-                "search_area_km2": latest_json["search_grid"]["area_km2"],
-                # From the DB, not the per-run JSON: legacy baseline JSONs
-                # predate the unique-pano coverage definition, and all DB
-                # rows were computed with the current definition
-                "coverage_rate_percent": latest.coverage_rate_pct,
-                "panorama_counts": {
-                    "unique_panos": latest_json["all_panos"]["duplicate_stats"]["total_unique_panos"],
-                    "unique_google_panos": latest_json["google_panos"]["duplicate_stats"]["total_unique_panos"],
-                },
-                "all_panos_age_stats": latest_json["all_panos"]["age_stats"],
-                "google_panos_age_stats": latest_json["google_panos"]["age_stats"],
-                "collection_info": latest_json["download"],
-                "histogram_of_capture_dates_by_year": {
-                    "all_panos": latest_json["all_panos"]["histogram_of_capture_dates_by_year"],
-                    "google_panos": latest_json["google_panos"]["histogram_of_capture_dates_by_year"],
-                },
-            },
-            "runs": [{
-                "run_date": r.run_date,
-                "is_baseline": r.is_baseline,
-                "data_file": r.csv_filename,
-                "json_file": r.json_filename,
-                "unique_google_panos": r.unique_google_panos,
-                "coverage_rate_percent": r.coverage_rate_pct,
-                "median_pano_age_years": r.median_pano_age_years,
-            } for r in runs],
-            "change": change,
+            "city": city_block,
+            "providers": providers_out,
         })
 
-    merged_histograms = merge_capture_date_histograms(latest_run_jsons)
+    merged_histograms = {
+        provider: merge_capture_date_histograms(jsons)
+        for provider, jsons in sorted(latest_run_jsons_by_provider.items())
+    }
 
     summary = {
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_at": pd.Timestamp.now(tz='UTC').isoformat(),
         "cities_count": len(cities_out),
         "histogram_of_capture_dates": merged_histograms,
@@ -511,7 +532,7 @@ def generate_aggregate_v2(conn, data_dir: str) -> Dict[str, Any]:
     output_path = os.path.join(data_dir, 'cities.json.gz')
     with gzip.open(output_path, 'wt', encoding='utf-8') as f:
         json.dump(sanitize_for_json(summary), f, indent=2, allow_nan=False)
-    logger.info(f"Wrote v2 aggregate for {len(cities_out)} cities to {output_path}")
+    logger.info(f"Wrote v3 aggregate for {len(cities_out)} cities to {output_path}")
 
     return summary
 
