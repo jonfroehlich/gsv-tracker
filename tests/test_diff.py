@@ -64,3 +64,13 @@ def test_duplicate_pano_ids_deduped_keeping_newest_date():
 def test_diff_filename():
     assert generate_diff_filename('bend--or', '2026-04-01', '2026-07-01') == \
         'bend--or_diff_2026-04-01_to_2026-07-01.csv.gz'
+
+
+def test_diff_filename_provider():
+    # gsv keeps the tokenless legacy form; other providers get a token
+    assert generate_diff_filename('bend--or', '2026-04-01', '2026-07-01',
+                                  provider='gsv') == \
+        'bend--or_diff_2026-04-01_to_2026-07-01.csv.gz'
+    assert generate_diff_filename('bend--or', '2026-04-01', '2026-07-01',
+                                  provider='mapillary') == \
+        'bend--or_diff_mapillary_2026-04-01_to_2026-07-01.csv.gz'

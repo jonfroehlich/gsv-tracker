@@ -8,9 +8,12 @@ exist on disk and all must parse:
 1. Legacy (undated):        seattle--wa_width_1000_height_1000_step_20.csv.gz
 2. Legacy (buggy float):    seattle--wa_width_1000_height_1000_step_20.0.csv.gz
 3. Dated runs (current):    seattle--washington--united-states_width_1000_height_1000_step_20_2026-07-02.csv.gz
+4. Non-GSV provider runs:   seattle--washington--united-states_width_1000_height_1000_step_20_mapillary_2026-07-02.csv.gz
 
-New files always use form 3: integer dimensions plus an ISO run date, so a
-city can accumulate multiple dated snapshots over time.
+New files use form 3 (GSV) or 4 (other providers): integer dimensions, an
+optional provider token, and an ISO run date. The absence of a provider
+token always means GSV, so every pre-existing filename and published URL
+stays valid unchanged.
 """
 
 import os
@@ -19,12 +22,20 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Optional
 
-# Accepts int or float numeric groups and an optional trailing ISO run date.
+# Providers with a filename token. GSV files carry no token (legacy compat),
+# so 'gsv' never appears in filenames but is the parse default.
+DEFAULT_PROVIDER = 'gsv'
+KNOWN_PROVIDERS = ('gsv', 'mapillary')
+
+# Accepts int or float numeric groups, an optional provider token, and an
+# optional trailing ISO run date. The groups can't bleed into each other:
+# step is numeric, provider alphabetic, date digits-and-dashes.
 FILENAME_RE = re.compile(
     r'^(?P<slug>.+?)'
     r'_width_(?P<w>\d+(?:\.\d+)?)'
     r'_height_(?P<h>\d+(?:\.\d+)?)'
     r'_step_(?P<s>\d+(?:\.\d+)?)'
+    r'(?:_(?P<provider>[a-z]+))?'
     r'(?:_(?P<date>\d{4}-\d{2}-\d{2}))?$'
 )
 
@@ -41,6 +52,7 @@ class ParsedFilename:
     height_meters: int
     step_meters: int
     run_date: Optional[date]     # None for legacy undated files
+    provider: str = DEFAULT_PROVIDER  # 'gsv' when no token in the filename
 
 
 def sanitize_city_query_str(city_query_str: str) -> str:
@@ -109,26 +121,32 @@ def parse_filename(filename: str) -> ParsedFilename:
     Parse a GSV metadata filename to extract its parameters.
 
     Accepts all filename generations: legacy undated names with integer or
-    float-formatted numbers (an old bug wrote `_step_20.0`), and current
-    dated names with a trailing `_YYYY-MM-DD` run date.
+    float-formatted numbers (an old bug wrote `_step_20.0`), current dated
+    names with a trailing `_YYYY-MM-DD` run date, and provider-tagged names
+    with a provider token before the date (no token = GSV).
 
     Args:
         filename: Name or path of the data file (any known extension)
 
     Returns:
         ParsedFilename with slug, reconstructed query string, integer
-        dimensions, and run_date (None for legacy undated files).
+        dimensions, run_date (None for legacy undated files), and provider
+        ('gsv' unless a provider token is present).
 
     Raises:
-        ValueError: If the filename doesn't match the expected format
+        ValueError: If the filename doesn't match the expected format or
+            carries an unknown provider token
 
     Examples:
         >>> p = parse_filename("grand-marais--mn_width_1000_height_1000_step_20.csv.gz")
-        >>> (p.city_query_str, p.width_meters, p.run_date)
-        ('Grand Marais, Mn', 1000, None)
+        >>> (p.city_query_str, p.width_meters, p.run_date, p.provider)
+        ('Grand Marais, Mn', 1000, None, 'gsv')
         >>> p = parse_filename("bend--or_width_5000_height_5000_step_20.0_2026-07-02.csv.gz")
         >>> (p.step_meters, p.run_date.isoformat())
         (20, '2026-07-02')
+        >>> p = parse_filename("bend--or_width_5000_height_5000_step_20_mapillary_2026-07-02.csv.gz")
+        >>> (p.provider, p.run_date.isoformat())
+        ('mapillary', '2026-07-02')
     """
     base = os.path.basename(filename)
     for ext in _KNOWN_EXTENSIONS:
@@ -139,6 +157,12 @@ def parse_filename(filename: str) -> ParsedFilename:
     match = FILENAME_RE.match(base)
     if not match:
         raise ValueError(f"Filename {filename} doesn't match expected format")
+
+    provider = match.group('provider') or DEFAULT_PROVIDER
+    if provider not in KNOWN_PROVIDERS:
+        raise ValueError(
+            f"Filename {filename} has unknown provider token {provider!r} "
+            f"(known: {', '.join(KNOWN_PROVIDERS)})")
 
     run_date = None
     if match.group('date'):
@@ -152,6 +176,7 @@ def parse_filename(filename: str) -> ParsedFilename:
         height_meters=int(float(match.group('h'))),
         step_meters=int(float(match.group('s'))),
         run_date=run_date,
+        provider=provider,
     )
 
 
@@ -180,7 +205,8 @@ def generate_run_filename(
     grid_width: float,
     grid_height: float,
     step_length: float,
-    run_date: date
+    run_date: date,
+    provider: str = DEFAULT_PROVIDER
 ) -> str:
     """
     Generate the dated base filename (no extension) for a collection run.
@@ -189,11 +215,18 @@ def generate_run_filename(
         city_id: canonical sanitized city slug (see db.register_city)
         grid_width/grid_height/step_length: grid geometry in meters
         run_date: the run's date, embedded as an ISO suffix
+        provider: imagery provider; 'gsv' emits no token so GSV filenames
+            match the pre-provider convention exactly
 
     Examples:
         >>> from datetime import date
         >>> generate_run_filename("bend--oregon--united-states", 5000, 5000, 20, date(2026, 7, 2))
         'bend--oregon--united-states_width_5000_height_5000_step_20_2026-07-02'
+        >>> generate_run_filename("bend--oregon--united-states", 5000, 5000, 20, date(2026, 7, 2), provider='mapillary')
+        'bend--oregon--united-states_width_5000_height_5000_step_20_mapillary_2026-07-02'
     """
+    if provider not in KNOWN_PROVIDERS:
+        raise ValueError(f"Unknown provider {provider!r} (known: {', '.join(KNOWN_PROVIDERS)})")
+    provider_token = '' if provider == DEFAULT_PROVIDER else f"_{provider}"
     return (f"{city_id}_width_{int(grid_width)}_height_{int(grid_height)}"
-            f"_step_{int(step_length)}_{run_date.isoformat()}")
+            f"_step_{int(step_length)}{provider_token}_{run_date.isoformat()}")

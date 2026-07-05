@@ -1,4 +1,4 @@
-"""Filename convention tests: all three generations must parse and round-trip."""
+"""Filename convention tests: all filename generations must parse and round-trip."""
 
 from datetime import date
 
@@ -15,12 +15,14 @@ def test_parse_legacy_int_name():
     assert p.city_query_str == "Grand Marais, Mn, Usa"
     assert (p.width_meters, p.height_meters, p.step_meters) == (1000, 1000, 20)
     assert p.run_date is None
+    assert p.provider == "gsv"
 
 
 def test_parse_buggy_float_step_name():
     p = parse_filename("bend--or_width_5000_height_5000_step_20.0.csv.gz")
     assert p.step_meters == 20
     assert p.run_date is None
+    assert p.provider == "gsv"
 
 
 def test_parse_dated_name():
@@ -28,6 +30,7 @@ def test_parse_dated_name():
         "bend--oregon--united-states_width_5000_height_5000_step_20_2026-07-02.json.gz")
     assert p.run_date == date(2026, 7, 2)
     assert p.slug == "bend--oregon--united-states"
+    assert p.provider == "gsv"
 
 
 def test_parse_legacy_single_underscore_slug():
@@ -60,6 +63,51 @@ def test_generate_run_filename_roundtrip():
     p = parse_filename(name + ".csv.gz")
     assert p.slug == "bend--oregon--united-states"
     assert p.run_date == date(2026, 7, 2)
+    assert p.provider == "gsv"
+
+
+def test_generate_run_filename_gsv_has_no_provider_token():
+    # Explicit provider='gsv' must produce byte-identical names to the
+    # pre-provider convention (published URLs depend on this).
+    assert generate_run_filename("bend--or", 5000, 5000, 20, date(2026, 7, 2),
+                                 provider="gsv") == \
+        generate_run_filename("bend--or", 5000, 5000, 20, date(2026, 7, 2))
+
+
+def test_parse_mapillary_dated_name():
+    p = parse_filename(
+        "bend--oregon--united-states_width_5000_height_5000_step_20_mapillary_2026-07-05.csv.gz")
+    assert p.provider == "mapillary"
+    assert p.run_date == date(2026, 7, 5)
+    assert p.slug == "bend--oregon--united-states"
+    assert (p.width_meters, p.height_meters, p.step_meters) == (5000, 5000, 20)
+
+
+def test_parse_mapillary_with_float_step():
+    p = parse_filename("bend--or_width_5000_height_5000_step_20.0_mapillary_2026-07-05.csv.gz")
+    assert p.provider == "mapillary"
+    assert p.step_meters == 20
+
+
+def test_generate_mapillary_run_filename_roundtrip():
+    name = generate_run_filename("st.-louis--mo--usa", 1000, 1000, 20,
+                                 date(2026, 7, 5), provider="mapillary")
+    assert name == "st.-louis--mo--usa_width_1000_height_1000_step_20_mapillary_2026-07-05"
+    p = parse_filename(name + ".csv.gz")
+    assert p.provider == "mapillary"
+    assert p.slug == "st.-louis--mo--usa"
+    assert p.run_date == date(2026, 7, 5)
+
+
+def test_parse_rejects_unknown_provider_token():
+    with pytest.raises(ValueError):
+        parse_filename("bend--or_width_5000_height_5000_step_20_kartaview_2026-07-05.csv.gz")
+
+
+def test_generate_run_filename_rejects_unknown_provider():
+    with pytest.raises(ValueError):
+        generate_run_filename("bend--or", 5000, 5000, 20, date(2026, 7, 5),
+                              provider="kartaview")
 
 
 def test_sanitize_city_query_str():

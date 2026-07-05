@@ -179,9 +179,17 @@ def compute_run_diff(df_old: pd.DataFrame, df_new: pd.DataFrame) -> RunDiff:
     )
 
 
-def generate_diff_filename(city_id: str, from_date: str, to_date: str) -> str:
-    """Basename for a published diff detail file."""
-    return f"{city_id}_diff_{from_date}_to_{to_date}.csv.gz"
+def generate_diff_filename(city_id: str, from_date: str, to_date: str,
+                           provider: str = 'gsv') -> str:
+    """
+    Basename for a published diff detail file.
+
+    GSV diffs keep the original tokenless form so published URLs are stable;
+    other providers get a token after '_diff':
+    ``{city_id}_diff_mapillary_{from}_to_{to}.csv.gz``.
+    """
+    provider_token = '' if provider == 'gsv' else f"{provider}_"
+    return f"{city_id}_diff_{provider_token}{from_date}_to_{to_date}.csv.gz"
 
 
 def write_diff_detail(diff: RunDiff, output_path: str) -> None:
