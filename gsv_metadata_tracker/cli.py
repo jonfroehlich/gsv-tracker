@@ -1,13 +1,17 @@
 """
 Command-line interface for the GSV Metadata Tracker tool.
 
-Each invocation collects one dated snapshot ("run") of a city. Runs are
-cataloged in a SQLite database (see db.py); a city's grid geometry is
-frozen in the catalog at first registration so that all future runs sample
-the exact same grid and run-to-run diffs are meaningful.
+Each invocation collects one dated snapshot ("run") of a city per imagery
+provider — by default BOTH GSV and Mapillary, back-to-back with the same
+run date, so the two series stay in sync (--provider gsv|mapillary
+restricts to one). Runs are cataloged in a SQLite database (see db.py); a
+city's grid geometry is frozen in the catalog at first registration so
+that all future runs sample the exact same grid and run-to-run diffs are
+meaningful.
 
-Skip policy: if the city's latest run is newer than --min-days-since-last-run
-days, the command exits 0 without downloading (use --force to override).
+Skip policy (per provider): if the provider's latest run is newer than
+--min-days-since-last-run days, that provider is skipped without
+downloading (use --force to override).
 
 Concurrent API requests are controlled by two key parameters:
 
@@ -80,11 +84,13 @@ def parse_args():
 
     parser.add_argument(
         '--provider',
-        choices=['gsv', 'mapillary'],
-        default='gsv',
-        help='Imagery provider to collect. Each provider keeps its own '
-             'independent run series (dated files, diffs, skip policy) on '
-             'the same frozen city grid.'
+        choices=['both', 'gsv', 'mapillary'],
+        default='both',
+        help='Imagery provider(s) to collect. The default collects GSV then '
+             'Mapillary back-to-back with the same run date so the two '
+             'series stay in sync. Each provider keeps its own independent '
+             'run series (dated files, diffs, skip policy) on the same '
+             'frozen city grid.'
     )
 
     parser.add_argument(
@@ -380,8 +386,12 @@ async def async_main():
     run_date = args.run_date or datetime.now(timezone.utc).date()
     db_path = args.db_path or db.get_default_db_path(args.download_dir)
 
+    providers = ['gsv', 'mapillary'] if args.provider == 'both' else [args.provider]
+
     try:
-        config = load_config(args.provider)
+        # Fail fast: require every requested provider's credential before
+        # any downloading, so a missing key can't leave the series unpaired
+        configs = {provider: load_config(provider) for provider in providers}
         conn = db.connect(db_path)
 
         vis_path = get_default_vis_dir()
@@ -398,127 +408,148 @@ async def async_main():
               f"step {city_row.step_m}m, centered at "
               f"{city_row.center_lat:.5f}, {city_row.center_lon:.5f}")
 
-        # Skip policy: honor --min-days-since-last-run unless --force.
-        # Each provider is an independent run series.
-        latest = db.get_latest_run(conn, city_row.city_id, args.provider)
-        if latest is not None:
-            days_since = (run_date - date.fromisoformat(latest.run_date)).days
-            if latest.run_date == run_date.isoformat():
-                print(f"A {args.provider} run already exists for {city_row.city_id} "
-                      f"on {run_date} ({latest.csv_filename}); nothing to do. "
-                      f"Use --run-date to record a different date.")
-                return 0
-            if not args.force and days_since < args.min_days_since_last_run:
-                print(f"SKIP: latest {args.provider} run for {city_row.city_id} is "
-                      f"{days_since} days old ({latest.run_date}), newer than "
-                      f"--min-days-since-last-run={args.min_days_since_last_run}. "
-                      f"Use --force to collect anyway.")
-                return 0
-
-        # Dated, immutable output file for this run
-        run_base = generate_run_filename(
-            city_row.city_id, city_row.grid_width_m, city_row.grid_height_m,
-            city_row.step_m, run_date, provider=args.provider)
-        output_csv_gz_path = os.path.join(args.download_dir, f"{run_base}.csv.gz")
-
-        logging.info(f"Collecting {args.provider} run {run_date} for {city_row.city_id}")
-
-        if args.provider == 'mapillary':
-            dict_results = await download_mapillary_metadata_async(
-                city_name=city_row.display_name,
-                center_lat=city_row.center_lat,
-                center_lon=city_row.center_lon,
-                grid_width=city_row.grid_width_m,
-                grid_height=city_row.grid_height_m,
-                step_length=city_row.step_m,
-                access_token=config['access_token'],
-                output_csv_gz_path=output_csv_gz_path,
-                request_timeout=args.timeout
-            )
-        else:
-            logging.info(f"Using batch_size={args.batch_size}, "
-                         f"connection_limit={args.connection_limit}")
-            dict_results = await download_gsv_metadata_async(
-                city_name=city_row.display_name,
-                center_lat=city_row.center_lat,
-                center_lon=city_row.center_lon,
-                grid_width=city_row.grid_width_m,
-                grid_height=city_row.grid_height_m,
-                step_length=city_row.step_m,
-                api_key=config['api_key'],
-                output_csv_gz_path=output_csv_gz_path,
-                batch_size=args.batch_size,
-                connection_limit=args.connection_limit,
-                request_timeout=args.timeout
-            )
-        df = dict_results["df"]
-
-        # Record API usage in the daily per-provider budget ledger
-        db.add_api_usage(conn, run_date, dict_results["api_requests"],
-                         provider=args.provider)
-
-        print("\nDownload Summary for", city_row.display_name)
-        print("=" * 50)
-        print_df_summary(df, provider=args.provider)
-
-        # Catalog the run
-        stats = calculate_run_stats(df, run_date, provider=args.provider)
-        duration = None
-        started = dict_results.get("started_at")
-        finished = dict_results.get("finished_at")
-        if started and finished:
-            duration = (datetime.fromisoformat(finished)
-                        - datetime.fromisoformat(started)).total_seconds()
-        run_id = db.register_run(
-            conn,
-            city_id=city_row.city_id,
-            run_date=run_date,
-            csv_filename=os.path.basename(output_csv_gz_path),
-            provider=args.provider,
-            started_at=started,
-            finished_at=finished,
-            duration_seconds=duration,
-            api_requests=dict_results["api_requests"],
-            **stats,
-        )
-
-        # Diff against the previous run of the same provider, if any
-        change_block = None
-        prev_run = db.get_previous_run(conn, city_row.city_id, run_date,
-                                       provider=args.provider)
-        if prev_run is not None:
-            change_block = _compute_and_record_diff(
-                conn, city_row, prev_run, run_id, run_date, df,
-                args.download_dir, provider=args.provider)
-
-        # Per-run summary JSON (schema v2, ages pinned to run_date)
-        json_path = generate_city_metadata_summary_as_json(
-            output_csv_gz_path, df,
-            city_row.city_name,
-            city_row.state_name,
-            city_row.country_name,
-            city_row.grid_width_m, city_row.grid_height_m, city_row.step_m,
-            force_recreate_file=True,
-            run_date=run_date,
-            change_from_previous_run=change_block,
-            provider=args.provider)
-        db.update_run_json_filename(conn, run_id, os.path.basename(json_path))
+        # Collect each provider in turn (same run_date, so series pair up).
+        # One provider failing must not prevent the other from collecting.
+        failed = []
+        for provider in providers:
+            try:
+                await _collect_one_run(conn, args, city_row, run_date,
+                                       provider, configs[provider], vis_path)
+            except Exception as e:
+                logging.exception(f"{provider} collection failed: {e}")
+                failed.append(provider)
 
         if not args.no_publish_json:
             generate_aggregate_v2(conn, args.download_dir)
 
-        if not args.no_visual:
-            map_path = os.path.join(vis_path, f"{run_base}.html")
-            map_obj = create_visualization_map(df, city_row.display_name)
-            print(f"Saving map visualization to {map_path}")
-            map_obj.save(map_path)
-            logging.info(f"Map visualization saved to {map_path}")
-
+        if failed:
+            print(f"FAILED: {', '.join(failed)} (see log for details)")
+            return 1
         return 0
 
     except Exception as e:
         logging.exception(f"Error: {str(e)}")
         sys.exit(1)
+
+
+async def _collect_one_run(conn, args, city_row, run_date, provider, config,
+                           vis_path) -> None:
+    """
+    Collect, catalog, diff, and summarize one (city, provider) run.
+    Returns silently when the skip policy applies; raises on failure.
+    """
+    # Skip policy: honor --min-days-since-last-run unless --force.
+    # Each provider is an independent run series.
+    latest = db.get_latest_run(conn, city_row.city_id, provider)
+    if latest is not None:
+        days_since = (run_date - date.fromisoformat(latest.run_date)).days
+        if latest.run_date == run_date.isoformat():
+            print(f"A {provider} run already exists for {city_row.city_id} "
+                  f"on {run_date} ({latest.csv_filename}); nothing to do. "
+                  f"Use --run-date to record a different date.")
+            return
+        if not args.force and days_since < args.min_days_since_last_run:
+            print(f"SKIP: latest {provider} run for {city_row.city_id} is "
+                  f"{days_since} days old ({latest.run_date}), newer than "
+                  f"--min-days-since-last-run={args.min_days_since_last_run}. "
+                  f"Use --force to collect anyway.")
+            return
+
+    # Dated, immutable output file for this run
+    run_base = generate_run_filename(
+        city_row.city_id, city_row.grid_width_m, city_row.grid_height_m,
+        city_row.step_m, run_date, provider=provider)
+    output_csv_gz_path = os.path.join(args.download_dir, f"{run_base}.csv.gz")
+
+    logging.info(f"Collecting {provider} run {run_date} for {city_row.city_id}")
+
+    if provider == 'mapillary':
+        dict_results = await download_mapillary_metadata_async(
+            city_name=city_row.display_name,
+            center_lat=city_row.center_lat,
+            center_lon=city_row.center_lon,
+            grid_width=city_row.grid_width_m,
+            grid_height=city_row.grid_height_m,
+            step_length=city_row.step_m,
+            access_token=config['access_token'],
+            output_csv_gz_path=output_csv_gz_path,
+            request_timeout=args.timeout
+        )
+    else:
+        logging.info(f"Using batch_size={args.batch_size}, "
+                     f"connection_limit={args.connection_limit}")
+        dict_results = await download_gsv_metadata_async(
+            city_name=city_row.display_name,
+            center_lat=city_row.center_lat,
+            center_lon=city_row.center_lon,
+            grid_width=city_row.grid_width_m,
+            grid_height=city_row.grid_height_m,
+            step_length=city_row.step_m,
+            api_key=config['api_key'],
+            output_csv_gz_path=output_csv_gz_path,
+            batch_size=args.batch_size,
+            connection_limit=args.connection_limit,
+            request_timeout=args.timeout
+        )
+    df = dict_results["df"]
+
+    # Record API usage in the daily per-provider budget ledger
+    db.add_api_usage(conn, run_date, dict_results["api_requests"],
+                     provider=provider)
+
+    print(f"\nDownload Summary for {city_row.display_name} [{provider}]")
+    print("=" * 50)
+    print_df_summary(df, provider=provider)
+
+    # Catalog the run
+    stats = calculate_run_stats(df, run_date, provider=provider)
+    duration = None
+    started = dict_results.get("started_at")
+    finished = dict_results.get("finished_at")
+    if started and finished:
+        duration = (datetime.fromisoformat(finished)
+                    - datetime.fromisoformat(started)).total_seconds()
+    run_id = db.register_run(
+        conn,
+        city_id=city_row.city_id,
+        run_date=run_date,
+        csv_filename=os.path.basename(output_csv_gz_path),
+        provider=provider,
+        started_at=started,
+        finished_at=finished,
+        duration_seconds=duration,
+        api_requests=dict_results["api_requests"],
+        **stats,
+    )
+
+    # Diff against the previous run of the same provider, if any
+    change_block = None
+    prev_run = db.get_previous_run(conn, city_row.city_id, run_date,
+                                   provider=provider)
+    if prev_run is not None:
+        change_block = _compute_and_record_diff(
+            conn, city_row, prev_run, run_id, run_date, df,
+            args.download_dir, provider=provider)
+
+    # Per-run summary JSON (schema v2, ages pinned to run_date)
+    json_path = generate_city_metadata_summary_as_json(
+        output_csv_gz_path, df,
+        city_row.city_name,
+        city_row.state_name,
+        city_row.country_name,
+        city_row.grid_width_m, city_row.grid_height_m, city_row.step_m,
+        force_recreate_file=True,
+        run_date=run_date,
+        change_from_previous_run=change_block,
+        provider=provider)
+    db.update_run_json_filename(conn, run_id, os.path.basename(json_path))
+
+    if not args.no_visual:
+        map_path = os.path.join(vis_path, f"{run_base}.html")
+        map_obj = create_visualization_map(df, city_row.display_name)
+        print(f"Saving map visualization to {map_path}")
+        map_obj.save(map_path)
+        logging.info(f"Map visualization saved to {map_path}")
 
 
 def _check_boundary(args, vis_path: str) -> int:

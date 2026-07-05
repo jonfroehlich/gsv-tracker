@@ -21,14 +21,19 @@ so cross-provider snapshots align.
 
 ## Imagery providers
 
-| | Google Street View (`--provider gsv`, default) | Mapillary (`--provider mapillary`) |
+**By default every collection command gathers both providers**, back-to-back
+with the same run date, so the two series stay in sync (`--provider gsv` or
+`--provider mapillary` restricts to one).
+
+| | Google Street View (`--provider gsv`) | Mapillary (`--provider mapillary`) |
 |---|---|---|
 | API model | One metadata request per grid point ("nearest pano to X?") | Bulk z14 vector tiles (~10–100 requests per city) |
 | What's kept | The nearest pano per grid point | **Every** 360° pano (`is_pano`), assigned to its nearest grid point; flat phone photos are excluded |
 | Credential | `GMAPS_API_KEY` ([console.cloud.google.com](https://console.cloud.google.com/apis/credentials), Street View Static API enabled) | `MAPILLARY_ACCESS_TOKEN` (free client token from [mapillary.com/dashboard/developers](https://www.mapillary.com/dashboard/developers)) |
 
-Both go in `.env` in the project root; each command only requires the
-credential of the provider it collects.
+Both go in `.env` in the project root. The default (both providers)
+requires both credentials up-front — a missing key fails before anything
+downloads, so the series can't drift out of sync.
 
 **Comparing numbers across providers.** Both providers use the identical
 frozen grid, so *coverage rate* (% of grid points with a pano) is directly
@@ -99,17 +104,16 @@ The repository includes several scripts divided into core data collection tools 
 
 ### Basic Usage
 
-To analyze a city's Street View coverage using default settings (1000m x 1000m grid, 20m steps):
+To analyze a city's coverage using default settings (1000m x 1000m grid, 20m steps) — this collects a GSV **and** a Mapillary snapshot with the same run date:
 
 ```bash
 python gsv_tracker.py "Seattle, WA"
 ```
 
-### Collecting Mapillary
-
-Same command, different provider (requires `MAPILLARY_ACCESS_TOKEN`):
+### Collecting a Single Provider
 
 ```bash
+python gsv_tracker.py "Seattle, WA" --provider gsv
 python gsv_tracker.py "Seattle, WA" --provider mapillary
 ```
 

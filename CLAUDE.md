@@ -13,9 +13,10 @@ source .venv/bin/activate          # standard venv, deps in requirements.txt
 pip install -r requirements.txt
 pytest                             # run the test suite (fast, no network)
 
-# Collect one dated snapshot of a city (skipped if a run <80 days old exists)
+# Collect dated snapshots of a city — BOTH providers by default, same run
+# date (per-provider skip if a run <80 days old exists)
 python gsv_tracker.py "Seattle, WA"
-python gsv_tracker.py "Seattle, WA" --provider mapillary   # independent run series
+python gsv_tracker.py "Seattle, WA" --provider mapillary   # restrict to one provider
 python gsv_tracker.py "Seattle, WA" --force --run-date 2026-07-02
 python gsv_tracker.py "Seattle, WA" --check-boundary   # preview search area only
 
@@ -31,7 +32,7 @@ python scripts/migrate_to_db.py            # dry run; --execute to apply
 ./sync_data_to_server.sh --dry-run
 ```
 
-Credentials in `.env`, loaded by `gsv_metadata_tracker/config.py` per provider: `GMAPS_API_KEY` (Street View Static API enabled) for gsv, `MAPILLARY_ACCESS_TOKEN` (free client token) for mapillary — only the active provider's key is required. Scheduler config lives in `config/scheduler.toml` (stdlib `tomllib`, Python ≥3.11).
+Credentials in `.env`, loaded by `gsv_metadata_tracker/config.py` per provider: `GMAPS_API_KEY` (Street View Static API enabled) for gsv, `MAPILLARY_ACCESS_TOKEN` (free client token) for mapillary. The default `--provider both` requires both keys up-front (fail-fast so the series can't drift); a single-provider run needs only its own key. Scheduler config lives in `config/scheduler.toml` (stdlib `tomllib`, Python ≥3.11).
 
 ## Architecture
 
