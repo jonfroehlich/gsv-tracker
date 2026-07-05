@@ -219,3 +219,54 @@ a.view-details-btn:focus-visible {
   font-weight: bold;
   outline: 1px solid rgba(0, 0, 0, 0.3);
 }
+/* ── Imagery provider toggle (GSV / Mapillary) ──────────────── */
+.provider-toggle {
+  position: fixed;
+  top: 70px;
+  left: 60px;
+  z-index: 1000;
+  display: flex;
+  gap: 4px;
+  margin: 0;
+  padding: 4px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.provider-toggle label {
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.provider-toggle input[type="radio"] {
+  /* Visually hidden but still focusable/announced */
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.provider-toggle label:has(input:checked) {
+  background-color: #4CAF50;
+  color: #fff;
+}
+
+.provider-toggle label:has(input:focus-visible) {
+  outline: 2px solid #1a73e8;
+  outline-offset: 1px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

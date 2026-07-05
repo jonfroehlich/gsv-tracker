@@ -20,6 +20,19 @@
     gtag("config", "G-ZSQGNSTEES");
   </script>
 
+  <fieldset id="provider-toggle" class="provider-toggle"
+            aria-label="Imagery provider">
+    <legend class="visually-hidden">Imagery provider</legend>
+    <label>
+      <input type="radio" name="provider" value="gsv" checked>
+      <span>Google Street View</span>
+    </label>
+    <label>
+      <input type="radio" name="provider" value="mapillary">
+      <span>Mapillary</span>
+    </label>
+  </fieldset>
+
   <div id="city-search" class="city-search" role="search" aria-label="Search cities">
     <input id="city-search-input" type="text"
            placeholder="Search for a city…"

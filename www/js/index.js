@@ -2,8 +2,9 @@
  * index.js
  * Overview-map logic for GSV City Explorer.
  *
- * Depends on globals from gsv-utils.js (getColor, fetchGzippedJson,
- * GSV_DATA_BASE_URL) and the Leaflet / Chart.js libraries.
+ * Depends on globals from gsv-utils.js (PROVIDERS, getColor,
+ * fetchGzippedJson, adaptCitiesPayload, GSV_DATA_BASE_URL) and the
+ * Leaflet / Chart.js libraries.
  */
 
 // ── Global state ──────────────────────────────────────────────
@@ -11,6 +12,11 @@ const map = L.map("map").setView([0, 0], 2);
 const charts = { pano: null, area: null };
 const mapRectangles = [];
 let allCityBounds = null;
+let rawCitiesData = null; // the fetched cities.json.gz payload (all providers)
+
+// Active provider, persisted in the URL (?provider=mapillary)
+const providerParam = new URLSearchParams(window.location.search).get("provider");
+let currentProvider = PROVIDERS[providerParam] ? providerParam : "gsv";
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
   attribution: "© OpenStreetMap contributors © CARTO",
@@ -38,7 +44,7 @@ function createPopupHistogram(histogramData, currentYear) {
       labels: years,
       datasets: [{
         data: counts,
-        backgroundColor: ages.map((a) => getColor(a)),
+        backgroundColor: ages.map((a) => getColor(a, currentProvider)),
         borderColor: "rgba(0,0,0,0.2)",
         borderWidth: 1,
       }],
@@ -48,7 +54,8 @@ function createPopupHistogram(histogramData, currentYear) {
       maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
-        title: { display: true, text: "Google Panoramas by Capture Year" },
+        title: { display: true,
+                 text: `${PROVIDERS[currentProvider].panoNoun} by Capture Year` },
       },
       scales: {
         y: { beginAtZero: true, title: { display: true, text: "Panoramas" } },
@@ -74,8 +81,15 @@ function createTooltip(city) {
   container.style.minWidth = "250px";
 
   const panoStats = city.panorama_counts;
-  const ageStats = city.google_panos_age_stats;
-  const googlePct = ((panoStats.unique_google_panos / panoStats.unique_panos) * 100).toFixed(1);
+  const ageStats = city.pano_age_stats;
+
+  // For GSV, break out the official-Google share of all found panoramas;
+  // for other providers every pano is already provider imagery
+  let panoLinesHtml = `<li>Total Panoramas: ${panoStats.unique_panos.toLocaleString()}</li>`;
+  if (city.provider === "gsv" && panoStats.unique_google_panos != null) {
+    const googlePct = ((panoStats.unique_google_panos / panoStats.unique_panos) * 100).toFixed(1);
+    panoLinesHtml += `<li>Google Panoramas: ${panoStats.unique_google_panos.toLocaleString()} (${googlePct}%)</li>`;
+  }
 
   // Snapshot history line (schema v2): "3 snapshots since 2025-01-17"
   let snapshotsHtml = "";
@@ -107,8 +121,7 @@ function createTooltip(city) {
       <li>Data Collected: ${city.latest_run_date || (city.collection_info?.end_time ? new Date(city.collection_info.end_time).toLocaleDateString() : "Unknown")}</li>
       ${snapshotsHtml}
       <li>Area: ${city.search_area_km2.toFixed(1)} km²</li>
-      <li>Total Panoramas: ${panoStats.unique_panos.toLocaleString()}</li>
-      <li>Google Panoramas: ${panoStats.unique_google_panos.toLocaleString()} (${googlePct}%)</li>
+      ${panoLinesHtml}
     </ul>
     <div style="margin-top:12px"><strong>Age Statistics:</strong></div>
     <ul class="popup-stats-list">
@@ -127,8 +140,7 @@ function createTooltip(city) {
 
   const currentYear = new Date().getFullYear();
   const rawHistogram =
-    city.histogram_of_capture_dates_by_year.google_panos.counts ||
-    city.histogram_of_capture_dates_by_year.google_panos;
+    city.capture_year_histogram.counts || city.capture_year_histogram;
 
   const years = Object.keys(rawHistogram).map(Number);
   const startYear = Math.min(...years);
@@ -174,13 +186,13 @@ function createLegend(maxAge, cities) {
 
   const ageCounts = new Array(maxYears + 1).fill(0);
   cities.forEach((city) => {
-    const age = Math.floor(city.google_panos_age_stats.median_pano_age_years);
+    const age = Math.floor(city.pano_age_stats.median_pano_age_years);
     if (age <= maxYears) ageCounts[age]++;
   });
 
   let html = "<h4>Median Age (years)</h4>";
   for (let age = 0; age <= maxYears; age++) {
-    const color = getColor(age);
+    const color = getColor(age, currentProvider);
     const n = ageCounts[age];
     const label = n > 0 ? `(${n} ${n === 1 ? "city" : "cities"})` : "(no cities)";
 
@@ -254,7 +266,7 @@ function highlightCitiesByExactAge(targetAge, zoomToHighlightedCities = false) {
 
   const highlightedCities = [];
   mapRectangles.forEach((rect) => {
-    const age = Math.floor(rect.city.google_panos_age_stats.median_pano_age_years);
+    const age = Math.floor(rect.city.pano_age_stats.median_pano_age_years);
     if (Math.abs(age - targetAge) <= tolerance) {
       // Selected state
       rect.setStyle({ 
@@ -302,7 +314,7 @@ function highlightCitiesByAgeRange(minAge, maxAge) {
   });
 
   mapRectangles.forEach((rect) => {
-    const age = rect.city.google_panos_age_stats.median_pano_age_years;
+    const age = rect.city.pano_age_stats.median_pano_age_years;
     rect.setStyle(age >= minAge && age < maxAge
       ? { fillOpacity: 0.8, weight: 2 }
       : { fillOpacity: 0.2, weight: 1 });
@@ -394,20 +406,29 @@ function selectCity(city) {
   }
 }
 
+// Search state shared across provider re-renders: the entry list is
+// swapped per provider, but DOM listeners are attached exactly once.
+let searchEntries = [];
+let searchInitialized = false;
+
 /**
- * Initialise the city search autocomplete once city data is loaded.
+ * Initialise (or, on provider switch, re-populate) the city search
+ * autocomplete. Safe to call repeatedly.
  * @param {Object[]} cities - Array of city records.
  */
 function initCitySearch(cities) {
+  // Pre-compute labels and sort alphabetically
+  searchEntries = cities
+    .map((city) => ({ city, label: getCityLabel(city) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  if (searchInitialized) return;
+  searchInitialized = true;
+
   const input = document.getElementById("city-search-input");
   const list = document.getElementById("city-search-results");
   let activeIdx = -1;
   let matches = [];
-
-  // Pre-compute labels and sort alphabetically
-  const entries = cities
-    .map((city) => ({ city, label: getCityLabel(city) }))
-    .sort((a, b) => a.label.localeCompare(b.label));
 
   /** Show or hide the dropdown. */
   function showDropdown(show) {
@@ -498,7 +519,7 @@ function initCitySearch(cities) {
     // Filter: prefer starts-with, then contains
     const startsWith = [];
     const contains = [];
-    for (const entry of entries) {
+    for (const entry of searchEntries) {
       const lower = entry.label.toLowerCase();
       if (lower.startsWith(query)) startsWith.push(entry);
       else if (lower.includes(query)) contains.push(entry);
@@ -561,17 +582,17 @@ function initCitySearch(cities) {
  */
 function createScatterPlots(cities) {
   const panoData = cities.map((city) => ({
-    x: city.panorama_counts.unique_google_panos,
-    y: city.google_panos_age_stats.median_pano_age_years,
+    x: city.pano_count,
+    y: city.pano_age_stats.median_pano_age_years,
     city,
-    backgroundColor: getColor(city.google_panos_age_stats.median_pano_age_years),
+    backgroundColor: getColor(city.pano_age_stats.median_pano_age_years, currentProvider),
   }));
 
   const areaData = cities.map((city) => ({
     x: city.search_area_km2,
-    y: city.google_panos_age_stats.median_pano_age_years,
+    y: city.pano_age_stats.median_pano_age_years,
     city,
-    backgroundColor: getColor(city.google_panos_age_stats.median_pano_age_years),
+    backgroundColor: getColor(city.pano_age_stats.median_pano_age_years, currentProvider),
   }));
 
   const sharedOptions = {
@@ -682,58 +703,117 @@ function createScatterPlots(cities) {
   });
 }
 
+// ── Provider toggle & rendering ───────────────────────────────
+
+/**
+ * Render everything (banner, legend, rectangles, scatter plots, search)
+ * for the current provider from the already-fetched payload.
+ *
+ * @param {boolean} [fitMap=false] - Fit the viewport to all cities
+ *   (first render only; provider switches keep the current view).
+ */
+function renderProvider(fitMap = false) {
+  const providerInfo = PROVIDERS[currentProvider];
+  const { meta, cities } = adaptCitiesPayload(rawCitiesData, currentProvider);
+
+  // Clear previous provider's view
+  map.closePopup();
+  mapRectangles.forEach((rect) => rect.remove());
+  mapRectangles.length = 0;
+  [charts.pano, charts.area].forEach((chart) => chart?.destroy());
+  charts.pano = charts.area = null;
+
+  // Provider attribution (Mapillary's terms require visible attribution)
+  Object.values(PROVIDERS).forEach((p) =>
+    map.attributionControl.removeAttribution(p.attribution));
+  map.attributionControl.addAttribution(providerInfo.attribution);
+
+  // Stats banner
+  document.getElementById("stats").innerHTML = `
+    <strong>${providerInfo.label} City Coverage Analysis</strong><br>
+    ${cities.length} cities analyzed | Updated: ${new Date(meta.generatedAt).toLocaleString()}
+  `;
+
+  if (cities.length === 0) {
+    document.getElementById("legend").innerHTML =
+      `<h4>No ${providerInfo.label} data yet</h4>`;
+    return;
+  }
+
+  // Legend
+  const maxAge = Math.max(
+    ...cities.map((c) => c.pano_age_stats.median_pano_age_years || 0)
+  );
+  createLegend(maxAge, cities);
+
+  // Map rectangles
+  cities.forEach((city) => {
+    const bounds = [
+      [city.bounds.min_lat, city.bounds.min_lon],
+      [city.bounds.max_lat, city.bounds.max_lon],
+    ];
+
+    const rect = L.rectangle(bounds, {
+      color: getColor(city.pano_age_stats.median_pano_age_years, currentProvider),
+      weight: 1,
+      fillOpacity: 0.6,
+    }).addTo(map);
+
+    rect.city = city;
+    rect.bindPopup(createTooltip(city));
+    mapRectangles.push(rect);
+
+    rect.on("mouseover", () => highlightCity(city));
+    rect.on("mouseout", () => resetHighlights());
+  });
+
+  createScatterPlots(cities);
+  initCitySearch(cities);
+
+  allCityBounds = cities.map((c) => [
+    [c.bounds.min_lat, c.bounds.min_lon],
+    [c.bounds.max_lat, c.bounds.max_lon],
+  ]);
+  if (fitMap) map.fitBounds(allCityBounds);
+}
+
+/**
+ * Switch the active imagery provider, re-render from the cached payload,
+ * and persist the choice in the URL.
+ *
+ * @param {string} provider - Provider key (see PROVIDERS).
+ */
+function setProvider(provider) {
+  if (!PROVIDERS[provider] || provider === currentProvider || !rawCitiesData) return;
+  currentProvider = provider;
+
+  const url = new URL(window.location);
+  if (provider === "gsv") url.searchParams.delete("provider");
+  else url.searchParams.set("provider", provider);
+  history.replaceState(null, "", url);
+
+  renderProvider();
+}
+
+/** Wire up the provider radio group and reflect the initial state. */
+function initProviderToggle() {
+  document.querySelectorAll('input[name="provider"]').forEach((radio) => {
+    radio.checked = radio.value === currentProvider;
+    radio.addEventListener("change", () => {
+      if (radio.checked) setProvider(radio.value);
+    });
+  });
+}
+
 // ── Data loading ──────────────────────────────────────────────
 
-/** Fetch cities.json.gz, build the map, legend, and scatter plots. */
+/** Fetch cities.json.gz, then render the active provider's view. */
 async function loadData() {
   try {
-    const data = await fetchGzippedJson(GSV_DATA_BASE_URL + "cities.json.gz");
-    const { meta, cities } = adaptCitiesPayload(data);
-
-    // Stats banner
-    document.getElementById("stats").innerHTML = `
-      <strong>GSV City Coverage Analysis</strong><br>
-      ${meta.citiesCount} cities analyzed | Updated: ${new Date(meta.generatedAt).toLocaleString()}
-    `;
-
+    rawCitiesData = await fetchGzippedJson(GSV_DATA_BASE_URL + "cities.json.gz");
     document.getElementById("loading").style.display = "none";
-
-    // Legend
-    const maxAge = Math.max(
-      ...cities.map((c) => c.google_panos_age_stats.median_pano_age_years)
-    );
-    createLegend(maxAge, cities);
-
-    // Map rectangles
-    cities.forEach((city) => {
-      const bounds = [
-        [city.bounds.min_lat, city.bounds.min_lon],
-        [city.bounds.max_lat, city.bounds.max_lon],
-      ];
-
-      const rect = L.rectangle(bounds, {
-        color: getColor(city.google_panos_age_stats.median_pano_age_years),
-        weight: 1,
-        fillOpacity: 0.6,
-      }).addTo(map);
-
-      rect.city = city;
-      rect.bindPopup(createTooltip(city));
-      mapRectangles.push(rect);
-
-      rect.on("mouseover", () => highlightCity(city));
-      rect.on("mouseout", () => resetHighlights());
-    });
-
-    createScatterPlots(cities);
-    initCitySearch(cities);
-
-    // Fit map to all cities
-    allCityBounds = cities.map((c) => [
-      [c.bounds.min_lat, c.bounds.min_lon],
-      [c.bounds.max_lat, c.bounds.max_lon],
-    ]);
-    map.fitBounds(allCityBounds);
+    initProviderToggle();
+    renderProvider(true);
   } catch (error) {
     console.error("Error loading data:", error);
     document.getElementById("loading").textContent =

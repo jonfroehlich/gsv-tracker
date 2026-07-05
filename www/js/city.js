@@ -2,8 +2,10 @@
  * city.js
  * Per-city detail-view logic for GSV City Explorer.
  *
- * Depends on globals from gsv-utils.js: getColor, fetchGzippedJson,
- * GSV_DATA_BASE_URL, MAX_COLOR_AGE_IN_YEARS.
+ * Depends on globals from gsv-utils.js: PROVIDERS, getColor,
+ * getProviderFromFilename, fetchGzippedJson, adaptCitiesPayload,
+ * GSV_DATA_BASE_URL. The imagery provider (GSV vs Mapillary) is derived
+ * from the data filename's provider token.
  *
  * Third-party libraries (loaded via CDN in city.html):
  *   Leaflet, Chart.js, moment, chartjs-adapter-moment, PapaParse, pako
@@ -36,9 +38,11 @@ let stateNameGlobal = "";
 let totalPanosGlobal = 0;
 let collectionDateGlobal = "";
 let statsGlobal = null;
+let panoStatsGlobal = null; // provider pano block: google_panos (gsv) or all_panos
+let providerGlobal = "gsv"; // derived from the data filename
 let oldestDateGlobal = null;
 let newestDateGlobal = null;
-let runsGlobal = [];        // this city's run history from the v2 aggregate
+let runsGlobal = [];        // this city's run history from the aggregate
 let currentFileGlobal = ""; // csv.gz filename of the run being displayed
 let changeGlobal = null;    // change_from_previous_run block of this run
 
@@ -81,9 +85,9 @@ function updateLegend(years) {
     const fmt = (v) => (v != null ? v.toFixed(1) : "—");
     const oldest = oldestDateGlobal?.toLocaleDateString() ?? "—";
     const newest = newestDateGlobal?.toLocaleDateString() ?? "—";
-    const median = fmt(s.google_panos.age_stats.median_pano_age_years);
-    const avg    = fmt(s.google_panos.age_stats.avg_pano_age_years);
-    const sd     = fmt(s.google_panos.age_stats.stdev_pano_age_years);
+    const median = fmt(panoStatsGlobal.age_stats.median_pano_age_years);
+    const avg    = fmt(panoStatsGlobal.age_stats.avg_pano_age_years);
+    const sd     = fmt(panoStatsGlobal.age_stats.stdev_pano_age_years);
 
     html += `
       <table class="legend-stats" aria-label="Dataset statistics">
@@ -171,7 +175,7 @@ function updateLegend(years) {
 
     sortedYears.forEach((year) => {
       const age = currentYear - year;
-      const color = getColor(age);
+      const color = getColor(age, providerGlobal);
       const isActive = activeYears.has(year);
       const count = markersByYear[year]?.length || 0;
 
@@ -405,8 +409,8 @@ function createTemporalPlot(temporalData, canvas) {
     datasets: [{
       label: "Panoramas",
       data: temporalData.map((d) => ({ x: d.date, y: d.count, opacity: 1 })),
-      backgroundColor: temporalData.map((d) => getColor(currentYear - d.date.getFullYear())),
-      pointBackgroundColor: temporalData.map((d) => getColor(currentYear - d.date.getFullYear())),
+      backgroundColor: temporalData.map((d) => getColor(currentYear - d.date.getFullYear(), providerGlobal)),
+      pointBackgroundColor: temporalData.map((d) => getColor(currentYear - d.date.getFullYear(), providerGlobal)),
       pointRadius: 4,
       pointHoverRadius: 6,
       pointBorderWidth: 0,
@@ -512,7 +516,7 @@ function resetChartColors(chart) {
   ds.data.forEach((pt) => { pt.opacity = 1; });
   ds.backgroundColor = ds.data.map((pt) => {
     const age = new Date().getFullYear() - new Date(pt.x).getFullYear();
-    return getColor(age);
+    return getColor(age, providerGlobal);
   });
   ds.pointBackgroundColor = ds.backgroundColor;
   chart.update();
@@ -531,7 +535,7 @@ function updateChartColorsForDate(chart, date) {
   ds.backgroundColor = ds.data.map((pt) => {
     const ptDate = new Date(pt.x);
     const age = new Date().getFullYear() - ptDate.getFullYear();
-    const base = getColor(age);
+    const base = getColor(age, providerGlobal);
     const opacity = ptDate.toDateString() === dateStr ? 1 : 0.3;
     pt.opacity = opacity;
 
@@ -548,24 +552,27 @@ function updateChartColorsForDate(chart, date) {
 // ── Main data loading ──────────────────────────────────────────
 
 /**
- * Build a popup HTML string for a panorama marker.
+ * Build a popup HTML string for a panorama marker, deep-linking to the
+ * active provider's pano viewer.
  *
  * @param {Date} captureDate
  * @param {string} ageFormatted - Human-readable age string.
  * @param {string} panoId
+ * @param {string} photographer - e.g. "Google" or a Mapillary contributor.
  * @returns {string} HTML string.
  */
-function buildPopupHtml(captureDate, ageFormatted, panoId) {
+function buildPopupHtml(captureDate, ageFormatted, panoId, photographer) {
+  const provider = PROVIDERS[providerGlobal];
   return `
     <div style="font-family:sans-serif">
       <strong>Capture Date:</strong> ${captureDate.toLocaleDateString()}<br>
       <strong>Age:</strong> ${ageFormatted}<br>
-      <strong>Photographer:</strong> Google<br>
+      <strong>Photographer:</strong> ${photographer}<br>
       <strong>Pano ID:</strong> ${panoId}<br><br>
-      <a href="https://www.google.com/maps/@?api=1&map_action=pano&pano=${panoId}"
+      <a href="${provider.viewerUrl(panoId)}"
          target="_blank" rel="noopener"
          style="color:#2196F3;text-decoration:none">
-         View in Google Street View
+         ${provider.viewerLabel}
       </a>
     </div>
   `;
@@ -606,13 +613,18 @@ async function loadData() {
 
     let targetFile = csvFile;
 
-    // Fetch the aggregate: needed to resolve ?city= queries, and (v2) to
-    // find this city's run history for the snapshot selector.
+    // Fetch the aggregate: needed to resolve ?city= queries, and to find
+    // this city's run history for the snapshot selector.
+    let rawCities = null;
     let citiesData = null;
     try {
       progressText.textContent = "Loading city index…";
-      const raw = await fetchGzippedJson(GSV_DATA_BASE_URL + "cities.json.gz");
-      citiesData = adaptCitiesPayload(raw);
+      rawCities = await fetchGzippedJson(GSV_DATA_BASE_URL + "cities.json.gz");
+      // ?city= queries resolve against the requested provider's view
+      // (?provider=mapillary), defaulting to GSV
+      const queryProvider = PROVIDERS[urlParams.get("provider")]
+        ? urlParams.get("provider") : "gsv";
+      citiesData = adaptCitiesPayload(rawCities, queryProvider);
     } catch (e) {
       // The ?file= path can still work without the aggregate
       console.warn("Could not load cities.json.gz:", e);
@@ -633,10 +645,14 @@ async function loadData() {
     }
 
     currentFileGlobal = targetFile;
+    providerGlobal = getProviderFromFilename(targetFile);
+    map.attributionControl.addAttribution(PROVIDERS[providerGlobal].attribution);
 
-    // Locate this city's run history (v2 aggregate) for the snapshot selector
-    if (citiesData) {
-      const record = citiesData.cities.find((c) =>
+    // Locate this city's run history for the snapshot selector — only the
+    // active provider's runs, so the <select> never mixes provider series
+    if (rawCities) {
+      const providerCities = adaptCitiesPayload(rawCities, providerGlobal).cities;
+      const record = providerCities.find((c) =>
         c.data_file?.filename === targetFile ||
         (c.runs || []).some((r) => r.data_file === targetFile));
       if (record) runsGlobal = record.runs || [];
@@ -660,10 +676,13 @@ async function loadData() {
       ? new Date(stats.download.end_time).toLocaleDateString()
       : "";
 
-    // Populate global stats for legend overview (available before streaming starts)
+    // Populate global stats for legend overview (available before streaming
+    // starts). For GSV the provider block is the Google-copyright subset;
+    // other providers' all_panos rows are already all provider imagery.
     statsGlobal = stats;
-    oldestDateGlobal = new Date(stats.google_panos.age_stats.oldest_pano_date);
-    newestDateGlobal = new Date(stats.google_panos.age_stats.newest_pano_date);
+    panoStatsGlobal = stats.google_panos ?? stats.all_panos;
+    oldestDateGlobal = new Date(panoStatsGlobal.age_stats.oldest_pano_date);
+    newestDateGlobal = new Date(panoStatsGlobal.age_stats.newest_pano_date);
 
     // Draw city bounds outline
     const bounds = stats.city.bounds;
@@ -674,22 +693,27 @@ async function loadData() {
       [bounds.max_lat, bounds.min_lon],
     ];
 
-    const oldestDate = new Date(stats.google_panos.age_stats.oldest_pano_date);
-    const newestDate = new Date(stats.google_panos.age_stats.newest_pano_date);
+    const oldestDate = new Date(panoStatsGlobal.age_stats.oldest_pano_date);
+    const newestDate = new Date(panoStatsGlobal.age_stats.newest_pano_date);
 
+    const googleLine = stats.google_panos
+      ? `Google panoramas: ${stats.google_panos.duplicate_stats.total_unique_panos.toLocaleString()}<br>`
+      : "";
+    const fmtYears = (v) => (v != null ? `${v.toFixed(1)} years` : "—");
     const tooltipHtml = `
       <div style="font-family:sans-serif">
-        <strong>${cityLabel}</strong><br><br>
+        <strong>${cityLabel}</strong><br>
+        <em>${PROVIDERS[providerGlobal].label}</em><br><br>
         Total panoramas: ${stats.all_panos.duplicate_stats.total_unique_panos.toLocaleString()}<br>
-        Google panoramas: ${stats.google_panos.duplicate_stats.total_unique_panos.toLocaleString()}<br><br>
+        ${googleLine}<br>
         Search grid area: ${stats.search_grid.area_km2.toFixed(1)} km²<br>
         Total search points: ${stats.search_grid.total_search_points.toLocaleString()}<br>
         Grid step size: ${stats.search_grid.step_length_meters} meters<br><br>
         Oldest pano: ${oldestDate.toLocaleDateString()}<br>
         Newest pano: ${newestDate.toLocaleDateString()}<br>
-        Median age: ${stats.google_panos.age_stats.median_pano_age_years.toFixed(1)} years<br>
-        Average age: ${stats.google_panos.age_stats.avg_pano_age_years.toFixed(1)} years
-        (SD=${stats.google_panos.age_stats.stdev_pano_age_years.toFixed(1)} years)<br><br>
+        Median age: ${fmtYears(panoStatsGlobal.age_stats.median_pano_age_years)}<br>
+        Average age: ${fmtYears(panoStatsGlobal.age_stats.avg_pano_age_years)}
+        ${panoStatsGlobal.age_stats.stdev_pano_age_years != null ? `(SD=${panoStatsGlobal.age_stats.stdev_pano_age_years.toFixed(1)} years)` : ""}<br><br>
         Data collected: ${collectionDateGlobal || "Unknown"}
       </div>
     `;
@@ -752,7 +776,9 @@ async function loadData() {
       for (const row of rows) {
         if (
           row.status !== "OK" ||
-          row.copyright_info !== "© Google" ||
+          // GSV runs mix official and third-party imagery; show only
+          // official Google. Other providers' rows are all provider panos.
+          (providerGlobal === "gsv" && row.copyright_info !== "© Google") ||
           !row.capture_date ||
           !row.pano_id ||
           !row.pano_lat ||
@@ -779,7 +805,7 @@ async function loadData() {
         // Map marker
         const marker = L.circleMarker([row.pano_lat, row.pano_lon], {
           radius: 3,
-          fillColor: getColor(age),
+          fillColor: getColor(age, providerGlobal),
           color: "#000",
           weight: 0,
           opacity: 1,
@@ -787,7 +813,11 @@ async function loadData() {
           captureDate,
         }).addTo(map);
 
-        marker.bindPopup(buildPopupHtml(captureDate, ageFormatted, row.pano_id));
+        const photographer = providerGlobal === "gsv"
+          ? "Google"
+          : (row.copyright_info || PROVIDERS[providerGlobal].label);
+        marker.bindPopup(buildPopupHtml(captureDate, ageFormatted, row.pano_id,
+                                        photographer));
 
         if (!markersByYear[year]) markersByYear[year] = [];
         markersByYear[year].push(marker);
