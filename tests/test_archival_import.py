@@ -261,6 +261,38 @@ def test_unresolved_city_skipped_without_nominatim(source_root, data_dir, tmp_pa
     assert not [f for f in os.listdir(data_dir) if f.endswith('.csv.gz')]
 
 
+def test_manifest_identity_registers_without_geocoding(
+        source_root, data_dir, tmp_path):
+    # Locality-grade datasets (East Hollywood, Reinsletta) carry an explicit
+    # identity so no Nominatim call happens even without --no-nominatim
+    csv_path = os.path.join(source_root, "Quarter/Quarter_30_coords.csv")
+    _write_v2_csv(csv_path, [(44.0011, -121.0011, 44.001, -121.001, 'p1', '2020-05')],
+                  [(44.002, -121.001)])
+    _write_bbox(csv_path, 44.0, 44.01, -121.01, -121.0)
+    manifest = _write_manifest(str(tmp_path / "m.json"), [
+        {"rel_csv": "Quarter/Quarter_30_coords.csv",
+         "query": "Quarter, Big City, Testland", "run_date": "2023-11-03",
+         "fmt": "v2", "identity": ["Quarter", None, "Testland"]},
+    ])
+
+    result = _run_import(source_root, data_dir, manifest)
+    assert result.returncode == 0, result.stderr
+    assert 'would register from manifest identity (quarter--testland)' in result.stdout
+
+    result = _run_import(source_root, data_dir, manifest, '--execute')
+    assert result.returncode == 0, result.stderr
+    assert '1 baseline runs registered' in result.stdout
+
+    conn = db.connect(os.path.join(data_dir, 'gsv_tracker.db'))
+    city = db.resolve_city(conn, 'quarter--testland')
+    assert city is not None
+    assert city.step_m == 20  # frozen at the default step, not the archival 30
+    assert (city.grid_width_m, city.grid_height_m) > (0, 0)
+    run = db.get_latest_run(conn, city.city_id)
+    assert run.is_baseline and '_step_30_' in run.csv_filename
+    conn.close()
+
+
 def test_format_mismatch_is_reported_not_fatal(source_root, data_dir, tmp_path):
     csv_path = os.path.join(source_root, "Mix/Mix_30_coords.csv")
     _write_v2_csv(csv_path, [(44.0011, -121.0011, 44.001, -121.001, 'p1', '2020-05')],

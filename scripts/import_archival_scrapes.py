@@ -80,6 +80,11 @@ class ArchivalDataset:
     query: str      # geocodable query string; also the catalog lookup key
     run_date: date  # git first-commit date of the csv (the scrape date)
     fmt: str        # 'v1' | 'v2' | 'v2_headerless'
+    # (city_name, state_name, country_name) override for locality-grade
+    # datasets that Nominatim resolves to their parent city (East Hollywood
+    # -> Los Angeles, Reinsletta -> Bodø). Registration then uses these
+    # names with the archival extent as the frozen geometry — no geocoding.
+    identity: Optional[Tuple[str, str, str]] = None
 
 
 # Run dates are the git first-commit dates of each CSV in the
@@ -98,38 +103,48 @@ MANIFEST = [
     ArchivalDataset("Denison, Texas/Denison, Texas_30_coords.csv",
                     "Denison, Texas", date(2023, 12, 5), "v2"),
     ArchivalDataset("East Hollywood, CA/East Hollywood, CA_30_coords.csv",
-                    "East Hollywood, Los Angeles, CA", date(2023, 11, 3), "v2"),
+                    "East Hollywood, Los Angeles, CA", date(2023, 11, 3), "v2",
+                    identity=("East Hollywood", "California", "United States")),
     ArchivalDataset("Hamilton, New Zealand/Hamilton, New Zealand_30_coords.csv",
                     "Hamilton, New Zealand", date(2023, 11, 3), "v2"),
+    # Queries below match existing catalog display_names exactly (these
+    # cities gained Dec-2024 baselines via the legacy migration; the
+    # archival runs become their earlier first runs). La Piedad attaches
+    # to the real identity, not the la_piedad_mx junk-slug squatter (#92).
     ArchivalDataset(
         "La Piedad de Cabadas, Mexico/La Piedad de Cabadas, Mexico_30_coords.csv",
-        "La Piedad de Cabadas, Mexico", date(2024, 10, 3), "v2"),
+        "La Piedad, Michoacán, Mexico", date(2024, 10, 3), "v2"),
     ArchivalDataset("Mendota, Illinois/Mendota, Illinois_30_coords.csv",
-                    "Mendota, Illinois", date(2024, 7, 8), "v2"),
+                    "Mendota, Illinois, United States", date(2024, 7, 8), "v2"),
     ArchivalDataset("Mt Vernon, Ohio/Mt Vernon, Ohio_30_coords.csv",
-                    "Mount Vernon, Ohio", date(2024, 5, 8), "v2"),
+                    "Mount Vernon, Ohio, United States", date(2024, 5, 8), "v2"),
     ArchivalDataset("Oradell, New Jersey/Oradell, New Jersey_30_coords.csv",
-                    "Oradell, New Jersey", date(2023, 11, 3), "v2"),
+                    "Oradell, New Jersey, United States", date(2023, 11, 3), "v2"),
     ArchivalDataset("Pittsburgh, Pennsylvania/Pittsburgh, Pennsylvania_30_coords.csv",
-                    "Pittsburgh, Pennsylvania", date(2023, 11, 3), "v2"),
+                    "Pittsburgh, Pennsylvania, United States", date(2023, 11, 3), "v2"),
     ArchivalDataset("Point Roberts, WA/Point Roberts, WA_30_coords.csv",
                     "Point Roberts, WA", date(2023, 11, 5), "v1"),
     ArchivalDataset("Reinsletta, Norway/Reinsletta, Norway_30_coords.csv",
-                    "Reinsletta, Norway", date(2024, 3, 25), "v2"),
+                    "Reinsletta, Norway", date(2024, 3, 25), "v2",
+                    identity=("Reinsletta", "Nordland", "Norway")),
     ArchivalDataset("Riverdale Park, Maryland/Riverdale Park, Maryland_30_coords.csv",
                     "Riverdale Park, Maryland", date(2024, 2, 14), "v2"),
     ArchivalDataset("Seattle/Seattle_30_coords.csv",
                     "Seattle, WA", date(2023, 11, 5), "v1"),
+    # Query matches the catalog display_name exactly: "St. Louis, Missouri"
+    # alone resolves nothing, and re-geocoding risks identity drift
     ArchivalDataset("St. Louis, Missouri/St. Louis, Missouri_30_coords.csv",
-                    "St. Louis, Missouri", date(2024, 3, 19), "v2"),
+                    "St. Louis, Missouri, United States", date(2024, 3, 19), "v2"),
     ArchivalDataset("Swissvale, Pennsylvania/Swissvale, Pennsylvania_30_coords.csv",
                     "Swissvale, Pennsylvania", date(2024, 2, 21), "v2"),
     ArchivalDataset("Washington D.C/Washington D.C._30_coords.csv",
                     "Washington, D.C.", date(2023, 11, 3), "v2"),
     ArchivalDataset("Washington D.C 10000x10000/Washington D.C._30_coords.csv",
                     "Washington, D.C.", date(2024, 4, 11), "v2"),
+    # Query matches the catalog display_name exactly: a fresh geocode can
+    # return "Zürich" (umlaut) and would mint a duplicate city_id
     ArchivalDataset("Zurich, Switzerland/Zurich, Switzerland_30_coords.csv",
-                    "Zurich, Switzerland", date(2023, 11, 3), "v2"),
+                    "Zurich, Zurich, Switzerland", date(2023, 11, 3), "v2"),
 ]
 
 # Source datasets deliberately NOT imported (always listed in the report).
@@ -254,20 +269,47 @@ def dims_from_boundingbox_raw(loc) -> Tuple[int, int]:
 
 def resolve_or_register_city(conn, entry: ArchivalDataset,
                              center: Tuple[float, float],
+                             extent: Tuple[int, int],
                              use_nominatim: bool,
                              execute: bool):
     """
-    Resolve the entry's city in the catalog, geocoding + registering it if
-    unknown. Returns (CityRow | None, note); a None CityRow means skipped.
+    Resolve the entry's city in the catalog, registering it if unknown.
+    Returns (CityRow | None, note); a None CityRow means not importable
+    yet (dry run for a new city, or skipped).
 
-    New cities freeze a freshly geocoded rectangle at the default 20 m
-    step — the frozen geometry governs future scheduled runs, while the
-    archival run keeps its own 30 m geometry in its filename. The archival
-    bbox center disambiguates the geocode (Hamilton NZ, not Hamilton OH).
+    New cities freeze a rectangle at the default 20 m step — the frozen
+    geometry governs future scheduled runs, while the archival run keeps
+    its own 30 m geometry in its filename. Identity + rectangle come from
+    a fresh geocode (the archival bbox center disambiguates: Hamilton NZ,
+    not Hamilton OH), or from the manifest identity + archival extent for
+    locality-grade datasets that Nominatim resolves to a parent city.
     """
     city_row = db.resolve_city(conn, entry.query)
     if city_row is not None:
         return city_row, "existing city"
+
+    if entry.identity is not None:
+        city_name, state_name, country_name = entry.identity
+        if not execute:
+            cid = db.derive_city_id(city_name, state_name, country_name)
+            return None, f"NEW: would register from manifest identity ({cid})"
+        city_id = db.register_city(
+            conn,
+            city_name=city_name,
+            state_name=state_name,
+            state_code=get_state_abbreviation(state_name),
+            country_name=country_name,
+            country_code=get_country_code(country_name),
+            center_lat=center[0],
+            center_lon=center[1],
+            grid_width_m=extent[0],
+            grid_height_m=extent[1],
+            step_m=NEW_CITY_STEP_M,
+        )
+        return (db.resolve_city(conn, city_id),
+                f"NEW city registered from manifest identity "
+                f"({extent[0]}x{extent[1]}m)")
+
     if not use_nominatim:
         return None, "needs geocoding (--no-nominatim)"
     if not execute:
@@ -299,7 +341,9 @@ def load_manifest_override(path: str) -> List[ArchivalDataset]:
         entries = json.load(f)
     return [ArchivalDataset(rel_csv=e["rel_csv"], query=e["query"],
                             run_date=date.fromisoformat(e["run_date"]),
-                            fmt=e["fmt"])
+                            fmt=e["fmt"],
+                            identity=(tuple(e["identity"])
+                                      if e.get("identity") else None))
             for e in entries]
 
 
@@ -352,7 +396,7 @@ def main() -> int:
         n_ok = int((df["status"] == "OK").sum())
 
         city_row, note = resolve_or_register_city(
-            conn, entry, (center_lat, center_lon),
+            conn, entry, (center_lat, center_lon), (width, height),
             use_nominatim=not args.no_nominatim, execute=args.execute)
         if city_row is None:
             if note.startswith("NEW:"):
