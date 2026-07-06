@@ -413,9 +413,10 @@ def _build_provider_summary(runs, latest_json, data_dir, conn) -> Dict[str, Any]
         },
         "json_file": latest.json_filename,
         "search_area_km2": latest_json["search_grid"]["area_km2"],
-        # From the DB, not the per-run JSON: legacy baseline JSONs
-        # predate the unique-pano coverage definition, and all DB
-        # rows were computed with the current definition
+        # From the DB, not the per-run JSON: the DB holds the
+        # points-with-pano coverage definition for every generation
+        # (issue #90), while per-run JSONs written before the fix may
+        # carry the briefly-used unique-pano rate until regenerated
         "coverage_rate_percent": latest.coverage_rate_pct,
         "panorama_counts": panorama_counts,
         "all_panos_age_stats": latest_json["all_panos"]["age_stats"],

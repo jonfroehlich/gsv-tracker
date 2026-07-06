@@ -59,7 +59,14 @@ class DistanceStats:
 
 @dataclass
 class CoverageStats:
-    """Statistics about GSV coverage for queried points."""
+    """
+    Statistics about imagery coverage of the sampled grid points.
+
+    coverage_rate is grid-point coverage: points with >= 1 pano / total
+    points (issue #90). Unique-pano counts are a separate metric — the
+    field name num_points_with_unique_pano_ids is kept for per-run JSON
+    key stability but holds the count of unique panoramas.
+    """
     num_points_with_panos: int
     num_points_with_unique_pano_ids: int
     num_points_with_errors: int
@@ -69,10 +76,10 @@ class CoverageStats:
 
     FIELD_LABELS: ClassVar[Dict[str, str]] = {
         'num_points_with_panos': 'Points with Panoramas',
-        'num_points_with_unique_pano_ids': 'Points with Unique Pano IDs',
+        'num_points_with_unique_pano_ids': 'Unique Panoramas',
         'num_points_without_panos': 'Points without Panoramas',
         'num_points_with_errors': 'Points with Errors',
-        'coverage_rate': 'Unique Pano IDs / Num Points Queried'
+        'coverage_rate': 'Points with Panos / Total Points'
     }
 
     def to_rows(self) -> List[List[str]]:
@@ -186,26 +193,42 @@ def calculate_age_stats(df: pd.DataFrame, now: pd.Timestamp) -> AgeStats:
     )
 
 def calculate_coverage_stats(df: pd.DataFrame) -> CoverageStats:
-    """Calculate coverage and distance statistics."""
-    num_total_points = len(df)
+    """
+    Calculate grid-point coverage and pano-distance statistics.
 
-    total_points_with_panos = df[df['status'] == 'OK']
-    num_points_with_panos = len(total_points_with_panos)
-    logger.debug(f"Total points with panoramas: {num_points_with_panos}")
-    
-    num_points_without_panos = len(df[df['status'] == 'ZERO_RESULTS'])
-    num_points_with_errors = len(df[df['status'].isin([
-        'ERROR', 'REQUEST_DENIED', 'INVALID_REQUEST',
-        'OVER_QUERY_LIMIT', 'NO_DATE', 'UNKNOWN_ERROR'
-    ])])
+    coverage_rate is the percentage of sampled grid points with at least
+    one pano — "what fraction of the sampled area is within reach of
+    imagery?" (issue #90). Unlike unique-panos / points (a density proxy
+    that shrinks as the sampling step shrinks), this is roughly
+    step-independent and matches the definition behind the originally
+    published site and the GeoIndustry 2025 paper.
 
-    successful_df_no_duplicates = total_points_with_panos.drop_duplicates(subset=['pano_id']).copy()
-    num_points_with_unique_pano_ids = len(successful_df_no_duplicates)
-    logger.debug(f"Total points with panoramas and no duplicates: {num_points_with_unique_pano_ids}")
-    num_points_without_unique_pano_ids = num_points_with_panos - len(successful_df_no_duplicates)
+    A run may hold several rows per grid point (Mapillary stores one row
+    per pano), so points are counted as distinct (query_lat, query_lon)
+    pairs. Coordinates within a run come from a single grid-generation
+    pass, so exact equality is safe.
+    """
+    point_cols = ['query_lat', 'query_lon']
+    num_total_points = len(df[point_cols].drop_duplicates())
+
+    ok_rows = df[df['status'] == 'OK']
+    num_points_with_panos = len(ok_rows[point_cols].drop_duplicates())
+    logger.debug(f"Grid points with panoramas: {num_points_with_panos}")
+
+    # ZERO_RESULTS rows exist only at grid points with no pano, so they
+    # never overlap the OK points; whatever remains saw only errors
+    # (REQUEST_DENIED, NO_DATE, ...)
+    num_points_without_panos = len(
+        df.loc[df['status'] == 'ZERO_RESULTS', point_cols].drop_duplicates())
+    num_points_with_errors = (num_total_points - num_points_with_panos
+                              - num_points_without_panos)
+
+    successful_df_no_duplicates = ok_rows.drop_duplicates(subset=['pano_id']).copy()
+    num_unique_panos = len(successful_df_no_duplicates)
+    logger.debug(f"Unique panoramas: {num_unique_panos}")
 
     distance_stats = None
-    if num_points_with_unique_pano_ids > 0:
+    if num_unique_panos > 0:
         distances = np.sqrt(
             (successful_df_no_duplicates['query_lat'] - successful_df_no_duplicates['pano_lat'])**2 +
             (successful_df_no_duplicates['query_lon'] - successful_df_no_duplicates['pano_lon'])**2
@@ -231,10 +254,10 @@ def calculate_coverage_stats(df: pd.DataFrame) -> CoverageStats:
     
     return CoverageStats(
         num_points_with_panos=num_points_with_panos,
-        num_points_with_unique_pano_ids=num_points_with_unique_pano_ids,
-        num_points_without_panos=num_points_without_panos + num_points_without_unique_pano_ids,
+        num_points_with_unique_pano_ids=num_unique_panos,
+        num_points_without_panos=num_points_without_panos,
         num_points_with_errors=num_points_with_errors,
-        coverage_rate=(num_points_with_unique_pano_ids / num_total_points) * 100 if num_total_points > 0 else 0,
+        coverage_rate=(num_points_with_panos / num_total_points) * 100 if num_total_points > 0 else 0,
         pano_distance_stats=distance_stats
     )
 
@@ -495,8 +518,10 @@ def calculate_pano_stats(
     unique_panos = ok_panos.drop_duplicates(subset=['pano_id'])
     age_stats = calculate_age_stats(unique_panos, now)
     
-    # Calculate coverage statistics
-    coverage_stats = calculate_coverage_stats(unique_panos)
+    # Coverage describes the sampled grid, not the copyright subset, so it
+    # is always computed over the full frame (the google_only filter would
+    # drop the ZERO_RESULTS rows that anchor the denominator)
+    coverage_stats = calculate_coverage_stats(df)
     
     # Calculate distributions and photographer stats
     yearly_dist = calculate_yearly_distribution(unique_panos)
