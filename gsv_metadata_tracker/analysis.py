@@ -18,6 +18,20 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Official Google imagery carries exactly this copyright string; anything
+# else is a third-party photographer. Substring matching is wrong because
+# photographer names can contain 'Google' (e.g. '© MIB 360 - Google Virtual
+# Tours Agency'). Must stay in sync with the exact match in www/js/city.js.
+GOOGLE_COPYRIGHT = '© Google'
+
+
+def is_google_copyright(copyright_info: pd.Series) -> pd.Series:
+    """
+    Boolean mask: rows whose copyright marks official Google imagery.
+    NaN (copyright never recorded, e.g. archival imports) compares False.
+    """
+    return copyright_info == GOOGLE_COPYRIGHT
+
 @dataclass
 class DistanceStats:
     """Statistics about distances between query points and panoramas."""
@@ -437,27 +451,27 @@ def calculate_photographer_stats(df: pd.DataFrame) -> PhotographerStats:
 def calculate_pano_stats(
     df: pd.DataFrame, 
     now: pd.Timestamp,
-    copyright_filter: Optional[str] = None
+    google_only: bool = False
 ) -> GSVAnalysisResults:
     """
     Calculate comprehensive panorama statistics from a DataFrame.
-    
+
     Args:
         df: DataFrame containing GSV metadata
         now: Timestamp to use for age calculations
-        copyright_filter: Optional string to filter copyright info (e.g., 'Google')
-        
+        google_only: When True, restrict to official Google imagery
+            (exact '© Google' copyright; see is_google_copyright)
+
     Returns:
         GSVAnalysisResults containing all calculated statistics
-        
+
     Example:
         >>> df = pd.read_csv('gsv_metadata.csv')
         >>> now = pd.Timestamp.now()
         >>> results = calculate_pano_stats(df, now)
         >>> results.print_summary("Analysis Results")
     """
-    # Apply copyright filter if specified
-    filtered_df = df[df['copyright_info'].str.contains(copyright_filter, na=False)] if copyright_filter else df
+    filtered_df = df[is_google_copyright(df['copyright_info'])] if google_only else df
     
     # Get successful panoramas
     ok_panos = filtered_df[filtered_df['status'] == 'OK'].copy()
@@ -546,7 +560,7 @@ def calculate_run_stats(df: pd.DataFrame, run_date,
     unique_google_panos = None
     if provider == 'gsv' and not (len(unique) > 0
                                   and unique['copyright_info'].isna().all()):
-        is_google = unique['copyright_info'].str.contains('Google', case=False, na=False)
+        is_google = is_google_copyright(unique['copyright_info'])
         unique_google_panos = int(is_google.sum())
 
     age_stats = calculate_age_stats(unique.copy(), now)
@@ -564,6 +578,54 @@ def calculate_run_stats(df: pd.DataFrame, run_date,
         'newest_capture_date': age_stats.newest_pano_date,
         'median_pano_age_years': age_stats.median_pano_age_years,
     }
+
+
+# Response statuses meaning the request itself was rejected
+# (credentials/quota), as opposed to "no imagery here" (ZERO_RESULTS)
+SYSTEMIC_FAILURE_STATUSES = ('REQUEST_DENIED', 'OVER_QUERY_LIMIT')
+
+
+def detect_systemic_failure(df: pd.DataFrame,
+                            threshold: float = 0.95) -> Optional[str]:
+    """
+    Detect a run whose responses are dominated by credential/quota denials.
+
+    Such a run contains no information about the city; registering it would
+    poison the run series (it becomes the diff baseline) and, in the
+    unattended scheduler, quietly catalog garbage night after night.
+    Callers should abort the run instead of registering it.
+
+    A run that is 100% ZERO_RESULTS is NOT flagged — "no imagery anywhere"
+    is a valid answer for remote areas.
+
+    Args:
+        df: loaded run DataFrame (must have a 'status' column)
+        threshold: fraction of denied responses at or above which the run
+            is rejected
+
+    Returns:
+        A human-readable reason string when the run should be rejected,
+        None when the run looks like a genuine collection.
+
+    Examples:
+        >>> import pandas as pd
+        >>> detect_systemic_failure(pd.DataFrame({'status': ['REQUEST_DENIED'] * 100}))
+        '100 of 100 responses (100%) were denied (REQUEST_DENIED=100) — check the API credential/quota'
+        >>> detect_systemic_failure(pd.DataFrame({'status': ['OK', 'ZERO_RESULTS']})) is None
+        True
+    """
+    if len(df) == 0:
+        return None
+    counts = df['status'].value_counts()
+    denied = int(sum(counts.get(s, 0) for s in SYSTEMIC_FAILURE_STATUSES))
+    fraction = denied / len(df)
+    if fraction < threshold:
+        return None
+    breakdown = ", ".join(f"{s}={int(counts[s])}"
+                          for s in SYSTEMIC_FAILURE_STATUSES if s in counts)
+    return (f"{denied:,} of {len(df):,} responses ({fraction:.0%}) were "
+            f"denied ({breakdown}) — check the API credential/quota")
+
 
 def analyze_gsv_status(df: pd.DataFrame) -> Dict[str, Any]:
     """
@@ -618,7 +680,7 @@ def print_df_summary(df: pd.DataFrame, now: Optional[pd.Timestamp] = None,
     all_stats.print_summary()
 
     if provider == 'gsv':
-        google_stats = calculate_pano_stats(df, timestamp, copyright_filter='Google')
+        google_stats = calculate_pano_stats(df, timestamp, google_only=True)
         print("\nGoogle Panoramas Only")
         print("=" * 40)
         google_stats.print_summary()

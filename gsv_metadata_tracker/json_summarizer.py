@@ -292,7 +292,7 @@ def generate_city_metadata_summary_as_json(
         ok_rows = df[df['status'] == 'OK']
         gsv_copyright_available = (len(ok_rows) == 0
                                    or bool(ok_rows['copyright_info'].notna().any()))
-    google_pano_stats = (calculate_pano_stats(df, now, copyright_filter='Google')
+    google_pano_stats = (calculate_pano_stats(df, now, google_only=True)
                          if provider == 'gsv' and gsv_copyright_available
                          else None)
 

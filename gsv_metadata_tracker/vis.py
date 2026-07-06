@@ -17,6 +17,7 @@ from typing import Optional
 import zlib
 import base64
 import sys
+from .analysis import is_google_copyright
 from .geoutils import get_best_folium_zoom_level
 from .geoutils import get_bounding_box_size
 from .geoutils import get_bounding_box
@@ -178,18 +179,41 @@ def display_search_area(city_name: str, city_center_lat: float,
 
     return m
 
-def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
+# User-facing labels and pano viewer deep-links per provider (mirrors the
+# PROVIDERS registry in www/js/gsv-utils.js)
+PROVIDER_DISPLAY = {
+    'gsv': {
+        'label': 'GSV',
+        'viewer_url': lambda pano_id:
+            f'https://www.google.com/maps/@?api=1&map_action=pano&pano={pano_id}',
+    },
+    'mapillary': {
+        'label': 'Mapillary',
+        'viewer_url': lambda pano_id:
+            f'https://www.mapillary.com/app/?pKey={pano_id}',
+    },
+}
+
+
+def create_visualization_map(df: pd.DataFrame, city_name: str,
+                             provider: str = 'gsv') -> folium.Map:
     """
-    Create an interactive map visualization of GSV metadata with temporal histogram.
-    
+    Create an interactive map visualization of a run's pano metadata with a
+    temporal histogram.
+
     Args:
-        df: DataFrame containing GSV metadata
+        df: DataFrame containing run metadata (config.METADATA_DTYPES schema)
         city_name: Name of the city being visualized
-    
+        provider: imagery provider ('gsv' or 'mapillary'); controls labels,
+            per-pano viewer links, and the official-imagery filter
+
     Returns:
         folium.Map object with the visualization
     """
-    logger.debug(f"Creating visualization map for {city_name} with {len(df)} rows")
+    display = PROVIDER_DISPLAY[provider]
+    label = display['label']
+    logger.debug(f"Creating visualization map for {city_name} [{provider}] "
+                 f"with {len(df)} rows")
 
     # Filter for valid data
     valid_rows = df[
@@ -199,9 +223,11 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
     ]
     logger.info(f"Rows with valid pano coordinates: {len(valid_rows)}")
 
-    # Filter for Google imagery
-    valid_rows = valid_rows[valid_rows['copyright_info'].str.contains('Google', na=False)]
-    logger.info(f"Filtered rows with Google imagery: {len(valid_rows)}")
+    # Official-imagery filter applies only to GSV (Mapillary rows are all
+    # provider imagery already)
+    if provider == 'gsv':
+        valid_rows = valid_rows[is_google_copyright(valid_rows['copyright_info'])]
+        logger.info(f"Filtered rows with official Google imagery: {len(valid_rows)}")
 
     # Filter for valid dates (same as before)
     valid_rows = valid_rows.dropna(subset=['capture_date'])
@@ -272,12 +298,12 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
     # Create enhanced tooltip HTML
     bbox_tooltip_html = f"""
     <div style='font-family: Arial, sans-serif; font-size: 12px; line-height: 1.5'>
-        <h3 style='margin: 0 0 8px 0'>{city_name}: GSV Coverage Area</h3>
+        <h3 style='margin: 0 0 8px 0'>{city_name}: {label} Coverage Area</h3>
         <div style='margin-bottom: 4px'>
             <strong>Grid Area:</strong> {width_meters:,.0f} x {height_meters:,.0f}m ({area_km2:.1f} km²)
         </div>
         <div style='margin-bottom: 4px'>
-            <strong>Total GSV Panos:</strong> {total_panos:,} ({density_per_km2:.1f} panos/km²)
+            <strong>Total {label} Panos:</strong> {total_panos:,} ({density_per_km2:.1f} panos/km²)
         </div>
         <div style='margin-bottom: 4px'>
             <strong>Avg Pano Age:</strong> {avg_age:.1f} yrs (SD={age_std:.1f} yrs)
@@ -321,7 +347,7 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
     # Add markers
     marker_data = []
     markers_fg = folium.FeatureGroup(name="Pano Markers")  # Create feature group for markers
-    for idx, row in tqdm(valid_rows.iterrows(), total=len(valid_rows), desc="Creating GSV point map markers"):
+    for idx, row in tqdm(valid_rows.iterrows(), total=len(valid_rows), desc=f"Creating {label} point map markers"):
         capture_date = row['capture_date']
         date_str = capture_date.strftime('%Y-%m')
         age_years = (datetime.now() - capture_date).days / 365.25
@@ -332,7 +358,7 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
                 Capture Date: {date_str}
                 <br>Age: {age_years:.1f} years
                 <br>Photographer: {row['copyright_info']}
-                <br><a href="https://www.google.com/maps/@?api=1&map_action=pano&pano={row['pano_id']}" target="_blank">View in GSV</a>
+                <br><a href="{display['viewer_url'](row['pano_id'])}" target="_blank">View in {label}</a>
             </div>
         """, max_width=300)
 
@@ -431,7 +457,7 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
     </style>
     <div class="overlay-panel histogram-container">
         <button class="minimize-button" onclick="toggleHistogram()">−</button>
-        <div class="panel-title">{city_name}: GSV Coverage Over Time</div>
+        <div class="panel-title">{city_name}: {label} Coverage Over Time</div>
         <div class="histogram-content">
             <canvas id="histogramCanvas" width="300" height="150"></canvas>
         </div>
@@ -643,7 +669,7 @@ def create_visualization_map(df: pd.DataFrame, city_name: str) -> folium.Map:
                         max: yAxisMax,
                         title: {{
                             display: true,
-                            text: 'GSV Images'
+                            text: '{label} Images'
                         }},
                         ticks: {{
                             padding: 5

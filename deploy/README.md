@@ -19,8 +19,10 @@ cd ~/gsv-tracker
 python3.11 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# API key (same file the CLI uses)
+# API keys (same file the CLI uses) — the scheduler collects both
+# providers by default, so both are required
 echo 'GMAPS_API_KEY=YOUR_KEY_HERE' > .env
+echo 'MAPILLARY_ACCESS_TOKEN=YOUR_TOKEN_HERE' >> .env
 chmod 600 .env
 ```
 

@@ -33,11 +33,11 @@ from datetime import date, datetime, timezone
 from dotenv import load_dotenv
 
 from . import db
-from .analysis import print_df_summary, calculate_run_stats
+from .analysis import print_df_summary, calculate_run_stats, detect_systemic_failure
 from .diff import compute_run_diff, generate_diff_filename, write_diff_detail
 from .fileutils import load_city_csv_file
 from .json_summarizer import generate_city_metadata_summary_as_json, generate_aggregate_v2
-from .naming import generate_run_filename, same_grid_geometry
+from .naming import generate_run_filename, same_grid_geometry, sanitize_city_query_str
 from .paths import get_default_data_dir, get_default_vis_dir
 
 from . import (
@@ -301,6 +301,13 @@ def _resolve_geometry(conn, args):
         grid_height_m=grid_height,
         step_m=args.step,
     )
+    # Alias the user's query slug to the canonical id so future invocations
+    # with the same query resolve without geocoding (and geocoder naming
+    # drift can't re-register the city under a different id)
+    query_slug = sanitize_city_query_str(args.city)
+    if query_slug != city_id:
+        db.add_alias(conn, query_slug, city_id)
+
     logger.info(f"Registered new city {city_id} with frozen geometry")
     return db.resolve_city(conn, city_id), True
 
@@ -399,7 +406,7 @@ async def async_main():
 
         # Boundary preview: geocode + visualize, but don't register or download
         if args.check_boundary:
-            return _check_boundary(args, vis_path)
+            return _check_boundary(conn, args, vis_path)
 
         city_row, newly_registered = _resolve_geometry(conn, args)
 
@@ -493,9 +500,22 @@ async def _collect_one_run(conn, args, city_row, run_date, provider, config,
         )
     df = dict_results["df"]
 
-    # Record API usage in the daily per-provider budget ledger
+    # Record API usage in the daily per-provider budget ledger (the
+    # requests were spent even if the run is rejected below)
     db.add_api_usage(conn, run_date, dict_results["api_requests"],
                      provider=provider)
+
+    # Refuse to catalog a run dominated by credential/quota denials: it
+    # says nothing about the city, and once registered it would become the
+    # diff baseline and get published. The raw responses are kept under a
+    # .rejected suffix (excluded from the *.csv.gz publish glob).
+    failure_reason = detect_systemic_failure(df)
+    if failure_reason:
+        rejected_path = f"{output_csv_gz_path}.rejected"
+        os.replace(output_csv_gz_path, rejected_path)
+        raise RuntimeError(
+            f"{provider} run rejected, not cataloged: {failure_reason}. "
+            f"Raw responses kept at {rejected_path}")
 
     print(f"\nDownload Summary for {city_row.display_name} [{provider}]")
     print("=" * 50)
@@ -558,34 +578,67 @@ async def _collect_one_run(conn, args, city_row, run_date, provider, config,
 
     if not args.no_visual:
         map_path = os.path.join(vis_path, f"{run_base}.html")
-        map_obj = create_visualization_map(df, city_row.display_name)
+        map_obj = create_visualization_map(df, city_row.display_name,
+                                           provider=provider)
         print(f"Saving map visualization to {map_path}")
         map_obj.save(map_path)
         logging.info(f"Map visualization saved to {map_path}")
 
 
-def _check_boundary(args, vis_path: str) -> int:
-    """Geocode + preview the search area without registering or downloading."""
+def _check_boundary(conn, args, vis_path: str) -> int:
+    """
+    Preview the search area without registering or downloading.
+
+    Uses the same identity and geometry a real run would: a registered city
+    keeps its canonical city_id and frozen geometry (so the preview filename
+    matches the run files exactly); an unknown city is geocoded and its
+    canonical id derived the same way register_city would — without
+    registering it.
+    """
     from .naming import generate_base_filename
 
-    city_loc_data = get_city_location_data(args.city)
-    if args.lat is not None:
-        center_lat, center_lng = args.lat, args.lng
-    elif city_loc_data:
-        center_lat, center_lng = city_loc_data.latitude, city_loc_data.longitude
+    city_row = db.resolve_city(conn, args.city)
+    if city_row is not None:
+        overrides = [o for o, v in (('--lat/--lng', args.lat),
+                                    ('--width/--height', args.width)) if v is not None]
+        if overrides:
+            logger.warning(
+                f"{' and '.join(overrides)} ignored: '{args.city}' is already "
+                f"registered as {city_row.city_id} with frozen grid geometry")
+        print(f"'{args.city}' is registered as {city_row.city_id}; "
+              f"previewing its frozen geometry")
+        city_id = city_row.city_id
+        center_lat, center_lng = city_row.center_lat, city_row.center_lon
+        grid_width, grid_height = city_row.grid_width_m, city_row.grid_height_m
+        step = city_row.step_m
     else:
-        logging.error(f"Could not find coordinates for {args.city}. "
-                      f"Use --lat and --lng to provide them manually.")
-        return 1
+        city_loc_data = get_city_location_data(args.city)
+        if args.lat is not None:
+            center_lat, center_lng = args.lat, args.lng
+        elif city_loc_data:
+            center_lat, center_lng = city_loc_data.latitude, city_loc_data.longitude
+        else:
+            logging.error(f"Could not find coordinates for {args.city}. "
+                          f"Use --lat and --lng to provide them manually.")
+            return 1
 
-    if args.width is not None:
-        grid_width, grid_height = args.width, args.height
-    else:
-        grid_width, grid_height = get_search_dimensions(args.city, 1000, 1000)
+        if args.width is not None:
+            grid_width, grid_height = args.width, args.height
+        else:
+            grid_width, grid_height = get_search_dimensions(args.city, 1000, 1000)
+        step = args.step
+
+        # Same canonical id register_city would derive, so the preview
+        # filename matches the files an eventual run will produce
+        if city_loc_data:
+            city_id = db.derive_city_id(city_loc_data.city, city_loc_data.state,
+                                        city_loc_data.country)
+        else:
+            city_id = db.derive_city_id(args.city, None, None)
 
     print(f"The search dimensions for {args.city} are {grid_width:.1f}m x {grid_height:.1f}m")
 
-    base_name = generate_base_filename(args.city, grid_width, grid_height, args.step)
+    base_name = generate_base_filename(city_id, grid_width, grid_height, step)
     boundary_vis_full_path = os.path.join(vis_path, f"{base_name}_search_boundary.html")
 
     search_area_map = display_search_area(
