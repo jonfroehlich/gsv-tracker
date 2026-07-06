@@ -283,10 +283,18 @@ def generate_city_metadata_summary_as_json(
     # Ages are pinned to run_date when known so the output is deterministic
     now = pd.Timestamp(run_date) if run_date is not None else pd.Timestamp.now()
 
-    # Calculate all pano statistics
+    # Calculate all pano statistics. Archival GSV imports (issue #93) never
+    # captured copyright_info; for those runs the Google subset is unknown,
+    # so the google_panos block is omitted and a flag records why.
     all_pano_stats = calculate_pano_stats(df, now)
+    gsv_copyright_available = True
+    if provider == 'gsv':
+        ok_rows = df[df['status'] == 'OK']
+        gsv_copyright_available = (len(ok_rows) == 0
+                                   or bool(ok_rows['copyright_info'].notna().any()))
     google_pano_stats = (calculate_pano_stats(df, now, copyright_filter='Google')
-                         if provider == 'gsv' else None)
+                         if provider == 'gsv' and gsv_copyright_available
+                         else None)
 
     # Calculate coverage statistics
     coverage_stats = calculate_coverage_stats(df)
@@ -350,6 +358,8 @@ def generate_city_metadata_summary_as_json(
             "top_10_photographers": top_10_photographers,
         },
     }
+    if provider == 'gsv':
+        metadata["copyright_info_available"] = gsv_copyright_available
     if google_pano_stats is not None:
         metadata["google_panos"] = {
             "duplicate_stats": asdict(google_pano_stats.duplicate_stats),
@@ -412,7 +422,12 @@ def _build_provider_summary(runs, latest_json, data_dir, conn) -> Dict[str, Any]
         "collection_info": latest_json["download"],
         "histogram_of_capture_dates_by_year": histograms_by_year,
     }
-    # GSV runs carry the Google-copyright breakdown; other providers don't
+    # GSV runs carry the Google-copyright breakdown; other providers don't.
+    # Archival GSV imports flag copyright_info_available=false instead and
+    # omit google_panos (frontends fall back to all-pano stats).
+    if "copyright_info_available" in latest_json:
+        latest_block["copyright_info_available"] = \
+            latest_json["copyright_info_available"]
     google_panos = latest_json.get("google_panos")
     if google_panos:
         panorama_counts["unique_google_panos"] = \

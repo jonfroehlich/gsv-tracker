@@ -17,7 +17,7 @@ COLUMNS = ['query_lat', 'query_lon', 'query_timestamp', 'pano_lat', 'pano_lon',
 
 
 def make_city_df(panos, run_date=date(2026, 1, 15), grid_origin=(44.0, -121.0),
-                 n_empty=1):
+                 n_empty=1, copyright_info='© Google'):
     """
     Build a synthetic run DataFrame.
 
@@ -26,6 +26,8 @@ def make_city_df(panos, run_date=date(2026, 1, 15), grid_origin=(44.0, -121.0),
         run_date: embedded in query_timestamp
         grid_origin: (lat, lon) of the first grid point; points step by 0.001
         n_empty: trailing ZERO_RESULTS points
+        copyright_info: value for OK rows; None mimics archival imports
+            that never captured copyright (issue #93)
 
     Returns raw (string-typed) DataFrame, like a freshly written CSV.
     """
@@ -35,7 +37,7 @@ def make_city_df(panos, run_date=date(2026, 1, 15), grid_origin=(44.0, -121.0),
     lat0, lon0 = grid_origin
     for i, (pano_id, capture) in enumerate(panos):
         rows.append((lat0 + i * 0.001, lon0, ts, lat0 + i * 0.001 + 0.0001,
-                     lon0 + 0.0001, pano_id, capture, '© Google', 'OK'))
+                     lon0 + 0.0001, pano_id, capture, copyright_info, 'OK'))
     for j in range(n_empty):
         rows.append((lat0 + (len(panos) + j) * 0.001, lon0, ts, None, None,
                      None, None, None, 'ZERO_RESULTS'))

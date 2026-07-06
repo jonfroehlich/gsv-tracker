@@ -69,11 +69,88 @@ def test_v2_fields_and_age_pinned_to_run_date(data_dir):
     assert data['run'] == {'run_date': '2026-01-15', 'is_baseline': False}
     assert data['change_from_previous_run']['panos_added'] == 1
     assert 'google_panos' in data
+    assert data['copyright_info_available'] is True
 
     # Ages relative to run_date: panos captured exactly 6 and 4 years earlier
     ages = data['all_panos']['age_stats']
     assert ages['avg_pano_age_years'] == pytest.approx(5.0, abs=0.01)
     assert ages['median_pano_age_years'] == pytest.approx(5.0, abs=0.01)
+
+
+def test_copyright_unknown_run_json(data_dir):
+    # Archival imports (issue #93) never captured copyright_info: the
+    # Google subset is unknown, so google_panos is omitted and flagged
+    run_date = date(2023, 11, 5)
+    csv_path = os.path.join(
+        data_dir, 'old--city_width_1000_height_1000_step_30_2023-11-05.csv.gz')
+    write_city_csv_gz(make_city_df([('p1', '2020-05-01'), ('p2', '2021-06-01')],
+                                   run_date=run_date, copyright_info=None),
+                      csv_path)
+    df = load_city_csv_file(csv_path)
+    json_path = generate_city_metadata_summary_as_json(
+        csv_path, df, 'Old', None, 'Testland', 1000, 1000, 30,
+        force_recreate_file=True, run_date=run_date, is_baseline=True)
+    data = strict_load(json_path)
+
+    assert data['copyright_info_available'] is False
+    assert 'google_panos' not in data
+    assert data['run'] == {'run_date': '2023-11-05', 'is_baseline': True}
+    assert data['all_panos']['duplicate_stats']['total_unique_panos'] == 2
+
+
+def test_run_stats_google_panos_none_when_copyright_unknown():
+    from gsv_metadata_tracker.analysis import calculate_run_stats
+
+    run_date = date(2023, 11, 5)
+    df_unknown = make_city_df([('p1', '2020-05-01')], run_date=run_date,
+                              copyright_info=None)
+    stats = calculate_run_stats(df_unknown, run_date)
+    assert stats['unique_google_panos'] is None
+    assert stats['unique_panos'] == 1
+
+    df_known = make_city_df([('p1', '2020-05-01')], run_date=run_date)
+    stats = calculate_run_stats(df_known, run_date)
+    assert stats['unique_google_panos'] == 1
+
+    # A run with zero OK rows has a trivially known (zero) Google subset
+    df_empty = make_city_df([], run_date=run_date, n_empty=2)
+    stats = calculate_run_stats(df_empty, run_date)
+    assert stats['unique_google_panos'] == 0
+
+
+def test_aggregate_propagates_copyright_flag(conn, data_dir):
+    city_id = db.register_city(
+        conn, city_name='Old', state_name=None, state_code=None,
+        country_name='Testland', country_code=None,
+        center_lat=44.0, center_lon=-121.0,
+        grid_width_m=1000, grid_height_m=1000, step_m=20)
+    run_date = date(2023, 11, 5)
+    csv_name = f'{city_id}_width_1000_height_1000_step_30_2023-11-05.csv.gz'
+    csv_path = os.path.join(data_dir, csv_name)
+    write_city_csv_gz(make_city_df([('p1', '2020-05-01')], run_date=run_date,
+                                   copyright_info=None), csv_path)
+    df = load_city_csv_file(csv_path)
+    json_path = generate_city_metadata_summary_as_json(
+        csv_path, df, 'Old', None, 'Testland', 1000, 1000, 30,
+        force_recreate_file=True, run_date=run_date, is_baseline=True)
+    db.register_run(conn, city_id=city_id, run_date=run_date,
+                    csv_filename=csv_name,
+                    json_filename=os.path.basename(json_path),
+                    is_baseline=True, unique_panos=1,
+                    unique_google_panos=None)
+
+    summary = generate_aggregate_v2(conn, data_dir)
+    gsv = summary['cities'][0]['providers']['gsv']
+
+    assert gsv['latest']['copyright_info_available'] is False
+    assert 'unique_google_panos' not in gsv['latest']['panorama_counts']
+    assert 'google_panos_age_stats' not in gsv['latest']
+    assert gsv['latest']['is_baseline'] is True
+    assert gsv['runs'][0]['unique_google_panos'] is None
+    # No google contribution to the global gsv histograms
+    assert summary['histogram_of_capture_dates']['gsv']['google_panos_yearly'] == {}
+
+    strict_load(os.path.join(data_dir, 'cities.json.gz'))
 
 
 def test_mapillary_run_json(data_dir):

@@ -528,7 +528,9 @@ def calculate_run_stats(df: pd.DataFrame, run_date,
         provider: imagery provider. The Google-copyright breakdown only
             makes sense for GSV runs; other providers store NULL for
             unique_google_panos (their unique_panos already counts only
-            provider imagery).
+            provider imagery). GSV runs whose copyright_info is entirely
+            null (archival imports that never captured it) also store
+            NULL — the Google subset is unknown, not zero.
 
     Returns:
         Dict matching db.register_run keyword arguments (stats subset).
@@ -542,7 +544,8 @@ def calculate_run_stats(df: pd.DataFrame, run_date,
     ok = df[df['status'] == 'OK']
     unique = ok.drop_duplicates(subset=['pano_id'])
     unique_google_panos = None
-    if provider == 'gsv':
+    if provider == 'gsv' and not (len(unique) > 0
+                                  and unique['copyright_info'].isna().all()):
         is_google = unique['copyright_info'].str.contains('Google', case=False, na=False)
         unique_google_panos = int(is_google.sum())
 

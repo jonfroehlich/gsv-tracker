@@ -39,6 +39,7 @@ let totalPanosGlobal = 0;
 let collectionDateGlobal = "";
 let statsGlobal = null;
 let panoStatsGlobal = null; // provider pano block: google_panos (gsv) or all_panos
+let copyrightAvailableGlobal = true; // false for archival GSV runs with no copyright data
 let providerGlobal = "gsv"; // derived from the data filename
 let oldestDateGlobal = null;
 let newestDateGlobal = null;
@@ -680,6 +681,7 @@ async function loadData() {
     // starts). For GSV the provider block is the Google-copyright subset;
     // other providers' all_panos rows are already all provider imagery.
     statsGlobal = stats;
+    copyrightAvailableGlobal = stats.copyright_info_available !== false;
     panoStatsGlobal = stats.google_panos ?? stats.all_panos;
     oldestDateGlobal = new Date(panoStatsGlobal.age_stats.oldest_pano_date);
     newestDateGlobal = new Date(panoStatsGlobal.age_stats.newest_pano_date);
@@ -699,13 +701,16 @@ async function loadData() {
     const googleLine = stats.google_panos
       ? `Google panoramas: ${stats.google_panos.duplicate_stats.total_unique_panos.toLocaleString()}<br>`
       : "";
+    const copyrightNote = !copyrightAvailableGlobal
+      ? `<em>Copyright info not recorded (archival import); counts include all panoramas</em><br>`
+      : "";
     const fmtYears = (v) => (v != null ? `${v.toFixed(1)} years` : "—");
     const tooltipHtml = `
       <div style="font-family:sans-serif">
         <strong>${cityLabel}</strong><br>
         <em>${PROVIDERS[providerGlobal].label}</em><br><br>
         Total panoramas: ${stats.all_panos.duplicate_stats.total_unique_panos.toLocaleString()}<br>
-        ${googleLine}<br>
+        ${googleLine}${copyrightNote}<br>
         Search grid area: ${stats.search_grid.area_km2.toFixed(1)} km²<br>
         Total search points: ${stats.search_grid.total_search_points.toLocaleString()}<br>
         Grid step size: ${stats.search_grid.step_length_meters} meters<br><br>
@@ -778,7 +783,9 @@ async function loadData() {
           row.status !== "OK" ||
           // GSV runs mix official and third-party imagery; show only
           // official Google. Other providers' rows are all provider panos.
-          (providerGlobal === "gsv" && row.copyright_info !== "© Google") ||
+          // Archival runs never recorded copyright, so all rows are kept.
+          (providerGlobal === "gsv" && copyrightAvailableGlobal &&
+            row.copyright_info !== "© Google") ||
           !row.capture_date ||
           !row.pano_id ||
           !row.pano_lat ||
@@ -814,7 +821,7 @@ async function loadData() {
         }).addTo(map);
 
         const photographer = providerGlobal === "gsv"
-          ? "Google"
+          ? (copyrightAvailableGlobal ? "Google" : (row.copyright_info || "Unknown"))
           : (row.copyright_info || PROVIDERS[providerGlobal].label);
         marker.bindPopup(buildPopupHtml(captureDate, ageFormatted, row.pano_id,
                                         photographer));

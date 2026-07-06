@@ -190,11 +190,15 @@ function adaptCityRecord(rec, provider = "gsv") {
     latest_run_date: latest.run_date,
     runs: block.runs || [],
     change: block.change || null,
+    // False for archival GSV runs that never captured copyright_info
+    // (their Google subset is unknown; the fallbacks below kick in)
+    copyright_info_available: latest.copyright_info_available ?? true,
     // Normalized provider-agnostic fields (prefer these in UI code)
-    pano_count: isGsv ? counts.unique_google_panos : counts.unique_panos,
-    pano_age_stats: isGsv ? latest.google_panos_age_stats
+    pano_count: isGsv ? (counts.unique_google_panos ?? counts.unique_panos)
+                      : counts.unique_panos,
+    pano_age_stats: isGsv ? (latest.google_panos_age_stats ?? latest.all_panos_age_stats)
                           : latest.all_panos_age_stats,
-    capture_year_histogram: isGsv ? histograms.google_panos
+    capture_year_histogram: isGsv ? (histograms.google_panos ?? histograms.all_panos)
                                   : histograms.all_panos,
   };
 }
