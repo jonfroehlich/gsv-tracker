@@ -37,7 +37,7 @@ from .analysis import print_df_summary, calculate_run_stats
 from .diff import compute_run_diff, generate_diff_filename, write_diff_detail
 from .fileutils import load_city_csv_file
 from .json_summarizer import generate_city_metadata_summary_as_json, generate_aggregate_v2
-from .naming import generate_run_filename
+from .naming import generate_run_filename, same_grid_geometry
 from .paths import get_default_data_dir, get_default_vis_dir
 
 from . import (
@@ -522,14 +522,26 @@ async def _collect_one_run(conn, args, city_row, run_date, provider, config,
         **stats,
     )
 
-    # Diff against the previous run of the same provider, if any
+    # Diff against the previous run of the same provider, if any — but only
+    # when both runs sampled the same grid geometry. Archival baselines
+    # (issue #93) carry their own width/height/step, recoverable only from
+    # the filename; a cross-geometry diff would compare different sampled
+    # areas and produce meaningless added/removed counts.
     change_block = None
     prev_run = db.get_previous_run(conn, city_row.city_id, run_date,
                                    provider=provider)
     if prev_run is not None:
-        change_block = _compute_and_record_diff(
-            conn, city_row, prev_run, run_id, run_date, df,
-            args.download_dir, provider=provider)
+        new_csv_filename = os.path.basename(output_csv_gz_path)
+        if same_grid_geometry(prev_run.csv_filename, new_csv_filename):
+            change_block = _compute_and_record_diff(
+                conn, city_row, prev_run, run_id, run_date, df,
+                args.download_dir, provider=provider)
+        else:
+            logger.warning(
+                f"Skipping diff for {city_row.city_id} [{provider}]: previous "
+                f"run {prev_run.csv_filename} has different grid geometry than "
+                f"{new_csv_filename}; diffs resume once two same-geometry runs "
+                f"exist")
 
     # Per-run summary JSON (schema v2, ages pinned to run_date)
     json_path = generate_city_metadata_summary_as_json(

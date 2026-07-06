@@ -6,7 +6,7 @@ import pytest
 
 from gsv_metadata_tracker.naming import (
     generate_base_filename, generate_run_filename, parse_filename,
-    sanitize_city_query_str)
+    same_grid_geometry, sanitize_city_query_str)
 
 
 def test_parse_legacy_int_name():
@@ -108,6 +108,46 @@ def test_generate_run_filename_rejects_unknown_provider():
     with pytest.raises(ValueError):
         generate_run_filename("bend--or", 5000, 5000, 20, date(2026, 7, 5),
                               provider="kartaview")
+
+
+def test_parse_archival_step_30_dated_name():
+    # Archival imports (issue #93) use the predecessor scraper's 30 m step
+    name = generate_run_filename("seattle--wa", 987, 1093, 30, date(2023, 11, 5))
+    p = parse_filename(name + ".csv.gz")
+    assert (p.width_meters, p.height_meters, p.step_meters) == (987, 1093, 30)
+    assert p.run_date == date(2023, 11, 5)
+    assert p.provider == "gsv"
+
+
+def test_same_grid_geometry_ignores_date_and_provider():
+    assert same_grid_geometry(
+        "seattle--wa_width_5000_height_5000_step_20_2026-07-02.csv.gz",
+        "seattle--wa_width_5000_height_5000_step_20_2026-04-01.csv.gz")
+    assert same_grid_geometry(
+        "seattle--wa_width_5000_height_5000_step_20_2026-07-02.csv.gz",
+        "seattle--wa_width_5000_height_5000_step_20_mapillary_2026-07-02.csv.gz")
+    # Legacy undated vs dated: geometry is all that matters
+    assert same_grid_geometry(
+        "seattle--wa_width_5000_height_5000_step_20.csv.gz",
+        "seattle--wa_width_5000_height_5000_step_20_2026-07-02.csv.gz")
+
+
+def test_same_grid_geometry_rejects_mismatches():
+    modern = "seattle--wa_width_5000_height_5000_step_20_2026-07-02.csv.gz"
+    assert not same_grid_geometry(
+        modern, "seattle--wa_width_1000_height_1000_step_30_2023-11-05.csv.gz")
+    assert not same_grid_geometry(
+        modern, "seattle--wa_width_5000_height_5000_step_30_2026-07-02.csv.gz")
+    assert not same_grid_geometry(
+        modern, "seattle--wa_width_4000_height_5000_step_20_2026-07-02.csv.gz")
+    assert not same_grid_geometry(
+        modern, "seattle--wa_width_5000_height_4000_step_20_2026-07-02.csv.gz")
+
+
+def test_same_grid_geometry_unparseable_is_false():
+    modern = "seattle--wa_width_5000_height_5000_step_20_2026-07-02.csv.gz"
+    assert not same_grid_geometry(modern, "cities.json.gz")
+    assert not same_grid_geometry("garbage", "garbage")
 
 
 def test_sanitize_city_query_str():

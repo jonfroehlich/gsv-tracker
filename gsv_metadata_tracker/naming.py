@@ -230,3 +230,29 @@ def generate_run_filename(
     provider_token = '' if provider == DEFAULT_PROVIDER else f"_{provider}"
     return (f"{city_id}_width_{int(grid_width)}_height_{int(grid_height)}"
             f"_step_{int(step_length)}{provider_token}_{run_date.isoformat()}")
+
+
+def same_grid_geometry(filename_a: str, filename_b: str) -> bool:
+    """
+    True when both filenames parse and encode the same grid geometry
+    (width, height, step). Provider token and run date are ignored.
+    Unparseable filenames compare unequal, which callers treat as
+    "don't diff" — the safe answer.
+
+    Examples:
+        >>> same_grid_geometry(
+        ...     "seattle--wa_width_5000_height_5000_step_20_2026-07-02.csv.gz",
+        ...     "seattle--wa_width_5000_height_5000_step_20_2026-04-01.csv.gz")
+        True
+        >>> same_grid_geometry(
+        ...     "seattle--wa_width_5000_height_5000_step_20_2026-07-02.csv.gz",
+        ...     "seattle--wa_width_1000_height_1000_step_30_2023-11-05.csv.gz")
+        False
+    """
+    try:
+        a = parse_filename(filename_a)
+        b = parse_filename(filename_b)
+    except ValueError:
+        return False
+    return ((a.width_meters, a.height_meters, a.step_meters)
+            == (b.width_meters, b.height_meters, b.step_meters))
