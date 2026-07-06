@@ -19,6 +19,37 @@ NOMINATIM_USER_AGENT = "gsv_metadata_tracker (jonf@cs.uw.edu)"
 _geolocator = Nominatim(user_agent=NOMINATIM_USER_AGENT, timeout=10)
 _rate_limited_geocode = RateLimiter(_geolocator.geocode, min_delay_seconds=1.1)
 
+
+def geocode_boundary_raw(city_name: str,
+                         state_name: Optional[str] = None,
+                         country_name: Optional[str] = None) -> Optional[dict]:
+    """
+    Rate-limited Nominatim lookup returning the raw top result including
+    the boundary polygon GeoJSON, or None when nothing matches.
+
+    Uses a structured query ({city, state, country}) rather than free-form
+    text: structured search restricts Nominatim to settlement-type matches,
+    which avoids the township/neighborhood mismatches the boundary audit
+    (issue #91) exists to catch. Deliberately does NOT bias by a known
+    center — the caller may be auditing whether that center is itself the
+    product of a bad geocode.
+
+    Geocoder exceptions (timeouts, service unavailable) propagate so
+    callers can distinguish transient failures (retry later) from a real
+    "not found" (a stable, cacheable answer).
+
+    Example:
+        >>> raw = geocode_boundary_raw('Seattle', 'Washington', 'United States')
+        >>> raw['geojson']['type']
+        'MultiPolygon'
+    """
+    query = {key: value for key, value in
+             [('city', city_name), ('state', state_name),
+              ('country', country_name)] if value}
+    location = _rate_limited_geocode(query, language='en',
+                                     addressdetails=True, geometry='geojson')
+    return dict(location.raw) if location is not None else None
+
 def get_state_abbreviation(state_name: Optional[str]) -> Optional[str]:
     """
     Get the standard two-letter abbreviation for a US state.

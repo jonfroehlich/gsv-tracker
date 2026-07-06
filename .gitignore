@@ -2,6 +2,7 @@
 .DS_Store
 data/
 data-step10/
+/audit/
 backup_data/
 vis/*.html
 www/index copy.html
