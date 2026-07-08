@@ -58,6 +58,8 @@ EXCLUDE_PATTERNS=(
   "*.db-shm"
   "*.csv"
   "*.json"
+  "osm_cache/"     # frozen OSM street networks (gsv_street_analyzer) — local only
+  "*.graphml"
 )
 
 # ──────────────────────────────────────────────
