@@ -275,8 +275,12 @@ def create_visualization_map(df: pd.DataFrame, city_name: str,
 
     logger.info(f"Average age: {avg_age:.1f} years, Median age: {median_age:.1f} years, Total panos: {total_panos}, Area: {area_km2:.1f} km²")
     
-    # Calculate coverage density
-    density_per_km2 = total_panos / area_km2
+    # Calculate coverage density. Guard against a degenerate 0-area bbox (a
+    # single pano, or collinear panos, gives a 0 x 0 bounding box), which would
+    # otherwise raise ZeroDivisionError and crash the run's local viz step
+    # after the run is already cataloged (issue #69).
+    density_per_km2 = total_panos / area_km2 if area_km2 > 0 else float('nan')
+    density_str = f"{density_per_km2:.1f}" if area_km2 > 0 else "n/a"
     
     # Calculate temporal coverage
     date_range = (valid_rows['capture_date'].max() - valid_rows['capture_date'].min()).days / 365.25
@@ -303,7 +307,7 @@ def create_visualization_map(df: pd.DataFrame, city_name: str,
             <strong>Grid Area:</strong> {width_meters:,.0f} x {height_meters:,.0f}m ({area_km2:.1f} km²)
         </div>
         <div style='margin-bottom: 4px'>
-            <strong>Total {label} Panos:</strong> {total_panos:,} ({density_per_km2:.1f} panos/km²)
+            <strong>Total {label} Panos:</strong> {total_panos:,} ({density_str} panos/km²)
         </div>
         <div style='margin-bottom: 4px'>
             <strong>Avg Pano Age:</strong> {avg_age:.1f} yrs (SD={age_std:.1f} yrs)
