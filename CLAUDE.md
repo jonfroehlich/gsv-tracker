@@ -58,6 +58,7 @@ Credentials in `.env`, loaded by `gsv_metadata_tracker/config.py` per provider: 
 
 ## Notes
 
+- Architecture decisions are recorded in `docs/adr/`. Notably **ADR 0001: stay fully static, no backend** — the public site has zero server-side runtime by design; large/dense-city rendering (#77, #58) is fixed with static artifacts (grid-binned overview → PMTiles), never a server.
 - `data/` contains thousands of files — avoid globbing/listing it wholesale.
 - Legacy pre-2026 data files are undated; they're registered as `is_baseline=1` runs by the migration script and are never renamed (published URLs stay stable).
 - The sync-vs-async duplicate download path was removed in v2 (`download.py`, `gsv_tracker_single.py`); v1.0.0 tag preserves the old architecture.
