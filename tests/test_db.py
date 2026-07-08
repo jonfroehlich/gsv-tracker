@@ -40,6 +40,29 @@ def test_alias_resolution(conn, city):
     assert db.resolve_city(conn, 'Nowhere, KS') is None
 
 
+def test_update_city_geometry_overwrites_and_appends_note(conn, city):
+    db.update_city_geometry(
+        conn, city_id=city, center_lat=44.10, center_lon=-121.40,
+        grid_width_m=18000, grid_height_m=20000, notes='regeom #91')
+    row = db.resolve_city(conn, city)
+    assert (row.center_lat, row.center_lon) == (44.10, -121.40)
+    assert row.grid_width_m == 18000 and row.grid_height_m == 20000
+    assert row.step_m == 20                       # step is untouched
+    assert row.notes == 'regeom #91'
+    # A second correction appends to (does not clobber) the audit-trail note.
+    db.update_city_geometry(
+        conn, city_id=city, center_lat=44.11, center_lon=-121.41,
+        grid_width_m=18000, grid_height_m=20000, notes='regeom #91 again')
+    assert db.resolve_city(conn, city).notes == 'regeom #91\nregeom #91 again'
+
+
+def test_update_city_geometry_unknown_city_raises(conn):
+    with pytest.raises(KeyError):
+        db.update_city_geometry(
+            conn, city_id='nope', center_lat=1.0, center_lon=2.0,
+            grid_width_m=100, grid_height_m=100)
+
+
 def test_runs_ordering_and_uniqueness(conn, city):
     r1 = db.register_run(conn, city_id=city, run_date=date(2026, 4, 1),
                          csv_filename='a.csv.gz')

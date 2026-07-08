@@ -331,6 +331,27 @@ class EnhancedLocation:
         return self._bot_right
 
     @property
+    def bbox_center(self) -> Optional[tuple]:
+        """
+        Get the midpoint of the OSM bounding box.
+
+        This is the correct grid center for a search rectangle: unlike the
+        geocoder's reported point (location.latitude/longitude), it is
+        guaranteed to sit at the geometric center of the bounding box the
+        grid dimensions are derived from, so the sampled rectangle actually
+        covers the boundary.
+
+        Returns:
+            tuple or None: (latitude, longitude) midpoint if the bounding box
+            is available, None otherwise
+        """
+        if self._top_left is None or self._bot_right is None:
+            return None
+        north, west = self._top_left
+        south, east = self._bot_right
+        return ((north + south) / 2.0, (west + east) / 2.0)
+
+    @property
     def width(self) -> Optional[float]:
         """
         Get the width of the bounding box in kilometers.

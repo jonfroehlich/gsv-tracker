@@ -53,6 +53,44 @@ from . import (
 
 logger = logging.getLogger(__name__)
 
+# Practical ceiling for auto-derived grid dimensions (issue #91). We bias grids
+# BIGGER not smaller — the full OSM bounding box, so a future analysis can clip
+# to the (always-smaller) polygon boundary; oversampling is free (GSV metadata
+# has no quota) and recoverable, undersampling loses coverage permanently. The
+# only real limit is collection time, so we clamp (with a warning) just the
+# handful of enormous administrative units — e.g. Đà Nẵng's 194×153 km
+# municipality — that would otherwise take ~hundreds of days. Override with
+# --width/--height for a genuinely larger area.
+MAX_GRID_DIM_M = 80000
+
+
+def _resolve_center(city_loc_data):
+    """
+    Grid center from a geocode result: the OSM bounding-box midpoint when
+    available (correct — the grid dimensions are derived from that same bbox,
+    so the sampled rectangle actually covers the boundary), else the geocoder's
+    reported point as a fallback. Returns (lat, lng) or None.
+    """
+    if city_loc_data is None:
+        return None
+    center = city_loc_data.bbox_center
+    if center is not None:
+        return center
+    return (city_loc_data.latitude, city_loc_data.longitude)
+
+
+def _cap_dimensions(grid_width, grid_height, city):
+    """Clamp auto-derived grid dimensions to MAX_GRID_DIM_M, warning if clamped."""
+    capped_w = min(grid_width, MAX_GRID_DIM_M)
+    capped_h = min(grid_height, MAX_GRID_DIM_M)
+    if capped_w < grid_width or capped_h < grid_height:
+        logger.warning(
+            f"Derived grid for '{city}' is {grid_width:.0f}x{grid_height:.0f}m; "
+            f"clamping to {capped_w:.0f}x{capped_h:.0f}m (the OSM boundary is far "
+            f"larger than a typical city sample). Use --width/--height to override.")
+    return capped_w, capped_h
+
+
 def parse_args():
     """
     Parse and validate command line arguments.
@@ -270,7 +308,7 @@ def _resolve_geometry(conn, args):
         center_lat, center_lng = args.lat, args.lng
         print(f"Using user-provided coordinates: {center_lat}, {center_lng}")
     elif city_loc_data:
-        center_lat, center_lng = city_loc_data.latitude, city_loc_data.longitude
+        center_lat, center_lng = _resolve_center(city_loc_data)
     else:
         logger.error(f"Could not find coordinates for {args.city}. "
                      f"Use --lat and --lng to provide them manually.")
@@ -281,6 +319,7 @@ def _resolve_geometry(conn, args):
         print(f"Using provided dimensions: {grid_width:.1f}m x {grid_height:.1f}m")
     else:
         grid_width, grid_height = get_search_dimensions(args.city, 1000, 1000)
+        grid_width, grid_height = _cap_dimensions(grid_width, grid_height, args.city)
 
     city_name = city_loc_data.city if city_loc_data else args.city.split(',')[0].strip()
     state_name = city_loc_data.state if city_loc_data else None
@@ -616,7 +655,7 @@ def _check_boundary(conn, args, vis_path: str) -> int:
         if args.lat is not None:
             center_lat, center_lng = args.lat, args.lng
         elif city_loc_data:
-            center_lat, center_lng = city_loc_data.latitude, city_loc_data.longitude
+            center_lat, center_lng = _resolve_center(city_loc_data)
         else:
             logging.error(f"Could not find coordinates for {args.city}. "
                           f"Use --lat and --lng to provide them manually.")
@@ -626,6 +665,7 @@ def _check_boundary(conn, args, vis_path: str) -> int:
             grid_width, grid_height = args.width, args.height
         else:
             grid_width, grid_height = get_search_dimensions(args.city, 1000, 1000)
+            grid_width, grid_height = _cap_dimensions(grid_width, grid_height, args.city)
         step = args.step
 
         # Same canonical id register_city would derive, so the preview
