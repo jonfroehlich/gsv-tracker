@@ -1,6 +1,6 @@
-# GSV Tracker
+# Streetscape Tracker
 
-GSV Tracker is a Python tool for analyzing street-level imagery coverage and temporal patterns in cities **over time** — Google Street View (GSV) and, as of 2026, [Mapillary](https://www.mapillary.com/) 360° panoramas. It samples geographic grids around city centers, queries each provider's metadata API, and produces dated snapshots per city — computing what changed between snapshots (panoramas added/removed, capture dates updated, coverage deltas) and rendering interactive visualizations of when and where imagery was captured.
+Streetscape Tracker (formerly *GSV Tracker*) is a Python tool for analyzing street-level imagery coverage and temporal patterns in cities **over time** — Google Street View (GSV) and, as of 2026, [Mapillary](https://www.mapillary.com/) 360° panoramas. It samples geographic grids around city centers, queries each provider's metadata API, and produces dated snapshots per city — computing what changed between snapshots (panoramas added/removed, capture dates updated, coverage deltas) and rendering interactive visualizations of when and where imagery was captured.
 
 This research project began in 2021 by Professor Jon E. Froehlich and was also part of the [UC Berkeley Data Science Discovery Program](https://cdss.berkeley.edu/discovery/projects) in 2023 with students Joseph Chen, Wenjing Yi, and Jingfeng Yang. Here's the [original pitch sheet in Google Docs](https://docs.google.com/document/d/1hfgvS_JHRmhkVtj_LBZ2qd_TO-50L6g0crlV8nTBy9s/edit?tab=t.0). The [v1.0.0 release](https://github.com/jonfroehlich/gsv-tracker/releases/tag/v1.0.0) of this tool supported our [GeoIndustry 2025 paper](https://doi.org/10.1145/3764919.3770883) on GSV coverage and socioeconomic indicators (see also [GSVantage](https://github.com/makeabilitylab/GSVantage)).
 
@@ -53,7 +53,7 @@ We recommend using a standard Python virtual environment (`.venv`) to manage dep
 1. **Clone the repository:**
 
 ```bash
-git clone https://github.com/yourusername/gsv-tracker.git
+git clone https://github.com/jonfroehlich/gsv-tracker.git
 cd gsv-tracker
 ```
 
