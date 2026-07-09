@@ -14,6 +14,7 @@ from .analysis import (
     calculate_pano_stats,
     calculate_age_stats,
     calculate_coverage_stats,
+    PRESENT_STATUSES,
 )
 
 logger = logging.getLogger(__name__)
@@ -289,9 +290,9 @@ def generate_city_metadata_summary_as_json(
     all_pano_stats = calculate_pano_stats(df, now)
     gsv_copyright_available = True
     if provider == 'gsv':
-        ok_rows = df[df['status'] == 'OK']
-        gsv_copyright_available = (len(ok_rows) == 0
-                                   or bool(ok_rows['copyright_info'].notna().any()))
+        present_rows = df[df['status'].isin(PRESENT_STATUSES)]
+        gsv_copyright_available = (len(present_rows) == 0
+                                   or bool(present_rows['copyright_info'].notna().any()))
     google_pano_stats = (calculate_pano_stats(df, now, google_only=True)
                          if provider == 'gsv' and gsv_copyright_available
                          else None)

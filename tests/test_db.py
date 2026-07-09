@@ -76,6 +76,26 @@ def test_runs_ordering_and_uniqueness(conn, city):
                         csv_filename='c.csv.gz')
 
 
+def test_register_run_round_trips_status_no_date(conn, city):
+    rid = db.register_run(conn, city_id=city, run_date=date(2026, 4, 1),
+                          csv_filename='a.csv.gz', total_points=10,
+                          status_ok=6, status_no_date=2, status_zero_results=2,
+                          status_other=0, unique_panos=8, unique_google_panos=8,
+                          coverage_rate_pct=80.0)
+    run = db.get_latest_run(conn, city)
+    assert run.run_id == rid
+    assert run.status_no_date == 2          # new v4 column persists
+    assert run.status_ok == 6 and run.unique_panos == 8
+    assert abs(run.coverage_rate_pct - 80.0) < 1e-9
+
+
+def test_register_run_status_no_date_defaults_null(conn, city):
+    # Callers that omit status_no_date (e.g. legacy paths) store NULL, not 0.
+    db.register_run(conn, city_id=city, run_date=date(2026, 4, 1),
+                    csv_filename='a.csv.gz')
+    assert db.get_latest_run(conn, city).status_no_date is None
+
+
 def test_diff_storage(conn, city):
     r1 = db.register_run(conn, city_id=city, run_date=date(2026, 4, 1),
                          csv_filename='a.csv.gz')
@@ -290,10 +310,14 @@ def test_migrate_v1_to_v2(tmp_path):
 
     conn = db.connect(db_path)  # triggers the migration (v1 -> current)
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    # v4 added status_no_date; a migrated legacy run has it as NULL (unknown)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
+    assert 'status_no_date' in cols
 
     run = db.get_latest_run(conn, 'bend--or')
     assert run.run_id == 7 and run.provider == 'gsv'
     assert run.unique_panos == 100 and run.unique_google_panos == 90
+    assert run.status_no_date is None
     assert db.get_api_usage(conn, date(2026, 4, 1)) == 12345
     row = conn.execute(
         "SELECT provider, day_of_cycle FROM schedule_state").fetchone()

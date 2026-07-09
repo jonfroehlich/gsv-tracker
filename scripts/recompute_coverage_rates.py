@@ -20,6 +20,12 @@ site reads coverage from it.
 
 Idempotent: recomputing already-correct rows is a no-op.
 
+SUPERSEDED by scripts/recompute_run_stats.py as of schema v3: the GSV
+pure-SQL path here (100 * status_ok / total_points) predates NO_DATE counting
+toward coverage, so running it against a v3 catalog would wrongly drop
+dateless panos from GSV coverage. This script now refuses to run on v3+
+databases.
+
 Usage:
     python scripts/recompute_coverage_rates.py            # dry run
     python scripts/recompute_coverage_rates.py --execute  # apply
@@ -54,6 +60,14 @@ def main() -> int:
     args = parser.parse_args()
 
     conn = db.connect(db.get_default_db_path(args.data_dir))
+
+    # v3 redefined coverage to include NO_DATE; the GSV pure-SQL path below is
+    # no longer correct. Refuse rather than silently regress GSV coverage.
+    schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if schema_version >= 3:
+        print("This script is superseded on schema v3+. "
+              "Use scripts/recompute_run_stats.py instead.")
+        return 1
 
     # ── GSV: one row per grid point, recompute from stored counters ──────
     gsv_rows = conn.execute(

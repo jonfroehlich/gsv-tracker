@@ -5,6 +5,7 @@ import json
 import os
 from datetime import date
 
+import pandas as pd
 import pytest
 
 from gsv_metadata_tracker import db
@@ -12,7 +13,7 @@ from gsv_metadata_tracker.fileutils import load_city_csv_file
 from gsv_metadata_tracker.json_summarizer import (
     generate_aggregate_v2, generate_city_metadata_summary_as_json,
     sanitize_for_json)
-from tests.conftest import (make_city_df, make_mapillary_city_df,
+from tests.conftest import (COLUMNS, make_city_df, make_mapillary_city_df,
                             write_city_csv_gz)
 
 
@@ -47,6 +48,36 @@ def test_single_pano_city_emits_valid_json(data_dir):
         force_recreate_file=True, run_date=date(2026, 1, 15))
     data = strict_load(json_path)  # raises if NaN leaked
     assert data['all_panos']['age_stats']['stdev_pano_age_years'] is None
+
+
+def test_no_date_pano_counted_in_json(data_dir):
+    # End-to-end: a dateless (NO_DATE) pano must appear in the published pano
+    # total and coverage, but not perturb the age stats (schema v3).
+    ts = '2026-01-15T12:00:00+00:00'
+    df_raw = pd.DataFrame([
+        (44.000, -121.0, ts, 44.0001, -121.0001, 'ok1', '2020-01-15',
+         '© Google', 'OK'),
+        (44.001, -121.0, ts, 44.0011, -121.0011, 'nd1', None,
+         '© Google', 'NO_DATE'),
+        (44.002, -121.0, ts, None, None, None, None, None, 'ZERO_RESULTS'),
+    ], columns=COLUMNS)
+    csv_path = os.path.join(
+        data_dir, 'nd--city_width_100_height_100_step_20_2026-01-15.csv.gz')
+    write_city_csv_gz(df_raw, csv_path)
+    df = load_city_csv_file(csv_path)
+    json_path = generate_city_metadata_summary_as_json(
+        csv_path, df, 'ND', None, 'Testland', 100, 100, 20,
+        force_recreate_file=True, run_date=date(2026, 1, 15))
+    data = strict_load(json_path)
+
+    # Both panos counted; Google subset counts the dateless © Google pano too
+    assert data['all_panos']['duplicate_stats']['total_unique_panos'] == 2
+    assert data['google_panos']['duplicate_stats']['total_unique_panos'] == 2
+    # Coverage: 2 of 3 grid points hold imagery
+    assert data['coverage']['coverage_rate'] == pytest.approx(100 * 2 / 3)
+    # Age stats derive from the single dated pano (captured exactly 6y before)
+    assert data['all_panos']['age_stats']['avg_pano_age_years'] == \
+        pytest.approx(6.0, abs=0.01)
 
 
 def test_v2_fields_and_age_pinned_to_run_date(data_dir):
