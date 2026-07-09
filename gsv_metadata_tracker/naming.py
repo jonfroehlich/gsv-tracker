@@ -232,6 +232,92 @@ def generate_run_filename(
             f"_step_{int(step_length)}{provider_token}_{run_date.isoformat()}")
 
 
+# ── Historical-dates harvest files (issue #2) ──────────────────────────────
+#
+# The historical-dates harvester (download_gsv_history) writes a DIFFERENT
+# artifact from a normal run: a census of every official Google panorama it
+# could surface in the city, each with its capture date, harvested in one pass
+# from an unpublished endpoint that may change or stop working at any time. It
+# is NOT a provider run, so it deliberately does NOT go through
+# generate_run_filename / the FILENAME_RE run-file contract. It carries its own
+# '_gsv_history_' marker so it can never be confused with a sampled run, and so
+# parse_filename() rejects it (callers already treat a ValueError as "not a run
+# file"). Published as a normal *.csv.gz, so sync picks it up unchanged.
+
+HISTORY_MARKER = 'gsv_history'
+
+_HISTORY_FILENAME_RE = re.compile(
+    r'^(?P<slug>.+?)'
+    r'_width_(?P<w>\d+)'
+    r'_height_(?P<h>\d+)'
+    r'_step_(?P<s>\d+)'
+    r'_' + HISTORY_MARKER + r'_'
+    r'(?P<date>\d{4}-\d{2}-\d{2})$'
+)
+
+
+@dataclass(frozen=True)
+class ParsedHistoryFilename:
+    """Components extracted from a historical-dates harvest filename."""
+    slug: str
+    city_query_str: str
+    width_meters: int
+    height_meters: int
+    step_meters: int
+    harvest_date: date
+
+
+def generate_history_filename(
+    city_id: str,
+    grid_width: float,
+    grid_height: float,
+    step_length: float,
+    harvest_date: date,
+) -> str:
+    """
+    Base filename (no extension) for a historical-dates harvest.
+
+    Example:
+        >>> from datetime import date
+        >>> generate_history_filename("bend--oregon--united-states", 5000, 5000, 20, date(2026, 7, 8))
+        'bend--oregon--united-states_width_5000_height_5000_step_20_gsv_history_2026-07-08'
+    """
+    return (f"{city_id}_width_{int(grid_width)}_height_{int(grid_height)}"
+            f"_step_{int(step_length)}_{HISTORY_MARKER}_{harvest_date.isoformat()}")
+
+
+def parse_history_filename(filename: str) -> ParsedHistoryFilename:
+    """
+    Parse a historical-dates harvest filename.
+
+    Raises ValueError if the name is not a history file (including normal run
+    files, which never carry the '_gsv_history_' marker).
+
+    Example:
+        >>> p = parse_history_filename("bend--or_width_5000_height_5000_step_20_gsv_history_2026-07-08.csv.gz")
+        >>> (p.width_meters, p.harvest_date.isoformat())
+        (5000, '2026-07-08')
+    """
+    base = os.path.basename(filename)
+    for ext in _KNOWN_EXTENSIONS:
+        if base.endswith(ext):
+            base = base[:-len(ext)]
+            break
+    match = _HISTORY_FILENAME_RE.match(base)
+    if not match:
+        raise ValueError(
+            f"Filename {filename} is not a {HISTORY_MARKER} harvest file")
+    slug = match.group('slug')
+    return ParsedHistoryFilename(
+        slug=slug,
+        city_query_str=slug_to_query_str(slug),
+        width_meters=int(match.group('w')),
+        height_meters=int(match.group('h')),
+        step_meters=int(match.group('s')),
+        harvest_date=date.fromisoformat(match.group('date')),
+    )
+
+
 def same_grid_geometry(filename_a: str, filename_b: str) -> bool:
     """
     True when both filenames parse and encode the same grid geometry

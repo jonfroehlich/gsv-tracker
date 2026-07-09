@@ -28,7 +28,7 @@ from .naming import sanitize_city_query_str
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS cities (
@@ -115,6 +115,28 @@ CREATE TABLE IF NOT EXISTS schedule_state (
     consecutive_failures INTEGER NOT NULL DEFAULT 0,
     last_error           TEXT,
     PRIMARY KEY (city_id, provider)
+);
+
+-- Historical-dates harvests (issue #2). One row per city per harvest pass of
+-- the full official-Google capture history, sourced from an unpublished
+-- endpoint with no guarantee it keeps working. This catalogs the harvest (like
+-- runs catalogs snapshots); the panos themselves live in the sibling csv.gz.
+-- Out-of-band from the sampled run series, so it is a separate table, not a
+-- 'provider' in runs.
+CREATE TABLE IF NOT EXISTS history_harvests (
+    harvest_id           INTEGER PRIMARY KEY,
+    city_id              TEXT NOT NULL REFERENCES cities(city_id),
+    provider             TEXT NOT NULL DEFAULT 'gsv',
+    harvest_date         TEXT NOT NULL,
+    csv_filename         TEXT NOT NULL UNIQUE,
+    grid_points_queried  INTEGER,
+    unique_panos         INTEGER,
+    oldest_capture_date  TEXT,
+    newest_capture_date  TEXT,
+    api_requests         INTEGER,
+    started_at           TEXT,
+    finished_at          TEXT,
+    UNIQUE (city_id, provider, harvest_date)
 );
 """
 
@@ -274,6 +296,9 @@ def init_schema(conn: sqlite3.Connection) -> None:
             f"supports ({SCHEMA_VERSION}). Update the code before proceeding.")
     if user_version == 1:
         _migrate_v1_to_v2(conn)
+    # v2 -> v3 is purely additive (the history_harvests table), so it needs no
+    # rebuild migration: the CREATE TABLE IF NOT EXISTS in _SCHEMA creates it on
+    # any older catalog, and the version stamp below records the upgrade.
     conn.executescript(_SCHEMA)
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -526,6 +551,64 @@ def get_diff_for_run(conn: sqlite3.Connection,
     """The diff whose 'to' side is the given run, or None."""
     return conn.execute(
         "SELECT * FROM run_diffs WHERE to_run_id = ?", (to_run_id,)).fetchone()
+
+
+# ── Historical-dates harvests (issue #2) ───────────────────────────────────
+
+def register_history_harvest(conn: sqlite3.Connection, *,
+                             city_id: str,
+                             harvest_date: date,
+                             csv_filename: str,
+                             provider: str = 'gsv',
+                             grid_points_queried: Optional[int] = None,
+                             unique_panos: Optional[int] = None,
+                             oldest_capture_date: Optional[str] = None,
+                             newest_capture_date: Optional[str] = None,
+                             api_requests: Optional[int] = None,
+                             started_at: Optional[str] = None,
+                             finished_at: Optional[str] = None) -> int:
+    """
+    Catalog a completed historical-dates harvest. Idempotent on the filename
+    and on (city_id, provider, harvest_date): re-harvesting the same city on the
+    same day replaces the prior row rather than erroring, since a harvest is a
+    full re-census, not an incremental append.
+
+    Returns the harvest_id.
+    """
+    cur = conn.execute(
+        """INSERT INTO history_harvests
+           (city_id, provider, harvest_date, csv_filename, grid_points_queried,
+            unique_panos, oldest_capture_date, newest_capture_date,
+            api_requests, started_at, finished_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(city_id, provider, harvest_date) DO UPDATE SET
+             csv_filename = excluded.csv_filename,
+             grid_points_queried = excluded.grid_points_queried,
+             unique_panos = excluded.unique_panos,
+             oldest_capture_date = excluded.oldest_capture_date,
+             newest_capture_date = excluded.newest_capture_date,
+             api_requests = excluded.api_requests,
+             started_at = excluded.started_at,
+             finished_at = excluded.finished_at""",
+        (city_id, provider, harvest_date.isoformat(), csv_filename,
+         grid_points_queried, unique_panos, oldest_capture_date,
+         newest_capture_date, api_requests, started_at, finished_at))
+    conn.commit()
+    row = conn.execute(
+        """SELECT harvest_id FROM history_harvests
+           WHERE city_id = ? AND provider = ? AND harvest_date = ?""",
+        (city_id, provider, harvest_date.isoformat())).fetchone()
+    return row['harvest_id']
+
+
+def get_latest_history_harvest(conn: sqlite3.Connection, city_id: str,
+                               provider: str = 'gsv') -> Optional[sqlite3.Row]:
+    """Most recent history harvest for a (city, provider), or None."""
+    return conn.execute(
+        """SELECT * FROM history_harvests
+           WHERE city_id = ? AND provider = ?
+           ORDER BY harvest_date DESC LIMIT 1""",
+        (city_id, provider)).fetchone()
 
 
 # ── API budget ledger ──────────────────────────────────────────────────────
