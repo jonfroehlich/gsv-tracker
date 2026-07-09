@@ -153,6 +153,17 @@ Then run the batch script:
 python run_cities.py cities.txt --continue-on-error
 ```
 
+### Which cities are tracked?
+
+The catalog is **not** limited to US state capitals — it spans ~1,100 US cities
+plus a few dozen international ones, assembled from several sources: a US
+census-stratified study list (`cities/`, see
+[`cities/README.md`](cities/README.md)), archival baseline imports, and ad-hoc
+additions (collaborator and Project Sidewalk requests). A proposed worldwide
+frame is in progress. The full provenance and sampling methodology — the record
+to cite in publications — lives in
+[`docs/city_sampling.md`](docs/city_sampling.md).
+
 ## 4. Output Files
 
 Each run generates the following files in your designated `--download-dir` (defaults to `./data`), where `{base}` is `{city_id}_width_{W}_height_{H}_step_{S}_{YYYY-MM-DD}` (Mapillary runs insert a `mapillary` token before the date):
