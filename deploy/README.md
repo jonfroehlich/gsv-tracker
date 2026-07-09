@@ -88,6 +88,49 @@ systemctl --user start gsv-tracker.service           # trigger a run now
 Rotating file logs are also written to `logs/gsv_scheduler.log`, and a
 rolling catalog backup to `logs/gsv_tracker.db.backup`.
 
+### Failure alerts (email)
+
+Off by default. The scheduler emails you when a nightly run finishes with
+`>= failure_threshold` failed collections, or crashes. First confirm what
+mail transport the box has:
+
+```bash
+echo "gsv-tracker mail test $(date)" | mail -s "gsv test" jonf@cs.uw.edu
+command -v mail msmtp sendmail
+```
+
+If `mail` delivers, set in `config/scheduler.toml`:
+
+```toml
+[alerts]
+enabled = true
+recipient = "jonf@cs.uw.edu"
+transport = "mail"     # or "msmtp" / "sendmail" if there's no local relay
+```
+
+No local relay? Configure `msmtp` (a one-file `~/.msmtprc` pointing at UW's
+SMTP, or a Gmail app password) and set `transport = "msmtp"`. Any other
+channel (e.g. a Slack webhook) works via `transport = "command"` — the body
+arrives on stdin with `$GSV_ALERT_SUBJECT` / `$GSV_ALERT_TO` in the env.
+Test end-to-end without waiting for a failure:
+
+```bash
+.venv/bin/python -m gsv_metadata_tracker.scheduler notify-failure
+```
+
+**Optional systemd safety net.** For an email even when the process dies
+before it can send its own (OOM, kill), also install the notify unit and
+uncomment `OnFailure=` in `gsv-tracker.service`:
+
+```bash
+cp deploy/systemd/gsv-tracker-notify@.service ~/.config/systemd/user/
+# then uncomment the OnFailure= line in gsv-tracker.service and daemon-reload
+```
+
+Note this fires on *any* nonzero exit (run-due returns nonzero on any failed
+city), so it can duplicate the scheduler's own threshold email — enable it
+only if you want the belt-and-suspenders coverage.
+
 ### First week
 
 Start conservatively: set `max_cities_per_day = 2` and a low

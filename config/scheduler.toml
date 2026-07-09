@@ -66,3 +66,21 @@ sleep_between_cities_s = 60
 # When true, run the publish script after each successful daily batch.
 enabled = false
 #publish_script = "/homes/gws/jonf/gsv-tracker/sync_data_to_server.sh"
+
+[alerts]
+# Email the operator when a nightly run finishes unhealthy (>= failure_threshold
+# failed collections) or crashes. OFF until enabled + a recipient are set;
+# nothing is ever sent otherwise. Independent of (and complementary to) the
+# optional systemd OnFailure= hook — see deploy/README.md.
+enabled = false
+#recipient = "jonf@cs.uw.edu"
+# Transport: "mail" (uses a local relay), "msmtp"/"sendmail" (SMTP), or
+# "command" (an arbitrary shell command; body on stdin, subject/recipient in
+# $GSV_ALERT_SUBJECT/$GSV_ALERT_TO — e.g. a Slack webhook curl). Confirm which
+# works on the box first:  echo test | mail -s test jonf@cs.uw.edu
+transport = "mail"
+#command = ""
+# Alert when at least this many (city, provider) collections failed. Raise it
+# to avoid paging on the occasional flaky single city.
+failure_threshold = 1
+#subject_prefix = "[gsv-tracker]"
