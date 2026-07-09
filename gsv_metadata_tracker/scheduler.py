@@ -54,7 +54,7 @@ class SchedulerConfig:
     # [schedule]
     cycle_days: int = 90
     grace_days: int = 7
-    daily_request_budget: int = 250_000  # legacy gsv budget ([providers] overrides)
+    daily_request_budget: int = 10_000_000  # legacy gsv budget ([providers] overrides)
     max_cities_per_day: int = 20
     max_consecutive_failures: int = 5
     city_timeout_minutes: int = 180
@@ -117,7 +117,7 @@ def load_scheduler_config(path: Optional[str] = None) -> SchedulerConfig:
     return SchedulerConfig(
         cycle_days=sched.get('cycle_days', 90),
         grace_days=sched.get('grace_days', 7),
-        daily_request_budget=sched.get('daily_request_budget', 250_000),
+        daily_request_budget=sched.get('daily_request_budget', 10_000_000),
         max_cities_per_day=sched.get('max_cities_per_day', 20),
         max_consecutive_failures=sched.get('max_consecutive_failures', 5),
         city_timeout_minutes=sched.get('city_timeout_minutes', 180),

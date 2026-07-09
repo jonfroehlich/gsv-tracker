@@ -21,17 +21,24 @@ city_timeout_minutes = 180
 
 # Legacy fallback: when no [providers.*] sections exist below, this is the
 # GSV daily budget and only GSV is collected.
-daily_request_budget = 250000
+daily_request_budget = 10000000
 
 # Per-provider daily request budgets. Each provider keeps its own run
 # series, budget ledger, and failure tracking; both are collected for a
 # city on the same day so cross-provider snapshots align.
 [providers.gsv]
 enabled = true
-# Hard daily ceiling on GSV metadata API requests across all cities. The
-# metadata endpoint is free but rate-limited; keep this comfortably below
-# your quota. ~1,144 cities/90 days at ~15-25k points each ≈ 200-300k/day.
-daily_request_budget = 250000
+# Daily ceiling on GSV metadata API requests across all cities. This is a
+# nightly-runtime knob, NOT a cost/quota limit: metadata requests are free
+# and consume no quota (developers.google.com/maps/documentation/streetview/
+# metadata); the only hard limit is the API's 30,000 queries/minute rate cap.
+# The downloader sustains ~300 req/s (~18k/min, ~60% of the cap) empirically.
+# Cycling ~1,144 cities every 90 days needs ~6.7M/day (median city ~54k pts,
+# not the ~15-25k first assumed). 10M/day covers that with headroom and runs
+# ~9 h on a full-budget night; only ~5 giant cities (Juneau, Anchorage, …)
+# exceed it and are collected manually. Raise for faster cycling; the rate
+# cap (not this number) is the real ceiling.
+daily_request_budget = 10000000
 
 [providers.mapillary]
 enabled = true

@@ -37,7 +37,7 @@ def test_config_defaults_when_file_missing(tmp_path):
     assert cfg.db_path.endswith("gsv_tracker.db")
     # No [providers] config → gsv-only with the legacy budget
     assert cfg.enabled_providers() == ['gsv']
-    assert cfg.providers['gsv'].daily_request_budget == 250_000
+    assert cfg.providers['gsv'].daily_request_budget == 10_000_000
 
 
 def test_config_parses_toml(tmp_path):
