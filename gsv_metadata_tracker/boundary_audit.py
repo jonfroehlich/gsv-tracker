@@ -200,6 +200,86 @@ def polygon_area_m2(geometry: Optional[Dict[str, Any]]) -> Optional[float]:
     return None
 
 
+def _intersect(p1: List[float], p2: List[float], axis: int,
+               val: float) -> List[float]:
+    """The point on segment p1->p2 where coordinate[axis] == val (linear)."""
+    other = 1 - axis
+    d = p2[axis] - p1[axis]
+    t = 0.0 if d == 0 else (val - p1[axis]) / d
+    pt = [0.0, 0.0]
+    pt[axis] = val
+    pt[other] = p1[other] + t * (p2[other] - p1[other])
+    return pt
+
+
+def _clip_ring_to_bbox(ring: List[List[float]], bbox: BBox) -> List[List[float]]:
+    """
+    Sutherland-Hodgman clip of a [lon, lat] ring against a (south, north,
+    west, east) axis-aligned rectangle. Returns an open ring (no repeated
+    closing vertex); fewer than 3 points means the ring fell outside.
+    """
+    south, north, west, east = bbox
+    # Drop an explicit closing vertex; the area/clip math treats rings as closed.
+    poly = (ring[:-1] if len(ring) > 1 and ring[0] == ring[-1] else list(ring))
+    # (axis, threshold, keep_greater_equal): west, east, south, north edges.
+    edges = [(0, west, True), (0, east, False),
+             (1, south, True), (1, north, False)]
+    for axis, val, keep_ge in edges:
+        if not poly:
+            break
+        clipped: List[List[float]] = []
+        for i in range(len(poly)):
+            cur, prev = poly[i], poly[i - 1]
+            cur_in = cur[axis] >= val if keep_ge else cur[axis] <= val
+            prev_in = prev[axis] >= val if keep_ge else prev[axis] <= val
+            if cur_in:
+                if not prev_in:
+                    clipped.append(_intersect(prev, cur, axis, val))
+                clipped.append(cur)
+            elif prev_in:
+                clipped.append(_intersect(prev, cur, axis, val))
+        poly = clipped
+    return poly
+
+
+def _clipped_polygon_area_m2(geometry: Dict[str, Any], bbox: BBox) -> float:
+    """Area (m²) of the part of a GeoJSON polygon inside `bbox`."""
+    gtype = geometry.get('type')
+    if gtype == 'Polygon':
+        rings = geometry.get('coordinates', [])
+        if not rings:
+            return 0.0
+        area = _ring_area_m2(_clip_ring_to_bbox(rings[0], bbox))
+        for hole in rings[1:]:
+            area -= _ring_area_m2(_clip_ring_to_bbox(hole, bbox))
+        return max(area, 0.0)
+    if gtype == 'MultiPolygon':
+        return sum(_clipped_polygon_area_m2({'type': 'Polygon',
+                                             'coordinates': rings}, bbox)
+                   for rings in geometry.get('coordinates', []))
+    return 0.0
+
+
+def rect_polygon_coverage(geometry: Optional[Dict[str, Any]],
+                          bbox: Optional[BBox]) -> Optional[float]:
+    """
+    Fraction of a GeoJSON boundary polygon's area that falls inside a
+    (south, north, west, east) rectangle — "how much of the real city does
+    this search grid actually cover?", the metric the audit's bbox ratios
+    only proxy. None when there is no polygon or its area is degenerate.
+
+    Uses the same shoelace-in-a-local-equirectangular-frame math as
+    polygon_area_m2 (no shapely); good to well under a percent at city scale.
+    """
+    if not isinstance(geometry, dict) or bbox is None:
+        return None
+    total = polygon_area_m2(geometry)
+    if not total or total <= 0:
+        return None
+    inside = _clipped_polygon_area_m2(geometry, bbox)
+    return max(0.0, min(1.0, inside / total))
+
+
 def classify(city: CityRow, osm: Optional[OsmBoundary],
              thresholds: Thresholds = Thresholds()) -> AuditResult:
     """

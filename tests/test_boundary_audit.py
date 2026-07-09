@@ -18,6 +18,7 @@ from gsv_metadata_tracker.boundary_audit import (
     frozen_rect_bounds,
     parse_osm_result,
     polygon_area_m2,
+    rect_polygon_coverage,
 )
 from gsv_metadata_tracker.db import CityRow
 
@@ -131,6 +132,48 @@ class TestPolygonArea:
     ])
     def test_non_areal_geometry_is_none(self, geom):
         assert polygon_area_m2(geom) is None
+
+
+class TestRectPolygonCoverage:
+    """rect_polygon_coverage: fraction of a boundary polygon inside a grid."""
+
+    def _poly(self, lat=0.0, lon=10.0, side_m=1_000):
+        return {'type': 'Polygon', 'coordinates': [square_ring(lat, lon, side_m)]}
+
+    def test_rect_fully_contains_polygon_is_one(self):
+        poly = self._poly(side_m=1_000)
+        big = frozen_rect_bounds(0.0, 10.0, 4_000, 4_000)
+        assert rect_polygon_coverage(poly, big) == pytest.approx(1.0, abs=1e-6)
+
+    def test_disjoint_rect_is_zero(self):
+        poly = self._poly(lat=0.0, lon=10.0, side_m=1_000)
+        away = frozen_rect_bounds(0.0, 20.0, 2_000, 2_000)
+        assert rect_polygon_coverage(poly, away) == pytest.approx(0.0, abs=1e-6)
+
+    def test_half_overlap_is_about_half(self):
+        # Rect (same width) shifted east by the polygon's half-width (500 m)
+        # leaves only the polygon's western half inside it.
+        poly = self._poly(lat=0.0, lon=10.0, side_m=1_000)
+        shift_lon = 500 / (111_320.0 * math.cos(math.radians(0.0)))
+        shifted = frozen_rect_bounds(0.0, 10.0 + shift_lon, 1_000, 2_000)
+        assert rect_polygon_coverage(poly, shifted) == pytest.approx(0.5, abs=0.02)
+
+    def test_multipolygon_partial(self):
+        # Two 1 km² squares; a rect over only one covers half the total area.
+        geom = {'type': 'MultiPolygon', 'coordinates': [
+            [square_ring(0.0, 10.0, 1_000)],
+            [square_ring(0.0, 12.0, 1_000)]]}
+        over_one = frozen_rect_bounds(0.0, 10.0, 3_000, 3_000)
+        assert rect_polygon_coverage(geom, over_one) == pytest.approx(0.5, abs=0.02)
+
+    @pytest.mark.parametrize('geom,bbox', [
+        (None, frozen_rect_bounds(0.0, 10.0, 1_000, 1_000)),
+        ({'type': 'Point', 'coordinates': [10.0, 0.0]},
+         frozen_rect_bounds(0.0, 10.0, 1_000, 1_000)),
+    ])
+    def test_no_polygon_or_bbox_is_none(self, geom, bbox):
+        assert rect_polygon_coverage(geom, bbox) is None
+        assert rect_polygon_coverage(self._poly(), None) is None
 
 
 class TestParseOsmResult:

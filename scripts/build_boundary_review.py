@@ -44,7 +44,8 @@ from typing import Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gsv_metadata_tracker import db  # noqa: E402
-from gsv_metadata_tracker.boundary_audit import frozen_rect_bounds  # noqa: E402
+from gsv_metadata_tracker.boundary_audit import (  # noqa: E402
+    frozen_rect_bounds, rect_polygon_coverage)
 from gsv_metadata_tracker.paths import get_default_data_dir  # noqa: E402
 
 logger = logging.getLogger("build_boundary_review")
@@ -178,6 +179,19 @@ def build_city_payload(city_id: str, *, group: str, current: Optional[dict],
         except (TypeError, ValueError):
             osm_center = None
 
+    # How much of the true OSM boundary polygon each grid actually covers —
+    # the metric the audit's bbox ratios only proxy. Lets the reviewer see
+    # whether the auto-fix improved real coverage (resize: before -> current).
+    def _coverage(geom):
+        if not geom or not isinstance(geojson, dict):
+            return None
+        return rect_polygon_coverage(
+            geojson, frozen_rect_bounds(geom["center_lat"], geom["center_lon"],
+                                        geom["width_m"], geom["height_m"]))
+
+    coverage_current = _coverage(frozen_geom)
+    coverage_before = _coverage(old_geom) if group == "resize" else None
+
     return {
         "city_id": city_id,
         "display_name": display_name,
@@ -188,6 +202,8 @@ def build_city_payload(city_id: str, *, group: str, current: Optional[dict],
         "frozen_geom": frozen_geom,
         "old_bounds": old_bounds,
         "old_geom": old_geom,
+        "poly_coverage_current": coverage_current,
+        "poly_coverage_before": coverage_before,
         "osm_bbox_bounds": osm_bbox_bounds,
         "osm_bbox_geom": osm_bbox_geom,
         "osm_polygon": osm_polygon,

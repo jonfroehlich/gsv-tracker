@@ -20,6 +20,7 @@
       --rec:    #2ca02c;   /* recommended geometry */
       --old:    #7a5195;   /* pre-fix rectangle (resize before/after) */
       --manual: #d4249a;   /* reviewer-drawn manual rectangle */
+      --union:  #ff7f0e;   /* union of current + before ("cover both") */
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; }
@@ -120,6 +121,13 @@
     #info h2 { font-size: 14px; margin: 0 0 2px; }
     #info .vd { font-size: 11px; font-weight: 700; letter-spacing: .3px; }
     #info .reason { color: #555; margin: 4px 0 8px; font-size: 12px; }
+    #info .changed { color: #1a1a1a; background: #fff4e6; border-left: 3px solid var(--union);
+                     padding: 4px 8px; margin: 0 0 8px; font-size: 12px; border-radius: 3px; }
+    .city .regflag { color: #c62828; font-size: 10px; margin-left: 4px; }
+    #triage { display: none; margin: 6px 0; padding: 6px 8px; border: 1px solid #e2e2e2;
+              border-radius: 4px; background: #fafafa; }
+    #triage .tstat { font-size: 11px; color: #555; margin-bottom: 6px; }
+    #triage button { font-size: 11px; margin: 0 4px 0 0; }
     #info table { border-collapse: collapse; font-size: 11px; margin-bottom: 8px; }
     #info td { padding: 1px 8px 1px 0; color: #444; }
     #info td.k { color: #888; }
@@ -180,6 +188,7 @@
       <h1>Boundary review</h1>
       <div id="progress"></div>
       <div id="banner"></div>
+      <div id="triage"></div>
       <button id="export">Export decisions.csv</button>
       <button id="reset">Clear saved decisions</button>
     </header>
@@ -200,7 +209,8 @@
     // Concrete hex values — Leaflet writes these as SVG stroke attributes, where
     // CSS var() would not resolve. Must match the :root custom properties above.
     const COLORS = { frozen: "#e8482c", bbox: "#1a73e8", poly: "#17becf",
-                     rec: "#2ca02c", old: "#7a5195", manual: "#d4249a" };
+                     rec: "#2ca02c", old: "#7a5195", manual: "#d4249a",
+                     union: "#ff7f0e" };
 
     // Meters<->degrees, matching boundary_audit.frozen_rect_bounds exactly so a
     // reviewer-drawn rectangle uses the same convention as the frozen grids.
@@ -221,6 +231,16 @@
         height_m: Math.round((b.getNorth() - b.getSouth()) * M_PER_DEG_LAT),
       };
     }
+    // Smallest rectangle covering BOTH the current and the pre-fix grid — the
+    // "cover both" option, for when the auto-fix recentered off area worth keeping.
+    function unionGeom(city) {
+      const a = city.frozen_geom, b = city.old_geom;
+      if (!a || !b) return a || b || null;
+      const bounds = L.latLngBounds(
+        rectBounds(a.center_lat, a.center_lon, a.width_m, a.height_m));
+      bounds.extend(rectBounds(b.center_lat, b.center_lon, b.width_m, b.height_m));
+      return boundsToGeom(bounds);
+    }
     // A decision picks WHICH rectangle becomes the catalog geometry. Each value
     // maps 1:1 to a legend layer (and its color); chosenGeom() resolves it to
     // that layer's geometry for export. Only options whose geometry exists for a
@@ -233,6 +253,11 @@
       before:      { label: "Revert to grid before resize", color: "old",
                      geom: (c) => c.old_geom,
                      desc: "Set the grid back to what it was before the automatic resize (purple)." },
+      union:       { label: "Cover both (union)", color: "union",
+                     geom: (c) => unionGeom(c),
+                     desc: "Grow the grid to the smallest rectangle covering BOTH the " +
+                           "current and the pre-fix grid (orange) — use when the auto-fix " +
+                           "recentered away from area worth keeping." },
       bbox:        { label: "Use OSM bounding box", color: "bbox",
                      geom: (c) => c.osm_bbox_geom,
                      desc: "Set the grid to the OSM bounding box (blue rectangle)." },
@@ -251,6 +276,7 @@
     function decOptions(city) {
       const out = ["current"];
       if (city.old_geom) out.push("before");
+      if (city.old_geom && city.frozen_geom) out.push("union");
       if (city.osm_bbox_geom) out.push("bbox");
       if (city.rec_geom && !recIsKeepCurrent(city)) out.push("recommended");
       out.push("manual");   // always listed; enabled only once a rectangle is drawn
@@ -290,7 +316,7 @@
         desc: "The city's search grid as stored in the catalog right now (its " +
               "\"frozen\" geometry). This is the rectangle collection samples today — " +
               "the thing you're deciding whether to change." },
-      { key: "old",    label: "Grid before resize", color: "var(--old)", dash: true,
+      { key: "old",    label: "Original grid (before auto-fix)", color: "var(--old)", dash: true,
         desc: "Resize cities only. The search grid BEFORE the automatic " +
               "recenter-and-grow fix was applied. Compare it against the current " +
               "search grid to confirm the fix moved/sized things correctly." },
@@ -509,10 +535,12 @@
     let selIndex = -1;      // index into `visible`
     let selCityId = null;   // selected city, tracked by id so it survives re-filtering
     let searchTerm = "";    // sidebar name search
+    let regOnly = false;    // triage: show only coverage-regressed resize cities
     function renderList() {
       const q = searchTerm.trim().toLowerCase();
       visible = CITIES.filter((c) => activeFilters.has(groupKey(c)) &&
-        (!q || c.display_name.toLowerCase().includes(q)));
+        (!q || c.display_name.toLowerCase().includes(q)) &&
+        (!regOnly || isRegression(c)));
       // Keep the same city selected across filter/search changes (indices shift).
       selIndex = selCityId == null ? -1
         : visible.findIndex((c) => c.city_id === selCityId);
@@ -530,7 +558,9 @@
         row.innerHTML =
           `<span class="dot ${dec}"></span>` +
           `<span class="nm">${escapeHtml(city.display_name)}</span>` +
-          `<span class="vd">${groupKey(city)}</span>`;
+          `<span class="vd">${groupKey(city)}</span>` +
+          (isRegression(city)
+            ? `<span class="regflag" title="Auto-fix reduced boundary coverage">▼ cov</span>` : "");
         row.onclick = () => selectIndex(i);
         el.appendChild(row);
       });
@@ -543,6 +573,73 @@
       document.getElementById("progress").innerHTML =
         `<b>${decided}</b> / ${CITIES.length} decided` +
         `&nbsp;·&nbsp;showing ${visible.length}`;
+      renderTriage();
+    }
+
+    // ---- resize triage: the 399 auto-fixed cities are the bulk; summarize how
+    // the fix affected boundary coverage and let the reviewer clear the safe
+    // ones (improved/flat) in one action, leaving only regressions to inspect.
+    function resizeStats() {
+      const rs = CITIES.filter((c) => c.group === "resize");
+      let improved = 0, flat = 0, regressed = 0, undecided = 0;
+      rs.forEach((c) => {
+        if (isRegression(c)) regressed++;
+        else {
+          const b = c.poly_coverage_before, a = c.poly_coverage_current;
+          if (b != null && a != null && a - b > 0.005) improved++; else flat++;
+        }
+        if (!(decisions[c.city_id] && decisions[c.city_id].decision)) undecided++;
+      });
+      return { total: rs.length, improved, flat, regressed, undecided };
+    }
+
+    function renderTriage() {
+      const el = document.getElementById("triage");
+      if (!el) return;
+      const s = resizeStats();
+      if (!s.total) { el.style.display = "none"; return; }
+      const clearable = CITIES.filter((c) => c.group === "resize" &&
+        !isRegression(c) &&
+        !(decisions[c.city_id] && decisions[c.city_id].decision)).length;
+      el.style.display = "block";
+      el.innerHTML =
+        `<div class="tstat">RESIZE ${s.total} · ` +
+          `<span style="color:#1b7e1b">▲ ${s.improved} improved</span> · ` +
+          `${s.flat} flat · ` +
+          `<span style="color:#c62828">▼ ${s.regressed} regressed</span> · ` +
+          `${s.undecided} undecided</div>` +
+        `<button id="accept-improved"${clearable ? "" : " disabled"}>` +
+          `Accept ${clearable} improved/flat (keep current)</button>` +
+        (s.regressed
+          ? `<button id="show-reg">${regOnly ? "Show all" : "Show " + s.regressed + " regressed"}</button>`
+          : "");
+      const acc = el.querySelector("#accept-improved");
+      if (acc) acc.onclick = acceptAllNonRegressions;
+      const sr = el.querySelector("#show-reg");
+      if (sr) sr.onclick = () => { regOnly = !regOnly; renderList(); };
+    }
+
+    // Record "keep current" for every non-regression resize city not yet decided.
+    // Blank already means keep-current at apply time; this makes that explicit so
+    // the progress count and export reflect a reviewed decision.
+    function acceptAllNonRegressions() {
+      const targets = CITIES.filter((c) => c.group === "resize" &&
+        !isRegression(c) &&
+        !(decisions[c.city_id] && decisions[c.city_id].decision));
+      if (!targets.length) return;
+      if (!confirm(`Record "keep current" for ${targets.length} resize cities whose ` +
+        `auto-fix did not reduce boundary coverage?`)) return;
+      targets.forEach((c) => {
+        const cur = decisions[c.city_id] || {};
+        cur.decision = "current";
+        decisions[c.city_id] = cur;
+      });
+      saveDecisions();
+      renderList();
+      if (selIndex >= 0 && visible[selIndex]) {
+        renderInfo(visible[selIndex]);
+        renderChoice(visible[selIndex]);
+      }
     }
 
     // ---- selecting + drawing a city ----
@@ -610,7 +707,7 @@
       if (city.old_bounds) {
         place("old", tip(L.rectangle(city.old_bounds,
           { color: COLORS.old, weight: 2, dashArray: "4 5", fill: false }),
-          COLORS.old, "Grid before resize", sizeStr(city.old_geom)), true);
+          COLORS.old, "Original grid (before auto-fix)", sizeStr(city.old_geom)), true);
       }
       // Draw the recommendation only when it differs from the frozen grid; when
       // it's "keep current" they coincide and we alias rec -> frozen below.
@@ -658,6 +755,55 @@
            : String(x);
     }
 
+    // Meters or km, rounded — for recenter distances.
+    function fmtDist(m) {
+      return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
+    }
+
+    // Plain-language summary of what the auto-fix did to a resize city's grid:
+    // how far/where it recentered and whether it changed size. "" if N/A.
+    function resizeSummary(city) {
+      const a = city.old_geom, b = city.frozen_geom;   // before -> current
+      if (!a || !b) return "";
+      const midLat = (a.center_lat + b.center_lat) / 2;
+      const dLat = (b.center_lat - a.center_lat) * M_PER_DEG_LAT;
+      const dLon = (b.center_lon - a.center_lon) * _mPerLon(midLat);
+      const dist = Math.hypot(dLat, dLon);
+      const dir = [];   // "NE"-style; include an axis only if it's a real component
+      if (Math.abs(dLat) >= 0.3 * dist) dir.push(dLat >= 0 ? "N" : "S");
+      if (Math.abs(dLon) >= 0.3 * dist) dir.push(dLon >= 0 ? "E" : "W");
+      const move = dist < 1 ? "not moved" : `recentered ${fmtDist(dist)} ${dir.join("")}`;
+      const sameSize = Math.abs(a.width_m - b.width_m) < 50 &&
+                       Math.abs(a.height_m - b.height_m) < 50;
+      const size = sameSize ? `size unchanged (${sizeStr(b)})`
+                            : `resized ${sizeStr(a)} → ${sizeStr(b)}`;
+      return `Auto-fix: ${move} · ${size}`;
+    }
+
+    // True when the applied auto-fix LOWERED how much of the OSM boundary the
+    // grid covers — a regression worth a closer look.
+    function isRegression(city) {
+      return city.group === "resize" &&
+        city.poly_coverage_before != null && city.poly_coverage_current != null &&
+        city.poly_coverage_current < city.poly_coverage_before - 0.005;
+    }
+
+    // One <tr>: how much of the OSM boundary polygon the grid covers — before→after
+    // (colored up/down) for resize cities, a single value otherwise. "" if unknown.
+    function coverageRow(city) {
+      const cur = city.poly_coverage_current, bef = city.poly_coverage_before;
+      if (cur == null && bef == null) return "";
+      if (city.group === "resize" && bef != null && cur != null) {
+        const delta = cur - bef;
+        const color = delta < -0.005 ? "#c62828" : delta > 0.005 ? "#1b7e1b" : "#555";
+        const tag = delta < -0.005 ? " ▼ reduced" : delta > 0.005 ? " ▲ improved" : "";
+        return `<tr><td class="k">boundary coverage</td>` +
+               `<td style="color:${color}">${fmt(bef, "pct")} → ${fmt(cur, "pct")}${tag}</td></tr>`;
+      }
+      const val = cur != null ? cur : bef;
+      return `<tr><td class="k">boundary coverage</td><td>${fmt(val, "pct")}</td></tr>`;
+    }
+
     function renderInfo(city) {
       const d = decisions[city.city_id] || {};
       const info = city.info || {};
@@ -703,9 +849,11 @@
         `<h2>${escapeHtml(city.display_name)}</h2>` +
         `<div class="vd" style="color:var(--frozen)">${groupKey(city)}</div>` +
         `<div class="reason">${escapeHtml(city.rec_basis || city.reason || "")}</div>` +
+        (city.group === "resize"
+          ? `<div class="changed">${escapeHtml(resizeSummary(city))}</div>` : "") +
         `<table>` +
           `<tr><td class="k">center offset</td><td>${fmt(info.center_dist_km, "km")}</td></tr>` +
-          `<tr><td class="k">coverage before</td><td>${fmt(info.coverage_before, "pct")}</td></tr>` +
+          coverageRow(city) +
           `<tr><td class="k">OSM bbox</td><td>${bboxSize}</td></tr>` +
           `<tr><td class="k">OSM polygon</td><td>${fmt(info.osm_polygon_area_km2, "km2")}</td></tr>` +
           frozenRow +
@@ -717,7 +865,7 @@
           `<textarea id="note" rows="2" placeholder="note (optional)">${escapeHtml(d.note || "")}</textarea>` +
         `</div>` +
         manualBlock +
-        `<div class="hint">j / k or ↑ ↓ to move · ${keys}</div>`;
+        `<div class="hint">j / k to move · ${keys}</div>`;
 
       el.querySelectorAll('input[name="dec"]').forEach((inp) => {
         inp.onchange = () => setDecision(city, inp.value);
@@ -953,10 +1101,15 @@
     // ---- keyboard navigation ----
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && drawMode) { exitDrawMode(); e.preventDefault(); return; }
-      if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
+      // Bail only for text-entry fields so typing isn't hijacked. Radios are
+      // INPUTs too but accept no text, and clicking one used to swallow j/k
+      // and the 1-9 decision keys — let those keys through when a radio holds
+      // focus (arrows stay native to the radio group; they no longer nav cities).
+      if (e.target.tagName === "TEXTAREA" ||
+          (e.target.tagName === "INPUT" && e.target.type !== "radio")) return;
       if (drawMode) return;   // no list nav / decisions while drawing
-      if (e.key === "j" || e.key === "ArrowDown") { selectIndex(selIndex + 1); e.preventDefault(); }
-      else if (e.key === "k" || e.key === "ArrowUp") { selectIndex(selIndex - 1); e.preventDefault(); }
+      if (e.key === "j") { selectIndex(selIndex + 1); e.preventDefault(); }
+      else if (e.key === "k") { selectIndex(selIndex - 1); e.preventDefault(); }
       else if (selIndex >= 0 && /^[1-9]$/.test(e.key)) {
         const city = visible[selIndex];
         const key = decOptions(city)[parseInt(e.key, 10) - 1];
