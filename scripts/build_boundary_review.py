@@ -228,8 +228,15 @@ def _load_current_geometry(conn) -> dict:
         "step_m FROM cities").fetchall()
     return {r["city_id"]: {"center_lat": r["center_lat"], "center_lon": r["center_lon"],
                            "grid_width_m": r["grid_width_m"],
-                           "grid_height_m": r["grid_height_m"]}
+                           "grid_height_m": r["grid_height_m"],
+                           "step_m": r["step_m"] or 20}
             for r in rows}
+
+
+def _estimate_points(geom: dict) -> int:
+    """Grid points (= one GSV metadata request each) for a geometry dict."""
+    s = geom.get("step_m") or 20
+    return int((geom["grid_width_m"] // s + 1) * (geom["grid_height_m"] // s + 1))
 
 
 def _load_csv_by_id(path: str) -> dict:
@@ -287,9 +294,14 @@ def _resize_changed(report: Optional[dict], current: Optional[dict]) -> bool:
 
 
 def build_payloads(current_by_id: dict, report_by_id: dict, manual_by_id: dict,
-                   plan_by_id: dict, cache_by_id: dict):
+                   plan_by_id: dict, cache_by_id: dict, include_largest: int = 0):
     """
     Assemble the ordered list of viewer records for all reviewed cities.
+
+    ``include_largest`` adds that many cities as a "large" group — the biggest
+    by grid-point count that aren't already flagged (manual/resize) — so the
+    reviewer can sanity-check whether the very largest frozen rectangles are
+    justified by the city or just over-generous, independent of the audit.
 
     Returns ``(payloads, skipped_resize)`` where ``skipped_resize`` is the count
     of reregister-plan cities dropped because their current geometry still
@@ -313,6 +325,20 @@ def build_payloads(current_by_id: dict, report_by_id: dict, manual_by_id: dict,
         payloads.append(build_city_payload(
             city_id, group="resize", current=current, report=report,
             rec_source=row, cache=cache_by_id.get(city_id)))
+
+    if include_largest > 0:
+        seen = {p["city_id"] for p in payloads}
+        ranked = sorted(
+            ((cid, g) for cid, g in current_by_id.items() if cid not in seen),
+            key=lambda kv: _estimate_points(kv[1]), reverse=True)
+        for city_id, geom in ranked[:include_largest]:
+            p = build_city_payload(
+                city_id, group="large", current=geom,
+                report=report_by_id.get(city_id),
+                rec_source=report_by_id.get(city_id) or {},
+                cache=cache_by_id.get(city_id))
+            p["points"] = _estimate_points(geom)
+            payloads.append(p)
     return payloads, skipped_resize
 
 
@@ -347,6 +373,10 @@ def main() -> int:
                         help="output HTML (default: {audit-dir}/boundary_review.html)")
     parser.add_argument("--log-level", default="WARNING",
                         choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    parser.add_argument("--include-largest", type=int, default=0, metavar="N",
+                        help="also review the N largest-by-grid-points cities not "
+                             "already flagged (a 'LARGE' group), to sanity-check "
+                             "whether the biggest rectangles are justified")
     args = parser.parse_args()
 
     logging.basicConfig(level=getattr(logging, args.log_level),
@@ -372,17 +402,19 @@ def main() -> int:
         _load_csv_by_id(report_path),
         _load_csv_by_id(manual_path),
         _load_csv_by_id(plan_path),
-        _load_cache(cache_path))
+        _load_cache(cache_path),
+        include_largest=args.include_largest)
 
     n_manual = sum(1 for p in payloads if p["group"] == "manual")
     n_resize = sum(1 for p in payloads if p["group"] == "resize")
+    n_large = sum(1 for p in payloads if p["group"] == "large")
     n_poly = sum(1 for p in payloads if p["osm_polygon"])
 
     html = render_html(payloads, args.template, meta={"skipped_resize": skipped_resize})
     with open(out_path, "w") as f:
         f.write(html)
 
-    print(f"Cities: {len(payloads)}  (manual={n_manual}, resize={n_resize})")
+    print(f"Cities: {len(payloads)}  (manual={n_manual}, resize={n_resize}, large={n_large})")
     print(f"Resize cities skipped (unchanged geometry): {skipped_resize}")
     print(f"With OSM polygon: {n_poly}")
     print(f"\nWrote {out_path} ({len(html) / 1024:.0f} KB) — open it in a browser.")

@@ -284,8 +284,10 @@
       return out;
     }
 
-    // Group key for filtering: resize cities collapse under a synthetic "RESIZE".
-    const groupKey = (c) => (c.group === "resize" ? "RESIZE" : c.verdict);
+    // Group key for filtering: resize/large cities collapse under synthetic
+    // "RESIZE"/"LARGE" chips; everything else filters by its audit verdict.
+    const groupKey = (c) => (c.group === "resize" ? "RESIZE"
+                           : c.group === "large" ? "LARGE" : c.verdict);
 
     // ---- persisted decisions ----
     let decisions = {};
@@ -853,6 +855,7 @@
           ? `<div class="changed">${escapeHtml(resizeSummary(city))}</div>` : "") +
         `<table>` +
           `<tr><td class="k">center offset</td><td>${fmt(info.center_dist_km, "km")}</td></tr>` +
+          (city.points ? `<tr><td class="k">grid points</td><td>${city.points.toLocaleString()} (~${(city.points/300/60).toFixed(0)} min @300/s)</td></tr>` : "") +
           coverageRow(city) +
           `<tr><td class="k">OSM bbox</td><td>${bboxSize}</td></tr>` +
           `<tr><td class="k">OSM polygon</td><td>${fmt(info.osm_polygon_area_km2, "km2")}</td></tr>` +
