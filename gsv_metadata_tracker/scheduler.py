@@ -20,17 +20,20 @@ import argparse
 import logging
 import logging.handlers
 import os
+import socket
 import subprocess
 import sys
 import time
 import tomllib
-from dataclasses import dataclass
+import traceback
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
 
 from tabulate import tabulate
 
 from . import db
+from .alerting import AlertConfig, send_alert, should_alert
 from .download_mapillary import estimate_tile_count
 from .json_summarizer import generate_aggregate_v2
 from .naming import KNOWN_PROVIDERS
@@ -73,6 +76,8 @@ class SchedulerConfig:
     # [providers.*] — when None (no section in the TOML), falls back to
     # gsv-only with the legacy [schedule].daily_request_budget
     providers: dict[str, ProviderConfig] | None = None
+    # [alerts] — operator email on unhealthy runs (off by default)
+    alerts: AlertConfig = field(default_factory=AlertConfig)
 
     def __post_init__(self):
         if not self.db_path:
@@ -101,6 +106,7 @@ def load_scheduler_config(path: str | None = None) -> SchedulerConfig:
     dl = raw.get("download", {})
     paths = raw.get("paths", {})
     pub = raw.get("publish", {})
+    al = raw.get("alerts", {})
 
     providers = None
     if "providers" in raw:
@@ -134,6 +140,14 @@ def load_scheduler_config(path: str | None = None) -> SchedulerConfig:
         publish_enabled=pub.get("enabled", False),
         publish_script=pub.get("publish_script", str(_PROJECT_ROOT / "sync_data_to_server.sh")),
         providers=providers,
+        alerts=AlertConfig(
+            enabled=al.get("enabled", False),
+            recipient=al.get("recipient", ""),
+            transport=al.get("transport", "mail"),
+            command=al.get("command", ""),
+            failure_threshold=al.get("failure_threshold", 1),
+            subject_prefix=al.get("subject_prefix", "[gsv-tracker]"),
+        ),
     )
 
 
@@ -161,6 +175,34 @@ def setup_logging(cfg: SchedulerConfig, verbose: bool = False) -> None:
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=handlers,
     )
+
+
+def _recent_log_tail(cfg: SchedulerConfig, n: int = 40) -> str:
+    """Last n lines of the scheduler log, for pasting into an alert email."""
+    log_path = os.path.join(cfg.log_dir, "gsv_scheduler.log")
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as f:
+            return "".join(f.readlines()[-n:]) or "(log empty)"
+    except OSError as e:
+        return f"(could not read {log_path}: {e})"
+
+
+def cmd_notify_failure(cfg: SchedulerConfig) -> int:
+    """
+    Email that the scheduled run failed. Intended for a systemd
+    ``OnFailure=`` hook, which fires when the unit exits nonzero (a crash, or
+    — since run-due returns nonzero on any failed city — a failed collection
+    the in-run threshold alert may have already covered). Best-effort.
+    """
+    host = socket.gethostname()
+    body = (
+        "gsv-tracker's scheduled run exited nonzero (systemd OnFailure).\n\n"
+        "Recent log:\n" + _recent_log_tail(cfg, 60)
+    )
+    sent = send_alert(cfg.alerts, f"scheduled run FAILED on {host}", body)
+    # 0 when we alerted or alerting is intentionally off; 1 only if a send was
+    # attempted and failed, so the notify unit's own status is meaningful.
+    return 0 if sent or not cfg.alerts.enabled else 1
 
 
 def cmd_status(cfg: SchedulerConfig) -> int:
@@ -413,11 +455,12 @@ def cmd_run_due(cfg: SchedulerConfig, dry_run: bool = False, limit: int | None =
             if processed < len(due):
                 time.sleep(cfg.sleep_between_cities_s)
 
-    logger.info(
-        f"Done: {succeeded}/{attempted} runs succeeded across "
+    summary = (
+        f"run-due {today}: {succeeded}/{attempted} runs succeeded across "
         f"{processed} cities"
         + (f"; {skipped_budget} deferred for budget" if skipped_budget else "")
     )
+    logger.info("Done: " + summary)
 
     # Regenerate the aggregate once for the whole batch
     if succeeded > 0:
@@ -440,7 +483,24 @@ def cmd_run_due(cfg: SchedulerConfig, dry_run: bool = False, limit: int | None =
         result = subprocess.run(["bash", cfg.publish_script], cwd=str(_PROJECT_ROOT))
         if result.returncode != 0:
             logger.error("Publish script failed")
+            send_alert(
+                cfg.alerts,
+                f"publish script FAILED on {socket.gethostname()}",
+                f"{summary}\n\nPublish step exited nonzero.\n\n"
+                f"Recent log:\n{_recent_log_tail(cfg)}",
+            )
             return 1
+
+    # Operator email when the batch finished unhealthy (threshold-controlled so
+    # an occasional single flaky city doesn't page every night). No-op unless
+    # [alerts] enabled.
+    failures = attempted - succeeded
+    if should_alert(failures, cfg.alerts.failure_threshold):
+        send_alert(
+            cfg.alerts,
+            f"{failures} failed collection(s) on {socket.gethostname()}",
+            f"{summary}\n\nRecent log:\n{_recent_log_tail(cfg)}",
+        )
 
     return 0 if succeeded == attempted else 1
 
@@ -461,6 +521,7 @@ def main() -> int:
     p_run = sub.add_parser("run-due", help="Collect today's due cities")
     p_run.add_argument("--dry-run", action="store_true", help="Print what would run; no downloads")
     p_run.add_argument("--limit", type=int, default=None, help="Process at most N cities (testing)")
+    sub.add_parser("notify-failure", help="Email the recent log (for a systemd OnFailure= hook)")
 
     args = parser.parse_args()
     cfg = load_scheduler_config(args.config)
@@ -470,8 +531,20 @@ def main() -> int:
         return cmd_status(cfg)
     if args.command == "assign":
         return cmd_assign(cfg)
+    if args.command == "notify-failure":
+        return cmd_notify_failure(cfg)
     if args.command == "run-due":
-        return cmd_run_due(cfg, dry_run=args.dry_run, limit=args.limit)
+        try:
+            return cmd_run_due(cfg, dry_run=args.dry_run, limit=args.limit)
+        except Exception:
+            # A crash (not just a failed city) — email the traceback before the
+            # process dies, so a silent nightly failure can't go unnoticed.
+            send_alert(
+                cfg.alerts,
+                f"run-due CRASHED on {socket.gethostname()}",
+                f"Uncaught exception in run-due:\n\n{traceback.format_exc()}",
+            )
+            raise
     return 2
 
 

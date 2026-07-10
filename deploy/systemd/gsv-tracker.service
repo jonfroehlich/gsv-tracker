@@ -4,6 +4,11 @@
 Description=GSV Tracker: collect today's due cities
 Wants=network-online.target
 After=network-online.target
+# Opt-in raw safety net: email whenever this unit exits nonzero. run-due
+# returns nonzero on ANY failed city, so the scheduler's own threshold email
+# ([alerts] in scheduler.toml) is usually the better signal; enable this too
+# only if you want a belt-and-suspenders notice on every failure/crash.
+#OnFailure=gsv-tracker-notify@%n.service
 
 [Service]
 Type=oneshot
