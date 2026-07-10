@@ -4,38 +4,51 @@ The scheduler runs as a **user-level systemd timer** on
 `makelab1.cs.washington.edu` (Rocky Linux 9): a oneshot service fires
 nightly, collects the cities due that day (staggered quarterly cycle,
 bounded by a daily API-request budget), diffs each against its previous
-run, regenerates the aggregate JSON, and rsyncs `data/` to the public web
-server. All state lives in `data/gsv_tracker.db`, so crashes and missed
-days self-heal.
+run, regenerates the aggregate JSON, and publishes `data/` to the public
+web docroot. All state lives in `data/gsv_tracker.db`, so crashes and
+missed days self-heal.
+
+## Where things live
+
+makelab1 is the **compute** host; storage is NFS from other servers, so
+this is deliberately split:
+
+| What | Path | Notes |
+|------|------|-------|
+| Code + data + DB + logs + `.env` | `/projects/makeabilitylab/gsv-tracker/` | On the lab fileserver **makelab2** (42 TB, backed up, group `makelab`). **Not web-served.** Colocated with Project Sidewalk. |
+| Convenience symlink | `~/gsv-tracker` → the path above | Lets the generic `%h/gsv-tracker` systemd units and `.env` resolve. |
+| Public web docroot | `/cse/web/research/makelab/public/gsv-tracker/` | On a *different* server (`new-rumble`); served at `makeabilitylab.cs.washington.edu/public/gsv-tracker/`. Holds only the flattened website + published `*.csv.gz`/`*.json.gz`. |
+
+Because makelab1 mounts the docroot directly, **publishing is a local
+rsync — no SSH to recycle** (`GSV_PUBLISH_LOCAL=1`, set in the systemd unit).
 
 ## 1. One-time setup
 
 ```bash
 ssh makelab1.cs.washington.edu
 
-# Clone and set up the environment (needs Python >= 3.11 for tomllib)
-git clone https://github.com/jonfroehlich/gsv-tracker.git ~/gsv-tracker
+# Clone onto lab storage, and symlink it into home for the systemd units
+git clone https://github.com/jonfroehlich/gsv-tracker.git /projects/makeabilitylab/gsv-tracker
+ln -s /projects/makeabilitylab/gsv-tracker ~/gsv-tracker
+
 cd ~/gsv-tracker
-python3.11 -m venv .venv
+python3.11 -m venv .venv          # 3.11+ for tomllib
 .venv/bin/pip install -r requirements.txt
 
-# API keys (same file the CLI uses) — the scheduler collects both
-# providers by default, so both are required
-echo 'GMAPS_API_KEY=YOUR_KEY_HERE' > .env
-echo 'MAPILLARY_ACCESS_TOKEN=YOUR_TOKEN_HERE' >> .env
-chmod 600 .env
+# API keys — copy your working .env up from the laptop (least error-prone):
+#   (from the laptop)  scp .env makelab1.cs.washington.edu:/projects/makeabilitylab/gsv-tracker/.env
+chmod 600 .env                    # seal the keys; the parent dir is group-readable
 ```
 
-## 2. Move the data + catalog to makelab1
+## 2. Move the data + catalog up
 
-From the machine that currently holds `data/` (laptop):
+From the machine that currently holds `data/` (laptop), ~15 GB:
 
 ```bash
-rsync -azh --progress data/ makelab1.cs.washington.edu:gsv-tracker/data/
+rsync -azh --progress data/ makelab1.cs.washington.edu:/projects/makeabilitylab/gsv-tracker/data/
 ```
 
-Then, on makelab1, register the existing files as baseline runs (dry-run
-first, review the report, then execute):
+Then register the existing files as baseline runs (dry-run first, review, execute):
 
 ```bash
 cd ~/gsv-tracker
@@ -43,100 +56,110 @@ cd ~/gsv-tracker
 .venv/bin/python scripts/migrate_to_db.py --execute
 ```
 
-## 3. Configure
+## 3. Sanity-check the config
 
-Edit `config/scheduler.toml`: uncomment and set the `[paths]` entries to
-absolute paths, review `daily_request_budget` / `max_cities_per_day`, and
-set `[publish] enabled = true` once you've confirmed SSH key auth from
-makelab1 to the web host (`recycle.cs.washington.edu`) works:
-
-```bash
-ssh recycle.cs.washington.edu true   # should succeed without a password
-```
-
-Sanity-check before enabling the timer:
+The production config `config/scheduler.makelab1.toml` is checked in and
+already points at the paths above, enables local publish, and enables email
+alerts. Confirm mail delivers, then preview a run:
 
 ```bash
-.venv/bin/python -m gsv_metadata_tracker.scheduler status
-.venv/bin/python -m gsv_metadata_tracker.scheduler run-due --dry-run
+echo "gsv-tracker mail test $(date)" | mail -s "gsv test" jonf@cs.uw.edu
+# NB: --config is global and must come BEFORE the subcommand.
+.venv/bin/python -m gsv_metadata_tracker.scheduler --config config/scheduler.makelab1.toml status
+.venv/bin/python -m gsv_metadata_tracker.scheduler --config config/scheduler.makelab1.toml run-due --dry-run
 ```
 
-## 4. Install the systemd units (user-level, no root needed)
+Start conservative for the first few nights — set `max_cities_per_day = 2`
+in the TOML, watch, then raise. (See **First full backfill** below.)
+
+## 4. Clean up the public docroot + deploy the website
+
+The docroot currently holds a legacy full-repo checkout (`.git/`, `scripts/`,
+`config/`, `.venv/`, `*.py`, …) — none of which belongs on a web server.
+`deploy_makelab1.sh` publishes the site **flattened** (so it serves at
+`.../public/gsv-tracker/` with no `/www/` in the URL) and its `--delete`
+sweeps that legacy junk, while **protecting** `data/`, `poster/`, `cities/`,
+and `data-huge/`. Preview first:
+
+```bash
+cd ~/gsv-tracker
+./deploy_makelab1.sh --dry-run     # shows exactly what is added/deleted
+./deploy_makelab1.sh               # pulls latest code, then prompts before applying
+```
+
+Run this whenever you push new frontend/backend code. The nightly **data**
+publish is separate and automatic (step 5).
+
+## 5. Install the systemd units (user-level, no root)
 
 ```bash
 mkdir -p ~/.config/systemd/user
 cp deploy/systemd/gsv-tracker.{service,timer} ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now gsv-tracker.timer
-
-# User services must survive logout:
-loginctl enable-linger $USER
+loginctl enable-linger $USER       # user services must survive logout
 ```
 
-If `enable-linger` is disallowed by policy, ask CSE IT to enable lingering
-for your account (or to install the units as a system service).
+The service ships with resource caps (`MemoryMax=8G`, `CPUQuota=400%`,
+`Nice=10`) so nightly collection can't starve Project Sidewalk, which shares
+the box and the makelab2 array. If `enable-linger` is disallowed by policy,
+ask CSE IT to enable lingering for your account.
 
-## 5. Operate
+## 6. Operate
 
 ```bash
 systemctl --user list-timers gsv-tracker.timer      # next scheduled run
 journalctl --user -u gsv-tracker.service -f          # live logs
-.venv/bin/python -m gsv_metadata_tracker.scheduler status
 systemctl --user start gsv-tracker.service           # trigger a run now
+.venv/bin/python -m gsv_metadata_tracker.scheduler --config config/scheduler.makelab1.toml status
 ```
 
-Rotating file logs are also written to `logs/gsv_scheduler.log`, and a
-rolling catalog backup to `logs/gsv_tracker.db.backup`.
+Rotating file logs also go to `logs/gsv_scheduler.log`, and a rolling
+catalog backup to `logs/gsv_tracker.db.backup`.
+
+### Watching resource use (alongside Project Sidewalk)
+
+```bash
+systemd-cgtop                                        # live CPU/mem per cgroup — gsv vs sidewalk
+systemctl --user show gsv-tracker.service -p MemoryPeak -p CPUUsageNSec
+```
+
+Validate the caps after the first live night: if `MemoryPeak` approaches
+`MemoryMax`, raise it (or lower `batch_size`/`connection_limit` in the TOML).
+Data lives on NFS, so IO is network (not block-device) — CPU/memory caps and
+`Nice` are the real levers; `IOWeight` would not govern it.
 
 ### Failure alerts (email)
 
-Off by default. The scheduler emails you when a nightly run finishes with
-`>= failure_threshold` failed collections, or crashes. First confirm what
-mail transport the box has:
+Enabled in `config/scheduler.makelab1.toml` (`transport = "mail"`, which
+delivers on makelab1 with no relay setup). Test end-to-end without waiting for
+a failure:
 
 ```bash
-echo "gsv-tracker mail test $(date)" | mail -s "gsv test" jonf@cs.uw.edu
-command -v mail msmtp sendmail
+.venv/bin/python -m gsv_metadata_tracker.scheduler --config config/scheduler.makelab1.toml notify-failure
 ```
 
-If `mail` delivers, set in `config/scheduler.toml`:
-
-```toml
-[alerts]
-enabled = true
-recipient = "jonf@cs.uw.edu"
-transport = "mail"     # or "msmtp" / "sendmail" if there's no local relay
-```
-
-No local relay? Configure `msmtp` (a one-file `~/.msmtprc` pointing at UW's
-SMTP, or a Gmail app password) and set `transport = "msmtp"`. Any other
-channel (e.g. a Slack webhook) works via `transport = "command"` — the body
-arrives on stdin with `$GSV_ALERT_SUBJECT` / `$GSV_ALERT_TO` in the env.
-Test end-to-end without waiting for a failure:
-
-```bash
-.venv/bin/python -m gsv_metadata_tracker.scheduler notify-failure
-```
-
-**Optional systemd safety net.** For an email even when the process dies
-before it can send its own (OOM, kill), also install the notify unit and
-uncomment `OnFailure=` in `gsv-tracker.service`:
+**Optional systemd safety net** — for an email even when the process dies
+before it can send its own (OOM, kill): install the notify unit and uncomment
+`OnFailure=` in `gsv-tracker.service`:
 
 ```bash
 cp deploy/systemd/gsv-tracker-notify@.service ~/.config/systemd/user/
-# then uncomment the OnFailure= line in gsv-tracker.service and daemon-reload
+# then uncomment OnFailure= in gsv-tracker.service and daemon-reload
 ```
 
-Note this fires on *any* nonzero exit (run-due returns nonzero on any failed
-city), so it can duplicate the scheduler's own threshold email — enable it
-only if you want the belt-and-suspenders coverage.
+It fires on *any* nonzero exit (run-due returns nonzero on any failed city),
+so it can duplicate the scheduler's own threshold email — enable only if you
+want belt-and-suspenders coverage.
 
-### First week
+### First full backfill
 
-Start conservatively: set `max_cities_per_day = 2` and a low
-`daily_request_budget` (e.g. `30000`) in the TOML, watch a few nights of
-journal output and the public site, then raise to production values
-(defaults in the example TOML).
+Post-#91, every city needs a fresh run on the new frozen geometry, so the
+first cycle is a big one-time burst (not steady state). Once a few nights look
+healthy, raise `max_cities_per_day` (and optionally trigger extra daytime
+batches with `systemctl --user start gsv-tracker.service`) to catch up, then
+drop back to the steady ~quarterly cadence (`max_cities_per_day = 20` keeps
+~1,144 cities on the 90-day cycle with headroom).
 
 ### Disabling a city
 

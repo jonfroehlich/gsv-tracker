@@ -1,9 +1,17 @@
 """Scheduler logic tests — pure logic only, no network or subprocesses."""
 
+import os
 from datetime import UTC, date
 
 from gsv_metadata_tracker import db
-from gsv_metadata_tracker.scheduler import SchedulerConfig, estimate_requests, load_scheduler_config
+from gsv_metadata_tracker.scheduler import (
+    SchedulerConfig,
+    build_parser,
+    estimate_requests,
+    load_scheduler_config,
+)
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _register(conn, name, width=5000, height=5000, step=20):
@@ -98,6 +106,37 @@ enabled = false
 """)
     cfg = load_scheduler_config(str(p))
     assert cfg.enabled_providers() == ["gsv"]
+
+
+def test_config_flag_accepted_on_either_side_of_subcommand():
+    # --config is global; a prior systemd unit put it AFTER the subcommand, which
+    # argparse rejected and would have failed the nightly service. It must now
+    # parse on both sides. See build_parser / _add_global_flags.
+    parser = build_parser()
+
+    before = parser.parse_args(["--config", "/x.toml", "run-due", "--dry-run"])
+    assert before.command == "run-due" and before.config == "/x.toml" and before.dry_run
+
+    after = parser.parse_args(["run-due", "--config", "/x.toml", "--dry-run"])
+    assert after.command == "run-due" and after.config == "/x.toml" and after.dry_run
+
+    # Works for a plain subcommand after the flag too.
+    assert parser.parse_args(["--config", "/y.toml", "status"]).config == "/y.toml"
+
+    # Omitted entirely: SUPPRESS leaves the attr absent so main() falls back to None.
+    assert getattr(parser.parse_args(["status"]), "config", None) is None
+
+
+def test_makelab1_production_config_is_wired():
+    # Guard the checked-in production config the systemd unit points at.
+    cfg = load_scheduler_config(os.path.join(_PROJECT_ROOT, "config", "scheduler.makelab1.toml"))
+    assert cfg.enabled_providers() == ["gsv", "mapillary"]
+    assert cfg.publish_enabled
+    assert cfg.publish_script.endswith("sync_data_to_server.sh")
+    assert cfg.alerts.enabled and cfg.alerts.transport == "mail" and cfg.alerts.recipient
+    # Data/DB live on lab storage (makelab2), not in the web docroot.
+    assert "/projects/makeabilitylab/gsv-tracker" in cfg.db_path
+    assert "/cse/web/" not in cfg.db_path and "/cse/web/" not in cfg.data_dir
 
 
 def test_due_cities_stalest_first(conn):

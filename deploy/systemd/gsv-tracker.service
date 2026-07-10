@@ -12,10 +12,29 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+# %h/gsv-tracker is a symlink to the real checkout on lab storage
+# (/projects/makeabilitylab/gsv-tracker); see deploy/README.md.
 WorkingDirectory=%h/gsv-tracker
-# GMAPS_API_KEY lives here (same format as the repo .env: KEY=value)
+# GMAPS_API_KEY / MAPILLARY_ACCESS_TOKEN live here (repo .env format: KEY=value)
 EnvironmentFile=%h/gsv-tracker/.env
-ExecStart=%h/gsv-tracker/.venv/bin/python -m gsv_metadata_tracker.scheduler run-due --config %h/gsv-tracker/config/scheduler.toml
+# Publish straight to the NFS-mounted docroot (no SSH) — see sync_data_to_server.sh
+Environment=GSV_PUBLISH_LOCAL=1
+# NB: --config is a global arg and MUST precede the subcommand (argparse).
+ExecStart=%h/gsv-tracker/.venv/bin/python -m gsv_metadata_tracker.scheduler --config %h/gsv-tracker/config/scheduler.makelab1.toml run-due
 # A full day of cities can legitimately take hours
 TimeoutStartSec=12h
+
+# ── Resource guardrails ────────────────────────────────────────────────
+# makelab1 is shared with Project Sidewalk (and its data lives on the same
+# makelab2 array). These caps keep nightly collection from starving co-tenants.
+# The workload is I/O-bound async HTTP + pandas, so real peaks are modest;
+# validate after the first live night and tune:
+#   systemctl --user show gsv-tracker.service -p MemoryPeak -p CPUUsageNSec
 Nice=10
+MemoryAccounting=true
+MemoryHigh=4G
+MemoryMax=8G
+CPUAccounting=true
+CPUQuota=400%
+# Note: data lives on NFS (makelab2), so IO is network, not block-device —
+# IOWeight would not govern it; CPU/Memory caps + Nice are the real levers.
