@@ -342,6 +342,44 @@ def register_city(conn: sqlite3.Connection, *,
     return city_id
 
 
+def update_city_geometry(conn: sqlite3.Connection, *,
+                         city_id: str,
+                         center_lat: float,
+                         center_lon: float,
+                         grid_width_m: float,
+                         grid_height_m: float,
+                         notes: Optional[str] = None) -> None:
+    """
+    Overwrite a city's frozen grid geometry (center + dimensions).
+
+    Geometry is normally immutable (register_city is INSERT OR IGNORE); this is
+    the deliberate escape hatch used only by the one-time boundary
+    re-registration (issue #91) to correct grids that were centered on the
+    geocoder's point instead of the OSM bounding-box midpoint. Callers own the
+    policy of when this is safe — normal collection runs never mutate geometry.
+
+    If ``notes`` is given it is appended (newline-separated) to any existing
+    notes so the correction leaves an audit trail on the row.
+    """
+    if notes:
+        existing = conn.execute(
+            "SELECT notes FROM cities WHERE city_id = ?", (city_id,)).fetchone()
+        prior = existing['notes'] if existing and existing['notes'] else None
+        notes = f"{prior}\n{notes}" if prior else notes
+
+    cur = conn.execute(
+        """UPDATE cities
+           SET center_lat = ?, center_lon = ?,
+               grid_width_m = ?, grid_height_m = ?,
+               notes = COALESCE(?, notes)
+           WHERE city_id = ?""",
+        (center_lat, center_lon, int(grid_width_m), int(grid_height_m),
+         notes, city_id))
+    if cur.rowcount == 0:
+        raise KeyError(f"Cannot update geometry: unknown city_id '{city_id}'")
+    conn.commit()
+
+
 def add_alias(conn: sqlite3.Connection, alias_slug: str, city_id: str) -> None:
     """Map a legacy filename slug (e.g. 'albany--ny') to a canonical city."""
     conn.execute(
