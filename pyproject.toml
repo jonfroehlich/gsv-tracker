@@ -1,0 +1,44 @@
+[project]
+# Minimal metadata only — Streetscape Tracker runs as scripts, not an installed
+# package. This file exists to hold tool config (ruff, pytest) in one standard
+# place; it does not define a build.
+name = "streetscape-tracker"
+version = "2.0.0"
+requires-python = ">=3.11"
+
+[tool.ruff]
+# Match the codebase's prevailing width; the formatter owns line wrapping.
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Curated set: real-bug catchers (pyflakes F, pycodestyle E/W, bugbear B),
+# import hygiene (I), comprehension cleanups (C4), and safe modernizations (UP).
+select = ["E", "F", "W", "I", "B", "C4", "UP"]
+ignore = [
+    # The formatter enforces line-length; E501 would only flag lines it can't
+    # break (long URLs, string literals) — pure noise, so leave it to the
+    # formatter.
+    "E501",
+    # dict(key=value) is used deliberately for readability in a few spots;
+    # rewriting to a literal with string keys reads worse here.
+    "C408",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# argparse defaults are commonly function calls (e.g. get_default_data_dir());
+# B008 is a false positive for that idiom.
+"scripts/*.py" = ["B008"]
+# vis.py embeds HTML/JS map templates as triple-quoted strings; the formatter
+# leaves string contents alone, so W291/W293 here flag whitespace *inside those
+# templates*, not real code.
+"gsv_metadata_tracker/vis.py" = ["W291", "W293"]
+
+[tool.ruff.format]
+# Ruff's Black-compatible defaults (double quotes, spaces). Explicit for clarity.
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

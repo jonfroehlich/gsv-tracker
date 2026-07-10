@@ -20,38 +20,38 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import date
-from typing import Optional
 
 # Providers with a filename token. GSV files carry no token (legacy compat),
 # so 'gsv' never appears in filenames but is the parse default.
-DEFAULT_PROVIDER = 'gsv'
-KNOWN_PROVIDERS = ('gsv', 'mapillary')
+DEFAULT_PROVIDER = "gsv"
+KNOWN_PROVIDERS = ("gsv", "mapillary")
 
 # Accepts int or float numeric groups, an optional provider token, and an
 # optional trailing ISO run date. The groups can't bleed into each other:
 # step is numeric, provider alphabetic, date digits-and-dashes.
 FILENAME_RE = re.compile(
-    r'^(?P<slug>.+?)'
-    r'_width_(?P<w>\d+(?:\.\d+)?)'
-    r'_height_(?P<h>\d+(?:\.\d+)?)'
-    r'_step_(?P<s>\d+(?:\.\d+)?)'
-    r'(?:_(?P<provider>[a-z]+))?'
-    r'(?:_(?P<date>\d{4}-\d{2}-\d{2}))?$'
+    r"^(?P<slug>.+?)"
+    r"_width_(?P<w>\d+(?:\.\d+)?)"
+    r"_height_(?P<h>\d+(?:\.\d+)?)"
+    r"_step_(?P<s>\d+(?:\.\d+)?)"
+    r"(?:_(?P<provider>[a-z]+))?"
+    r"(?:_(?P<date>\d{4}-\d{2}-\d{2}))?$"
 )
 
 # Extensions stripped before parsing, longest first.
-_KNOWN_EXTENSIONS = ('.csv.gz', '.json.gz', '.csv', '.json', '.html')
+_KNOWN_EXTENSIONS = (".csv.gz", ".json.gz", ".csv", ".json", ".html")
 
 
 @dataclass(frozen=True)
 class ParsedFilename:
     """Components extracted from a GSV metadata filename."""
-    slug: str                    # sanitized location slug, e.g. 'grand-marais--mn'
-    city_query_str: str          # human-readable reconstruction, e.g. 'Grand Marais, MN'
+
+    slug: str  # sanitized location slug, e.g. 'grand-marais--mn'
+    city_query_str: str  # human-readable reconstruction, e.g. 'Grand Marais, MN'
     width_meters: int
     height_meters: int
     step_meters: int
-    run_date: Optional[date]     # None for legacy undated files
+    run_date: date | None  # None for legacy undated files
     provider: str = DEFAULT_PROVIDER  # 'gsv' when no token in the filename
 
 
@@ -87,19 +87,19 @@ def sanitize_city_query_str(city_query_str: str) -> str:
     stripped) — this matches the slugs of all previously collected data
     files, so it must not change.
     """
-    parts = [p.strip() for p in city_query_str.split(',')]
+    parts = [p.strip() for p in city_query_str.split(",")]
 
     cleaned_parts = []
     for part in parts:
         # \s (not ' ') so Unicode whitespace like the non-breaking spaces
         # Nominatim sometimes returns (e.g. "Ann\xa0Arbor") is normalized too
-        cleaned = re.sub(r'\s', '-', part)
-        cleaned = re.sub(r'[<>:"/\\|?*]', '', cleaned)
-        cleaned = cleaned.strip('.-')
+        cleaned = re.sub(r"\s", "-", part)
+        cleaned = re.sub(r'[<>:"/\\|?*]', "", cleaned)
+        cleaned = cleaned.strip(".-")
         cleaned = cleaned.lower()
         cleaned_parts.append(cleaned)
 
-    return '--'.join(cleaned_parts)
+    return "--".join(cleaned_parts)
 
 
 def slug_to_query_str(slug: str) -> str:
@@ -110,10 +110,10 @@ def slug_to_query_str(slug: str) -> str:
     'Grand Marais, Mn, Usa'
     """
     processed_parts = []
-    for part in slug.split('--'):
-        words = part.split('-')
-        processed_parts.append(' '.join(word.capitalize() for word in words))
-    return ', '.join(processed_parts)
+    for part in slug.split("--"):
+        words = part.split("-")
+        processed_parts.append(" ".join(word.capitalize() for word in words))
+    return ", ".join(processed_parts)
 
 
 def parse_filename(filename: str) -> ParsedFilename:
@@ -151,40 +151,38 @@ def parse_filename(filename: str) -> ParsedFilename:
     base = os.path.basename(filename)
     for ext in _KNOWN_EXTENSIONS:
         if base.endswith(ext):
-            base = base[:-len(ext)]
+            base = base[: -len(ext)]
             break
 
     match = FILENAME_RE.match(base)
     if not match:
         raise ValueError(f"Filename {filename} doesn't match expected format")
 
-    provider = match.group('provider') or DEFAULT_PROVIDER
+    provider = match.group("provider") or DEFAULT_PROVIDER
     if provider not in KNOWN_PROVIDERS:
         raise ValueError(
             f"Filename {filename} has unknown provider token {provider!r} "
-            f"(known: {', '.join(KNOWN_PROVIDERS)})")
+            f"(known: {', '.join(KNOWN_PROVIDERS)})"
+        )
 
     run_date = None
-    if match.group('date'):
-        run_date = date.fromisoformat(match.group('date'))
+    if match.group("date"):
+        run_date = date.fromisoformat(match.group("date"))
 
-    slug = match.group('slug')
+    slug = match.group("slug")
     return ParsedFilename(
         slug=slug,
         city_query_str=slug_to_query_str(slug),
-        width_meters=int(float(match.group('w'))),
-        height_meters=int(float(match.group('h'))),
-        step_meters=int(float(match.group('s'))),
+        width_meters=int(float(match.group("w"))),
+        height_meters=int(float(match.group("h"))),
+        step_meters=int(float(match.group("s"))),
         run_date=run_date,
         provider=provider,
     )
 
 
 def generate_base_filename(
-    city_query_str: str,
-    grid_width: float,
-    grid_height: float,
-    step_length: float
+    city_query_str: str, grid_width: float, grid_height: float, step_length: float
 ) -> str:
     """
     Generate a legacy (undated) base filename for GSV metadata files.
@@ -206,7 +204,7 @@ def generate_run_filename(
     grid_height: float,
     step_length: float,
     run_date: date,
-    provider: str = DEFAULT_PROVIDER
+    provider: str = DEFAULT_PROVIDER,
 ) -> str:
     """
     Generate the dated base filename (no extension) for a collection run.
@@ -227,9 +225,11 @@ def generate_run_filename(
     """
     if provider not in KNOWN_PROVIDERS:
         raise ValueError(f"Unknown provider {provider!r} (known: {', '.join(KNOWN_PROVIDERS)})")
-    provider_token = '' if provider == DEFAULT_PROVIDER else f"_{provider}"
-    return (f"{city_id}_width_{int(grid_width)}_height_{int(grid_height)}"
-            f"_step_{int(step_length)}{provider_token}_{run_date.isoformat()}")
+    provider_token = "" if provider == DEFAULT_PROVIDER else f"_{provider}"
+    return (
+        f"{city_id}_width_{int(grid_width)}_height_{int(grid_height)}"
+        f"_step_{int(step_length)}{provider_token}_{run_date.isoformat()}"
+    )
 
 
 # ── Historical-dates harvest files (issue #2) ──────────────────────────────
@@ -244,21 +244,22 @@ def generate_run_filename(
 # parse_filename() rejects it (callers already treat a ValueError as "not a run
 # file"). Published as a normal *.csv.gz, so sync picks it up unchanged.
 
-HISTORY_MARKER = 'gsv_history'
+HISTORY_MARKER = "gsv_history"
 
 _HISTORY_FILENAME_RE = re.compile(
-    r'^(?P<slug>.+?)'
-    r'_width_(?P<w>\d+)'
-    r'_height_(?P<h>\d+)'
-    r'_step_(?P<s>\d+)'
-    r'_' + HISTORY_MARKER + r'_'
-    r'(?P<date>\d{4}-\d{2}-\d{2})$'
+    r"^(?P<slug>.+?)"
+    r"_width_(?P<w>\d+)"
+    r"_height_(?P<h>\d+)"
+    r"_step_(?P<s>\d+)"
+    r"_" + HISTORY_MARKER + r"_"
+    r"(?P<date>\d{4}-\d{2}-\d{2})$"
 )
 
 
 @dataclass(frozen=True)
 class ParsedHistoryFilename:
     """Components extracted from a historical-dates harvest filename."""
+
     slug: str
     city_query_str: str
     width_meters: int
@@ -282,8 +283,10 @@ def generate_history_filename(
         >>> generate_history_filename("bend--oregon--united-states", 5000, 5000, 20, date(2026, 7, 8))
         'bend--oregon--united-states_width_5000_height_5000_step_20_gsv_history_2026-07-08'
     """
-    return (f"{city_id}_width_{int(grid_width)}_height_{int(grid_height)}"
-            f"_step_{int(step_length)}_{HISTORY_MARKER}_{harvest_date.isoformat()}")
+    return (
+        f"{city_id}_width_{int(grid_width)}_height_{int(grid_height)}"
+        f"_step_{int(step_length)}_{HISTORY_MARKER}_{harvest_date.isoformat()}"
+    )
 
 
 def parse_history_filename(filename: str) -> ParsedHistoryFilename:
@@ -301,20 +304,19 @@ def parse_history_filename(filename: str) -> ParsedHistoryFilename:
     base = os.path.basename(filename)
     for ext in _KNOWN_EXTENSIONS:
         if base.endswith(ext):
-            base = base[:-len(ext)]
+            base = base[: -len(ext)]
             break
     match = _HISTORY_FILENAME_RE.match(base)
     if not match:
-        raise ValueError(
-            f"Filename {filename} is not a {HISTORY_MARKER} harvest file")
-    slug = match.group('slug')
+        raise ValueError(f"Filename {filename} is not a {HISTORY_MARKER} harvest file")
+    slug = match.group("slug")
     return ParsedHistoryFilename(
         slug=slug,
         city_query_str=slug_to_query_str(slug),
-        width_meters=int(match.group('w')),
-        height_meters=int(match.group('h')),
-        step_meters=int(match.group('s')),
-        harvest_date=date.fromisoformat(match.group('date')),
+        width_meters=int(match.group("w")),
+        height_meters=int(match.group("h")),
+        step_meters=int(match.group("s")),
+        harvest_date=date.fromisoformat(match.group("date")),
     )
 
 
@@ -340,5 +342,8 @@ def same_grid_geometry(filename_a: str, filename_b: str) -> bool:
         b = parse_filename(filename_b)
     except ValueError:
         return False
-    return ((a.width_meters, a.height_meters, a.step_meters)
-            == (b.width_meters, b.height_meters, b.step_meters))
+    return (a.width_meters, a.height_meters, a.step_meters) == (
+        b.width_meters,
+        b.height_meters,
+        b.step_meters,
+    )

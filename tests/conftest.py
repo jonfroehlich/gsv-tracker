@@ -3,7 +3,7 @@
 import gzip
 import os
 import sys
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pandas as pd
 import pytest
@@ -12,12 +12,26 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gsv_metadata_tracker import db  # noqa: E402
 
-COLUMNS = ['query_lat', 'query_lon', 'query_timestamp', 'pano_lat', 'pano_lon',
-           'pano_id', 'capture_date', 'copyright_info', 'status']
+COLUMNS = [
+    "query_lat",
+    "query_lon",
+    "query_timestamp",
+    "pano_lat",
+    "pano_lon",
+    "pano_id",
+    "capture_date",
+    "copyright_info",
+    "status",
+]
 
 
-def make_city_df(panos, run_date=date(2026, 1, 15), grid_origin=(44.0, -121.0),
-                 n_empty=1, copyright_info='© Google'):
+def make_city_df(
+    panos,
+    run_date=date(2026, 1, 15),
+    grid_origin=(44.0, -121.0),
+    n_empty=1,
+    copyright_info="© Google",
+):
     """
     Build a synthetic run DataFrame.
 
@@ -31,22 +45,43 @@ def make_city_df(panos, run_date=date(2026, 1, 15), grid_origin=(44.0, -121.0),
 
     Returns raw (string-typed) DataFrame, like a freshly written CSV.
     """
-    ts = datetime(run_date.year, run_date.month, run_date.day,
-                  12, 0, tzinfo=timezone.utc).isoformat()
+    ts = datetime(run_date.year, run_date.month, run_date.day, 12, 0, tzinfo=UTC).isoformat()
     rows = []
     lat0, lon0 = grid_origin
     for i, (pano_id, capture) in enumerate(panos):
-        rows.append((lat0 + i * 0.001, lon0, ts, lat0 + i * 0.001 + 0.0001,
-                     lon0 + 0.0001, pano_id, capture, copyright_info, 'OK'))
+        rows.append(
+            (
+                lat0 + i * 0.001,
+                lon0,
+                ts,
+                lat0 + i * 0.001 + 0.0001,
+                lon0 + 0.0001,
+                pano_id,
+                capture,
+                copyright_info,
+                "OK",
+            )
+        )
     for j in range(n_empty):
-        rows.append((lat0 + (len(panos) + j) * 0.001, lon0, ts, None, None,
-                     None, None, None, 'ZERO_RESULTS'))
+        rows.append(
+            (
+                lat0 + (len(panos) + j) * 0.001,
+                lon0,
+                ts,
+                None,
+                None,
+                None,
+                None,
+                None,
+                "ZERO_RESULTS",
+            )
+        )
     return pd.DataFrame(rows, columns=COLUMNS)
 
 
-def make_mapillary_city_df(panos, run_date=date(2026, 1, 15),
-                           grid_origin=(44.0, -121.0), n_empty=1,
-                           panos_per_point=1):
+def make_mapillary_city_df(
+    panos, run_date=date(2026, 1, 15), grid_origin=(44.0, -121.0), n_empty=1, panos_per_point=1
+):
     """
     Build a synthetic Mapillary run DataFrame.
 
@@ -60,27 +95,46 @@ def make_mapillary_city_df(panos, run_date=date(2026, 1, 15),
 
     Returns raw (string-typed) DataFrame, like a freshly written CSV.
     """
-    ts = datetime(run_date.year, run_date.month, run_date.day,
-                  12, 0, tzinfo=timezone.utc).isoformat()
+    ts = datetime(run_date.year, run_date.month, run_date.day, 12, 0, tzinfo=UTC).isoformat()
     rows = []
     lat0, lon0 = grid_origin
     n_points_used = 0
     for i, (pano_id, capture) in enumerate(panos):
         point = i // panos_per_point
         n_points_used = point + 1
-        rows.append((lat0 + point * 0.001, lon0, ts,
-                     lat0 + point * 0.001 + 0.0001, lon0 + 0.0001,
-                     pano_id, capture,
-                     f'© Mapillary contributor {100 + i % 3}', 'OK'))
+        rows.append(
+            (
+                lat0 + point * 0.001,
+                lon0,
+                ts,
+                lat0 + point * 0.001 + 0.0001,
+                lon0 + 0.0001,
+                pano_id,
+                capture,
+                f"© Mapillary contributor {100 + i % 3}",
+                "OK",
+            )
+        )
     for j in range(n_empty):
-        rows.append((lat0 + (n_points_used + j) * 0.001, lon0, ts, None, None,
-                     None, None, None, 'ZERO_RESULTS'))
+        rows.append(
+            (
+                lat0 + (n_points_used + j) * 0.001,
+                lon0,
+                ts,
+                None,
+                None,
+                None,
+                None,
+                None,
+                "ZERO_RESULTS",
+            )
+        )
     return pd.DataFrame(rows, columns=COLUMNS)
 
 
 def write_city_csv_gz(df, path):
     """Write a synthetic df the way the downloader does (gzipped CSV)."""
-    with gzip.open(path, 'wt', encoding='utf-8', newline='') as f:
+    with gzip.open(path, "wt", encoding="utf-8", newline="") as f:
         df.to_csv(f, index=False)
     return path
 

@@ -1,0 +1,6 @@
+# Development dependencies: everything in requirements.txt plus tooling.
+# Install with:  pip install -r requirements-dev.txt
+-r requirements.txt
+
+# Linter + formatter (pinned to keep local and CI results identical).
+ruff==0.15.21

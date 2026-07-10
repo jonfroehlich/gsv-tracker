@@ -30,9 +30,9 @@ import gzip
 import logging
 import math
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, Any, Iterable, List, Tuple
+from typing import Any
 
 import aiohttp
 import backoff
@@ -49,8 +49,9 @@ from .fileutils import load_city_csv_file
 logger = logging.getLogger(__name__)
 
 TILE_ZOOM = 14  # the only zoom level whose tiles carry per-image metadata
-TILE_URL_TEMPLATE = ("https://tiles.mapillary.com/maps/vtp/mly1_computed_public"
-                     "/2/{z}/{x}/{y}?access_token={token}")
+TILE_URL_TEMPLATE = (
+    "https://tiles.mapillary.com/maps/vtp/mly1_computed_public/2/{z}/{x}/{y}?access_token={token}"
+)
 IMAGE_LAYER = "image"
 
 # Meters per degree of latitude (WGS84 mean). Used only for nearest-grid-
@@ -61,36 +62,39 @@ _M_PER_DEG_LAT = 111320.0
 
 # ── Slippy-map tile math (stdlib only) ─────────────────────────────────────
 
-def lonlat_to_tile_frac(lon: float, lat: float, zoom: int) -> Tuple[float, float]:
+
+def lonlat_to_tile_frac(lon: float, lat: float, zoom: int) -> tuple[float, float]:
     """Fractional Web-Mercator tile coordinates (x, y; y from the top)."""
-    n = 2 ** zoom
+    n = 2**zoom
     fx = (lon + 180.0) / 360.0 * n
     lat_rad = math.radians(lat)
     fy = (1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n
     return fx, fy
 
 
-def tile_frac_to_lonlat(fx: float, fy: float, zoom: int) -> Tuple[float, float]:
+def tile_frac_to_lonlat(fx: float, fy: float, zoom: int) -> tuple[float, float]:
     """Inverse of lonlat_to_tile_frac."""
-    n = 2 ** zoom
+    n = 2**zoom
     lon = fx / n * 360.0 - 180.0
     lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * fy / n))))
     return lon, lat
 
 
-def tiles_for_bbox(min_lon: float, min_lat: float, max_lon: float,
-                   max_lat: float, zoom: int = TILE_ZOOM) -> List[Tuple[int, int]]:
+def tiles_for_bbox(
+    min_lon: float, min_lat: float, max_lon: float, max_lat: float, zoom: int = TILE_ZOOM
+) -> list[tuple[int, int]]:
     """All (x, y) tile indices at the given zoom intersecting the bbox."""
     fx_min, fy_max = lonlat_to_tile_frac(min_lon, min_lat, zoom)  # y grows southward
     fx_max, fy_min = lonlat_to_tile_frac(max_lon, max_lat, zoom)
-    n = 2 ** zoom
+    n = 2**zoom
     x_range = range(max(0, int(fx_min)), min(n - 1, int(fx_max)) + 1)
     y_range = range(max(0, int(fy_min)), min(n - 1, int(fy_max)) + 1)
     return [(x, y) for x in x_range for y in y_range]
 
 
-def grid_bbox(center_lat: float, center_lon: float, grid_width: float,
-              grid_height: float, step_length: float) -> Tuple[float, float, float, float]:
+def grid_bbox(
+    center_lat: float, center_lon: float, grid_width: float, grid_height: float, step_length: float
+) -> tuple[float, float, float, float]:
     """
     (min_lon, min_lat, max_lon, max_lat) covering the sampling grid plus a
     half-step margin, computed with the same geodesic math that builds the
@@ -107,21 +111,28 @@ def grid_bbox(center_lat: float, center_lon: float, grid_width: float,
     return west.longitude, south.latitude, east.longitude, north.latitude
 
 
-def estimate_tile_count(center_lat: float, center_lon: float,
-                        grid_width: float, grid_height: float,
-                        step_length: float = 20) -> int:
+def estimate_tile_count(
+    center_lat: float,
+    center_lon: float,
+    grid_width: float,
+    grid_height: float,
+    step_length: float = 20,
+) -> int:
     """
     Number of z14 tile requests a run will make — the Mapillary analogue of
     the scheduler's grid-point request estimate for GSV.
     """
-    return len(tiles_for_bbox(*grid_bbox(center_lat, center_lon,
-                                         grid_width, grid_height, step_length)))
+    return len(
+        tiles_for_bbox(*grid_bbox(center_lat, center_lon, grid_width, grid_height, step_length))
+    )
 
 
 # ── Tile decoding ──────────────────────────────────────────────────────────
 
-def decode_image_features(tile_bytes: bytes, tile_x: int, tile_y: int,
-                          zoom: int = TILE_ZOOM) -> List[Dict[str, Any]]:
+
+def decode_image_features(
+    tile_bytes: bytes, tile_x: int, tile_y: int, zoom: int = TILE_ZOOM
+) -> list[dict[str, Any]]:
     """
     Extract pano image records from one raw vector tile.
 
@@ -133,33 +144,35 @@ def decode_image_features(tile_bytes: bytes, tile_x: int, tile_y: int,
     layer = decoded.get(IMAGE_LAYER)
     if not layer:
         return []
-    extent = layer.get('extent', 4096)
+    extent = layer.get("extent", 4096)
 
     records = []
-    for feature in layer['features']:
-        props = feature.get('properties', {})
-        if not props.get('is_pano'):
+    for feature in layer["features"]:
+        props = feature.get("properties", {})
+        if not props.get("is_pano"):
             continue
-        geometry = feature.get('geometry', {})
-        if geometry.get('type') != 'Point':
+        geometry = feature.get("geometry", {})
+        if geometry.get("type") != "Point":
             continue
-        px, py = geometry['coordinates']
+        px, py = geometry["coordinates"]
         # decode() returns y-up tile-local coords; convert to global fractions
         fx = tile_x + px / extent
         fy = tile_y + (1 - py / extent)
         lon, lat = tile_frac_to_lonlat(fx, fy, zoom)
 
-        image_id = props.get('id', feature.get('id'))
+        image_id = props.get("id", feature.get("id"))
         if image_id is None:
             continue
-        captured_at = props.get('captured_at')
-        records.append({
-            'id': str(image_id),
-            'lon': lon,
-            'lat': lat,
-            'captured_at_ms': captured_at,
-            'creator_id': props.get('creator_id'),
-        })
+        captured_at = props.get("captured_at")
+        records.append(
+            {
+                "id": str(image_id),
+                "lon": lon,
+                "lat": lat,
+                "captured_at_ms": captured_at,
+                "creator_id": props.get("creator_id"),
+            }
+        )
     return records
 
 
@@ -171,22 +184,28 @@ def captured_at_to_iso_date(captured_at_ms) -> str:
     Mapillary could plausibly have imagery, or in the future).
     """
     if not captured_at_ms:
-        return ''
+        return ""
     try:
-        dt = datetime.fromtimestamp(int(captured_at_ms) / 1000, tz=timezone.utc)
+        dt = datetime.fromtimestamp(int(captured_at_ms) / 1000, tz=UTC)
     except (ValueError, OSError, OverflowError):
-        return ''
-    if dt.year < 2004 or dt > datetime.now(timezone.utc):
-        return ''
+        return ""
+    if dt.year < 2004 or dt > datetime.now(UTC):
+        return ""
     return dt.date().isoformat()
 
 
 # ── Grid assignment ────────────────────────────────────────────────────────
 
-def assign_to_grid(image_lats: np.ndarray, image_lons: np.ndarray,
-                   center_lat: float, center_lon: float,
-                   width_steps: int, height_steps: int,
-                   step_length: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+
+def assign_to_grid(
+    image_lats: np.ndarray,
+    image_lons: np.ndarray,
+    center_lat: float,
+    center_lon: float,
+    width_steps: int,
+    height_steps: int,
+    step_length: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Vectorized nearest-grid-point assignment.
 
@@ -214,19 +233,19 @@ def assign_to_grid(image_lats: np.ndarray, image_lons: np.ndarray,
 
 # ── Download ───────────────────────────────────────────────────────────────
 
+
 @backoff.on_exception(
-    backoff.expo,
-    (asyncio.TimeoutError, aiohttp.ClientError),
-    max_tries=3,
-    max_time=60
+    backoff.expo, (asyncio.TimeoutError, aiohttp.ClientError), max_tries=3, max_time=60
 )
-async def _fetch_tile(session: aiohttp.ClientSession, url: str,
-                      timeout: aiohttp.ClientTimeout) -> bytes:
+async def _fetch_tile(
+    session: aiohttp.ClientSession, url: str, timeout: aiohttp.ClientTimeout
+) -> bytes:
     async with session.get(url, timeout=timeout) as response:
         if response.status in (401, 403):
             raise DownloadError(
                 f"Mapillary rejected the access token (HTTP {response.status}). "
-                "Check MAPILLARY_ACCESS_TOKEN.")
+                "Check MAPILLARY_ACCESS_TOKEN."
+            )
         if response.status != 200:
             # 429/5xx raise ClientResponseError, which backoff retries
             response.raise_for_status()
@@ -244,7 +263,7 @@ async def download_mapillary_metadata_async(
     output_csv_gz_path: str,
     connection_limit: int = 5,
     request_timeout: float = 30,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Fetch Mapillary pano metadata for a city and write it as a run csv.gz.
 
@@ -259,14 +278,12 @@ async def download_mapillary_metadata_async(
             api_requests: number of tile requests issued this call
             started_at / finished_at: UTC ISO 8601 timestamps
     """
-    started_at = datetime.now(timezone.utc).isoformat()
+    started_at = datetime.now(UTC).isoformat()
     query_timestamp = started_at
 
-    if not output_csv_gz_path.endswith('.csv.gz'):
-        raise ValueError(
-            f"output_csv_gz_path must end in .csv.gz, got: {output_csv_gz_path}")
-    Path(os.path.dirname(os.path.abspath(output_csv_gz_path))).mkdir(
-        parents=True, exist_ok=True)
+    if not output_csv_gz_path.endswith(".csv.gz"):
+        raise ValueError(f"output_csv_gz_path must end in .csv.gz, got: {output_csv_gz_path}")
+    Path(os.path.dirname(os.path.abspath(output_csv_gz_path))).mkdir(parents=True, exist_ok=True)
 
     width_steps = int(grid_width / step_length)
     height_steps = int(grid_height / step_length)
@@ -278,15 +295,15 @@ async def download_mapillary_metadata_async(
     tiles = tiles_for_bbox(*bbox)
     logger.info(
         f"Fetching Mapillary metadata for {city_name}: {len(tiles)} z{TILE_ZOOM} "
-        f"tiles covering bbox {tuple(round(v, 4) for v in bbox)}")
+        f"tiles covering bbox {tuple(round(v, 4) for v in bbox)}"
+    )
 
     api_requests = 0
     timeout = aiohttp.ClientTimeout(total=request_timeout)
     semaphore = asyncio.Semaphore(connection_limit)
-    progress_bar = tqdm(total=len(tiles),
-                        desc=f"Downloading Mapillary tiles for {city_name}")
+    progress_bar = tqdm(total=len(tiles), desc=f"Downloading Mapillary tiles for {city_name}")
 
-    async def fetch_one(x: int, y: int) -> List[Dict[str, Any]]:
+    async def fetch_one(x: int, y: int) -> list[dict[str, Any]]:
         nonlocal api_requests
         url = TILE_URL_TEMPLATE.format(z=TILE_ZOOM, x=x, y=y, token=access_token)
         async with semaphore:
@@ -298,7 +315,7 @@ async def download_mapillary_metadata_async(
     try:
         async with aiohttp.ClientSession() as session:
             results = await asyncio.gather(*(fetch_one(x, y) for x, y in tiles))
-    except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+    except (TimeoutError, aiohttp.ClientError) as e:
         raise DownloadError(f"Mapillary tile download failed: {e}") from e
     finally:
         progress_bar.close()
@@ -308,72 +325,81 @@ async def download_mapillary_metadata_async(
     images_by_id = {}
     for records in results:
         for record in records:
-            images_by_id[record['id']] = record
+            images_by_id[record["id"]] = record
     images = list(images_by_id.values())
-    logger.info(f"Decoded {sum(len(r) for r in results)} pano features "
-                f"({len(images)} unique) from {len(tiles)} tiles")
+    logger.info(
+        f"Decoded {sum(len(r) for r in results)} pano features "
+        f"({len(images)} unique) from {len(tiles)} tiles"
+    )
 
     rows = []
     covered_points = set()
     if images:
-        lats = np.array([img['lat'] for img in images])
-        lons = np.array([img['lon'] for img in images])
+        lats = np.array([img["lat"] for img in images])
+        lons = np.array([img["lon"] for img in images])
         i_idx, j_idx, in_grid = assign_to_grid(
-            lats, lons, center_lat, center_lon,
-            width_steps, height_steps, step_length)
-        for img, i, j, keep in zip(images, i_idx, j_idx, in_grid):
+            lats, lons, center_lat, center_lon, width_steps, height_steps, step_length
+        )
+        for img, i, j, keep in zip(images, i_idx, j_idx, in_grid, strict=False):
             if not keep:
                 continue
             grid_lat, grid_lon = point_by_index[(int(i), int(j))]
-            capture_date = captured_at_to_iso_date(img['captured_at_ms'])
-            creator = img['creator_id']
-            copyright_info = (f"© Mapillary contributor {creator}"
-                              if creator is not None else "© Mapillary")
-            rows.append({
-                'query_lat': grid_lat,
-                'query_lon': grid_lon,
-                'query_timestamp': query_timestamp,
-                'pano_lat': img['lat'],
-                'pano_lon': img['lon'],
-                'pano_id': img['id'],
-                'capture_date': capture_date,
-                'copyright_info': copyright_info,
-                # Mirror GSV's convention: an image without a usable
-                # capture date is present but doesn't count as coverage
-                'status': 'OK' if capture_date else 'NO_DATE',
-            })
+            capture_date = captured_at_to_iso_date(img["captured_at_ms"])
+            creator = img["creator_id"]
+            copyright_info = (
+                f"© Mapillary contributor {creator}" if creator is not None else "© Mapillary"
+            )
+            rows.append(
+                {
+                    "query_lat": grid_lat,
+                    "query_lon": grid_lon,
+                    "query_timestamp": query_timestamp,
+                    "pano_lat": img["lat"],
+                    "pano_lon": img["lon"],
+                    "pano_id": img["id"],
+                    "capture_date": capture_date,
+                    "copyright_info": copyright_info,
+                    # Mirror GSV's convention: an image without a usable
+                    # capture date is present but doesn't count as coverage
+                    "status": "OK" if capture_date else "NO_DATE",
+                }
+            )
             covered_points.add((int(i), int(j)))
 
     for (i, j), (grid_lat, grid_lon) in point_by_index.items():
         if (i, j) not in covered_points:
-            rows.append({
-                'query_lat': grid_lat,
-                'query_lon': grid_lon,
-                'query_timestamp': query_timestamp,
-                'pano_lat': None,
-                'pano_lon': None,
-                'pano_id': None,
-                'capture_date': None,
-                'copyright_info': None,
-                'status': 'ZERO_RESULTS',
-            })
+            rows.append(
+                {
+                    "query_lat": grid_lat,
+                    "query_lon": grid_lon,
+                    "query_timestamp": query_timestamp,
+                    "pano_lat": None,
+                    "pano_lon": None,
+                    "pano_id": None,
+                    "capture_date": None,
+                    "copyright_info": None,
+                    "status": "ZERO_RESULTS",
+                }
+            )
 
     df = pd.DataFrame(rows, columns=list(METADATA_DTYPES.keys()))
-    csv_bytes = df.to_csv(index=False).encode('utf-8')
-    with gzip.open(output_csv_gz_path, 'wb') as f:
+    csv_bytes = df.to_csv(index=False).encode("utf-8")
+    with gzip.open(output_csv_gz_path, "wb") as f:
         f.write(csv_bytes)
 
     # Read back through the shared loader so dtypes match GSV runs exactly
     df = load_city_csv_file(output_csv_gz_path)
-    n_panos = int((df['status'] == 'OK').sum())
-    logger.info(f"Wrote {len(df)} rows ({n_panos} panos, "
-                f"{len(point_by_index) - len(covered_points)} empty grid points) "
-                f"to {output_csv_gz_path}")
+    n_panos = int((df["status"] == "OK").sum())
+    logger.info(
+        f"Wrote {len(df)} rows ({n_panos} panos, "
+        f"{len(point_by_index) - len(covered_points)} empty grid points) "
+        f"to {output_csv_gz_path}"
+    )
 
     return {
         "df": df,
         "filename_with_path": output_csv_gz_path,
         "api_requests": api_requests,
         "started_at": started_at,
-        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": datetime.now(UTC).isoformat(),
     }

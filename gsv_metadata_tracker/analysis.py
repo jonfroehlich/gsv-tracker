@@ -1,20 +1,19 @@
 """
 analysis.py - Module for analyzing and displaying GSV metadata statistics.
 
-This module provides functions and classes for analyzing Google Street View metadata and 
+This module provides functions and classes for analyzing Google Street View metadata and
 displaying formatted statistics tables. It's designed to be used by multiple
 components like json_summarizer.py, check_status_codes.py, and cli.py.
 """
 
+import logging
+from collections import Counter
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, List, Tuple, ClassVar
+from typing import Any, ClassVar
+
+import numpy as np
 import pandas as pd
 from tabulate import tabulate
-from datetime import datetime
-import numpy as np
-import os
-from collections import Counter
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +21,7 @@ logger = logging.getLogger(__name__)
 # else is a third-party photographer. Substring matching is wrong because
 # photographer names can contain 'Google' (e.g. '© MIB 360 - Google Virtual
 # Tours Agency'). Must stay in sync with the exact match in www/js/city.js.
-GOOGLE_COPYRIGHT = '© Google'
+GOOGLE_COPYRIGHT = "© Google"
 
 # Statuses that mean "imagery is present at this grid point". A pano the
 # provider returned counts even when we could not read a usable capture date
@@ -31,7 +30,7 @@ GOOGLE_COPYRIGHT = '© Google'
 # necessarily use only the dated subset (status == 'OK'). ZERO_RESULTS means
 # "no imagery here"; everything else (REQUEST_DENIED, OVER_QUERY_LIMIT, ...) is
 # an error, not an absence.
-PRESENT_STATUSES = ('OK', 'NO_DATE')
+PRESENT_STATUSES = ("OK", "NO_DATE")
 
 
 def is_google_copyright(copyright_info: pd.Series) -> pd.Series:
@@ -41,9 +40,11 @@ def is_google_copyright(copyright_info: pd.Series) -> pd.Series:
     """
     return copyright_info == GOOGLE_COPYRIGHT
 
+
 @dataclass
 class DistanceStats:
     """Statistics about distances between query points and panoramas."""
+
     min_meters: float
     max_meters: float
     avg_meters: float
@@ -51,20 +52,21 @@ class DistanceStats:
     stdev_meters: float
 
     # Class variable mapping internal field names to human-readable labels
-    FIELD_LABELS: ClassVar[Dict[str, str]] = {
-        'min_meters': 'Min Distance (m)',
-        'max_meters': 'Max Distance (m)',
-        'avg_meters': 'Avg Distance (m)',
-        'median_meters': 'Median Distance (m)',
-        'stdev_meters': 'Std Dev Distance (m)'
+    FIELD_LABELS: ClassVar[dict[str, str]] = {
+        "min_meters": "Min Distance (m)",
+        "max_meters": "Max Distance (m)",
+        "avg_meters": "Avg Distance (m)",
+        "median_meters": "Median Distance (m)",
+        "stdev_meters": "Std Dev Distance (m)",
     }
 
-    def to_rows(self) -> List[List[str]]:
+    def to_rows(self) -> list[list[str]]:
         """Convert stats to formatted rows for tabulation."""
         return [
             [self.FIELD_LABELS[field], f"{getattr(self, field):.2f}"]
             for field in self.FIELD_LABELS.keys()
         ]
+
 
 @dataclass
 class CoverageStats:
@@ -76,32 +78,37 @@ class CoverageStats:
     field name num_points_with_unique_pano_ids is kept for per-run JSON
     key stability but holds the count of unique panoramas.
     """
+
     num_points_with_panos: int
     num_points_with_unique_pano_ids: int
     num_points_with_errors: int
     num_points_without_panos: int
     coverage_rate: float
-    pano_distance_stats: Optional[DistanceStats] = None
+    pano_distance_stats: DistanceStats | None = None
 
-    FIELD_LABELS: ClassVar[Dict[str, str]] = {
-        'num_points_with_panos': 'Points with Panoramas',
-        'num_points_with_unique_pano_ids': 'Unique Panoramas',
-        'num_points_without_panos': 'Points without Panoramas',
-        'num_points_with_errors': 'Points with Errors',
-        'coverage_rate': 'Points with Panos / Total Points'
+    FIELD_LABELS: ClassVar[dict[str, str]] = {
+        "num_points_with_panos": "Points with Panoramas",
+        "num_points_with_unique_pano_ids": "Unique Panoramas",
+        "num_points_without_panos": "Points without Panoramas",
+        "num_points_with_errors": "Points with Errors",
+        "coverage_rate": "Points with Panos / Total Points",
     }
 
-    def to_rows(self) -> List[List[str]]:
+    def to_rows(self) -> list[list[str]]:
         """Convert stats to formatted rows for tabulation."""
         rows = [
-            [self.FIELD_LABELS[field], 
-             f"{getattr(self, field):.2f}%" if field == 'coverage_rate' else str(getattr(self, field))]
+            [
+                self.FIELD_LABELS[field],
+                f"{getattr(self, field):.2f}%"
+                if field == "coverage_rate"
+                else str(getattr(self, field)),
+            ]
             for field in self.FIELD_LABELS.keys()
         ]
-        
+
         if self.pano_distance_stats:
             rows.extend(self.pano_distance_stats.to_rows())
-            
+
         return rows
 
     def format_table(self) -> str:
@@ -111,27 +118,29 @@ class CoverageStats:
             headers=["Metric", "Value"],
             tablefmt="simple",
             numalign="right",
-            stralign="left"
+            stralign="left",
         )
+
 
 @dataclass
 class AgeStats:
     """Statistics about panorama ages."""
-    count: int
-    oldest_pano_date: Optional[str]
-    newest_pano_date: Optional[str]
-    avg_pano_age_years: Optional[float]
-    median_pano_age_years: Optional[float]
-    stdev_pano_age_years: Optional[float]
-    age_percentiles_years: Optional[Dict[str, float]]
 
-    FIELD_LABELS: ClassVar[Dict[str, str]] = {
-        'count': 'Total Panoramas',
-        'oldest_pano_date': 'Oldest Panorama',
-        'newest_pano_date': 'Newest Panorama',
-        'avg_pano_age_years': 'Average Age (years)',
-        'median_pano_age_years': 'Median Age (years)',
-        'stdev_pano_age_years': 'Std Dev Age (years)'
+    count: int
+    oldest_pano_date: str | None
+    newest_pano_date: str | None
+    avg_pano_age_years: float | None
+    median_pano_age_years: float | None
+    stdev_pano_age_years: float | None
+    age_percentiles_years: dict[str, float] | None
+
+    FIELD_LABELS: ClassVar[dict[str, str]] = {
+        "count": "Total Panoramas",
+        "oldest_pano_date": "Oldest Panorama",
+        "newest_pano_date": "Newest Panorama",
+        "avg_pano_age_years": "Average Age (years)",
+        "median_pano_age_years": "Median Age (years)",
+        "stdev_pano_age_years": "Std Dev Age (years)",
     }
 
     def format_field_value(self, field: Any) -> str:
@@ -146,7 +155,7 @@ class AgeStats:
             return f"{value:.1f}"
         return str(value)
 
-    def to_rows(self) -> List[List[str]]:
+    def to_rows(self) -> list[list[str]]:
         """Convert stats to formatted rows for tabulation."""
         return [
             [self.FIELD_LABELS[field], self.format_field_value(field)]
@@ -160,8 +169,9 @@ class AgeStats:
             headers=["Metric", "Value"],
             tablefmt="simple",
             numalign="right",
-            stralign="left"
+            stralign="left",
         )
+
 
 def calculate_age_stats(df: pd.DataFrame, now: pd.Timestamp) -> AgeStats:
     """Helper function to calculate age statistics for panoramas."""
@@ -173,22 +183,26 @@ def calculate_age_stats(df: pd.DataFrame, now: pd.Timestamp) -> AgeStats:
             avg_pano_age_years=None,
             median_pano_age_years=None,
             stdev_pano_age_years=None,
-            age_percentiles_years=None
+            age_percentiles_years=None,
         )
-    
+
     # Convert capture_date to datetime if necessary
-    if not pd.api.types.is_datetime64_any_dtype(df['capture_date']):
-        df['capture_date'] = pd.to_datetime(df['capture_date'])
-    
-    valid_dates_mask = df['capture_date'].notna()
+    if not pd.api.types.is_datetime64_any_dtype(df["capture_date"]):
+        df["capture_date"] = pd.to_datetime(df["capture_date"])
+
+    valid_dates_mask = df["capture_date"].notna()
     df_with_dates = df[valid_dates_mask]
-    
-    ages = (now - df_with_dates['capture_date']).dt.total_seconds() / (365.25 * 24 * 3600)
-    
+
+    ages = (now - df_with_dates["capture_date"]).dt.total_seconds() / (365.25 * 24 * 3600)
+
     return AgeStats(
         count=len(df),
-        oldest_pano_date=df_with_dates['capture_date'].min().isoformat() if len(df_with_dates) > 0 else None,
-        newest_pano_date=df_with_dates['capture_date'].max().isoformat() if len(df_with_dates) > 0 else None,
+        oldest_pano_date=df_with_dates["capture_date"].min().isoformat()
+        if len(df_with_dates) > 0
+        else None,
+        newest_pano_date=df_with_dates["capture_date"].max().isoformat()
+        if len(df_with_dates) > 0
+        else None,
         avg_pano_age_years=float(ages.mean()) if len(ages) > 0 else None,
         median_pano_age_years=float(ages.median()) if len(ages) > 0 else None,
         # std() with a single sample returns NaN (ddof=1), which is not valid JSON
@@ -197,9 +211,10 @@ def calculate_age_stats(df: pd.DataFrame, now: pd.Timestamp) -> AgeStats:
             "p10": float(ages.quantile(0.1)) if len(ages) > 0 else None,
             "p25": float(ages.quantile(0.25)) if len(ages) > 0 else None,
             "p75": float(ages.quantile(0.75)) if len(ages) > 0 else None,
-            "p90": float(ages.quantile(0.9)) if len(ages) > 0 else None
-        }
+            "p90": float(ages.quantile(0.9)) if len(ages) > 0 else None,
+        },
     )
+
 
 def calculate_coverage_stats(df: pd.DataFrame) -> CoverageStats:
     """
@@ -217,12 +232,12 @@ def calculate_coverage_stats(df: pd.DataFrame) -> CoverageStats:
     pairs. Coordinates within a run come from a single grid-generation
     pass, so exact equality is safe.
     """
-    point_cols = ['query_lat', 'query_lon']
+    point_cols = ["query_lat", "query_lon"]
     num_total_points = len(df[point_cols].drop_duplicates())
 
     # A grid point is covered if it holds >= 1 present pano (OK or NO_DATE):
     # a dateless pano is still imagery within reach (see PRESENT_STATUSES).
-    present_rows = df[df['status'].isin(PRESENT_STATUSES)]
+    present_rows = df[df["status"].isin(PRESENT_STATUSES)]
     num_points_with_panos = len(present_rows[point_cols].drop_duplicates())
     logger.debug(f"Grid points with panoramas: {num_points_with_panos}")
 
@@ -230,51 +245,65 @@ def calculate_coverage_stats(df: pd.DataFrame) -> CoverageStats:
     # overlap the covered points; whatever remains saw only errors
     # (REQUEST_DENIED, OVER_QUERY_LIMIT, ...)
     num_points_without_panos = len(
-        df.loc[df['status'] == 'ZERO_RESULTS', point_cols].drop_duplicates())
-    num_points_with_errors = (num_total_points - num_points_with_panos
-                              - num_points_without_panos)
+        df.loc[df["status"] == "ZERO_RESULTS", point_cols].drop_duplicates()
+    )
+    num_points_with_errors = num_total_points - num_points_with_panos - num_points_without_panos
 
-    successful_df_no_duplicates = present_rows.drop_duplicates(subset=['pano_id']).copy()
+    successful_df_no_duplicates = present_rows.drop_duplicates(subset=["pano_id"]).copy()
     num_unique_panos = len(successful_df_no_duplicates)
     logger.debug(f"Unique panoramas: {num_unique_panos}")
 
     distance_stats = None
     if num_unique_panos > 0:
-        distances = np.sqrt(
-            (successful_df_no_duplicates['query_lat'] - successful_df_no_duplicates['pano_lat'])**2 +
-            (successful_df_no_duplicates['query_lon'] - successful_df_no_duplicates['pano_lon'])**2
-        ) * 111000  # Approximate conversion to meters
-        
-        successful_df_no_duplicates.loc[:, 'distance_to_query'] = distances
-        logger.debug(f"Distance: {distances}")
-        logger.debug(f"Distance is NA: {successful_df_no_duplicates['distance_to_query'].isna().all()}")
-        logger.debug(f"Distance std: {successful_df_no_duplicates['distance_to_query'].std()}")
-    
-        
-        if not successful_df_no_duplicates['distance_to_query'].isna().all():
-
-            # If we have only one point, std will be NaN
-            std_val = successful_df_no_duplicates['distance_to_query'].std()
-            distance_stats = DistanceStats(
-                min_meters=float(successful_df_no_duplicates['distance_to_query'].min()),
-                max_meters=float(successful_df_no_duplicates['distance_to_query'].max()),
-                avg_meters=float(successful_df_no_duplicates['distance_to_query'].mean()),
-                median_meters=float(successful_df_no_duplicates['distance_to_query'].median()),
-                stdev_meters=0.0 if pd.isna(std_val) else float(std_val)  # Use 0.0 for single points
+        distances = (
+            np.sqrt(
+                (successful_df_no_duplicates["query_lat"] - successful_df_no_duplicates["pano_lat"])
+                ** 2
+                + (
+                    successful_df_no_duplicates["query_lon"]
+                    - successful_df_no_duplicates["pano_lon"]
+                )
+                ** 2
             )
-    
+            * 111000
+        )  # Approximate conversion to meters
+
+        successful_df_no_duplicates.loc[:, "distance_to_query"] = distances
+        logger.debug(f"Distance: {distances}")
+        logger.debug(
+            f"Distance is NA: {successful_df_no_duplicates['distance_to_query'].isna().all()}"
+        )
+        logger.debug(f"Distance std: {successful_df_no_duplicates['distance_to_query'].std()}")
+
+        if not successful_df_no_duplicates["distance_to_query"].isna().all():
+            # If we have only one point, std will be NaN
+            std_val = successful_df_no_duplicates["distance_to_query"].std()
+            distance_stats = DistanceStats(
+                min_meters=float(successful_df_no_duplicates["distance_to_query"].min()),
+                max_meters=float(successful_df_no_duplicates["distance_to_query"].max()),
+                avg_meters=float(successful_df_no_duplicates["distance_to_query"].mean()),
+                median_meters=float(successful_df_no_duplicates["distance_to_query"].median()),
+                stdev_meters=0.0
+                if pd.isna(std_val)
+                else float(std_val),  # Use 0.0 for single points
+            )
+
     return CoverageStats(
         num_points_with_panos=num_points_with_panos,
         num_points_with_unique_pano_ids=num_unique_panos,
         num_points_without_panos=num_points_without_panos,
         num_points_with_errors=num_points_with_errors,
-        coverage_rate=(num_points_with_panos / num_total_points) * 100 if num_total_points > 0 else 0,
-        pano_distance_stats=distance_stats
+        coverage_rate=(num_points_with_panos / num_total_points) * 100
+        if num_total_points > 0
+        else 0,
+        pano_distance_stats=distance_stats,
     )
+
 
 @dataclass
 class DuplicateStats:
     """Statistics about panorama duplications."""
+
     total_unique_panos: int
     total_pano_references: int
     duplicate_reference_count: int
@@ -282,21 +311,24 @@ class DuplicateStats:
     panos_with_multiple_refs: int
     average_references_per_pano: float
 
-    FIELD_LABELS: ClassVar[Dict[str, str]] = {
-        'total_unique_panos': 'Total Unique Panoramas',
-        'total_pano_references': 'Total References',
-        'duplicate_reference_count': 'Duplicate References',
-        'most_referenced_count': 'Most Referenced Count',
-        'panos_with_multiple_refs': 'Panoramas with Multiple Refs',
-        'average_references_per_pano': 'Average References per Pano'
+    FIELD_LABELS: ClassVar[dict[str, str]] = {
+        "total_unique_panos": "Total Unique Panoramas",
+        "total_pano_references": "Total References",
+        "duplicate_reference_count": "Duplicate References",
+        "most_referenced_count": "Most Referenced Count",
+        "panos_with_multiple_refs": "Panoramas with Multiple Refs",
+        "average_references_per_pano": "Average References per Pano",
     }
 
-    def to_rows(self) -> List[List[str]]:
+    def to_rows(self) -> list[list[str]]:
         """Convert stats to formatted rows for tabulation."""
         return [
-            [self.FIELD_LABELS[field], 
-             f"{getattr(self, field):.2f}" if field == 'average_references_per_pano' 
-             else str(getattr(self, field))]
+            [
+                self.FIELD_LABELS[field],
+                f"{getattr(self, field):.2f}"
+                if field == "average_references_per_pano"
+                else str(getattr(self, field)),
+            ]
             for field in self.FIELD_LABELS.keys()
         ]
 
@@ -307,24 +339,26 @@ class DuplicateStats:
             headers=["Metric", "Value"],
             tablefmt="simple",
             numalign="right",
-            stralign="left"
+            stralign="left",
         )
+
 
 @dataclass
 class YearlyDistribution:
     """Distribution of panoramas by year."""
-    counts: Dict[int, int]
 
-    def to_rows(self) -> List[List[str]]:
+    counts: dict[int, int]
+
+    def to_rows(self) -> list[list[str]]:
         """Convert distribution to formatted rows for tabulation."""
         total_panos = sum(self.counts.values())
         rows = []
-        
+
         for year in sorted(self.counts.keys()):
             count = self.counts[year]
             percentage = (count / total_panos) * 100
             rows.append([str(year), str(count), f"{percentage:.2f}%"])
-        
+
         # Add total row
         rows.append(["TOTAL", str(total_panos), "100.00%"])
         return rows
@@ -337,24 +371,26 @@ class YearlyDistribution:
             tablefmt="simple",
             floatfmt=".2f",
             numalign="right",
-            stralign="left"
+            stralign="left",
         )
+
 
 @dataclass
 class DailyDistribution:
     """Distribution of panoramas by day."""
-    counts: Dict[str, int]  # Maps ISO date strings (YYYY-MM-DD) to counts
 
-    def to_rows(self) -> List[List[str]]:
+    counts: dict[str, int]  # Maps ISO date strings (YYYY-MM-DD) to counts
+
+    def to_rows(self) -> list[list[str]]:
         """Convert distribution to formatted rows for tabulation."""
         total_panos = sum(self.counts.values())
         rows = []
-        
+
         for date in sorted(self.counts.keys()):
             count = self.counts[date]
             percentage = (count / total_panos) * 100
             rows.append([date, str(count), f"{percentage:.2f}%"])
-        
+
         # Add total row
         rows.append(["TOTAL", str(total_panos), "100.00%"])
         return rows
@@ -367,35 +403,31 @@ class DailyDistribution:
             tablefmt="simple",
             floatfmt=".2f",
             numalign="right",
-            stralign="left"
+            stralign="left",
         )
+
 
 @dataclass
 class PhotographerStats:
     """Statistics about photographer contributions."""
-    photographer_counts: Dict[str, int]  # Maps photographer name to unique pano count
+
+    photographer_counts: dict[str, int]  # Maps photographer name to unique pano count
     top_n: int = 5  # Number of top photographers to show
 
-    def to_rows(self) -> List[List[str]]:
+    def to_rows(self) -> list[list[str]]:
         """Convert stats to formatted rows for tabulation."""
         total_panos = sum(self.photographer_counts.values())
         rows = []
-        
+
         # Sort by count and take top N
         sorted_photographers = sorted(
-            self.photographer_counts.items(), 
-            key=lambda x: x[1], 
-            reverse=True
-        )[:self.top_n]
-        
+            self.photographer_counts.items(), key=lambda x: x[1], reverse=True
+        )[: self.top_n]
+
         for photographer, count in sorted_photographers:
             percentage = (count / total_panos) * 100
-            rows.append([
-                photographer,
-                f"{count:,}",
-                f"{percentage:.2f}%"
-            ])
-            
+            rows.append([photographer, f"{count:,}", f"{percentage:.2f}%"])
+
         return rows
 
     def format_table(self, title: str = "Top Photographers by Unique Panoramas") -> str:
@@ -406,12 +438,14 @@ class PhotographerStats:
             tablefmt="simple",
             floatfmt=".2f",
             numalign="right",
-            stralign="left"
+            stralign="left",
         )
+
 
 @dataclass
 class GSVAnalysisResults:
     """Complete set of GSV metadata analysis results."""
+
     duplicate_stats: DuplicateStats
     age_stats: AgeStats
     coverage_stats: CoverageStats
@@ -431,62 +465,63 @@ class GSVAnalysisResults:
         print(self.duplicate_stats.format_table())
 
         print(self.age_stats.format_table())
-        
+
         print("\nPhotographer Statistics")
         print(self.photographer_stats.format_table())
-        
+
         print("\nYearly and Daily Distributions")
         print(self.yearly_distribution.format_table())
         print(self.daily_distribution.format_table())
 
+
 def calculate_daily_distribution(df: pd.DataFrame) -> DailyDistribution:
     """
     Calculate distribution of panoramas by date (YYYY-MM-DD).
-    
+
     Args:
         df: DataFrame containing panorama data with capture_date column
-        
+
     Returns:
         DailyDistribution object containing date-wise counts
     """
     if len(df) == 0:
         return DailyDistribution(counts={})
-    
+
     # Convert capture_date to datetime if necessary
-    if not pd.api.types.is_datetime64_any_dtype(df['capture_date']):
-        df['capture_date'] = pd.to_datetime(df['capture_date'])
-    
+    if not pd.api.types.is_datetime64_any_dtype(df["capture_date"]):
+        df["capture_date"] = pd.to_datetime(df["capture_date"])
+
     # Use ISO format for dates (YYYY-MM-DD)
-    date_counts = df['capture_date'].apply(lambda x: x.date().isoformat()).value_counts().sort_index()
-    
-    # Convert counts to integers while maintaining ISO date strings as keys
-    return DailyDistribution(
-        counts={date: int(count) for date, count in date_counts.items()}
+    date_counts = (
+        df["capture_date"].apply(lambda x: x.date().isoformat()).value_counts().sort_index()
     )
+
+    # Convert counts to integers while maintaining ISO date strings as keys
+    return DailyDistribution(counts={date: int(count) for date, count in date_counts.items()})
+
 
 def calculate_photographer_stats(df: pd.DataFrame) -> PhotographerStats:
     """
     Calculate photographer contribution statistics.
-    
+
     Args:
         df: DataFrame containing GSV metadata with 'copyright_info' and 'pano_id' columns
-        
+
     Returns:
         PhotographerStats containing photographer contribution analysis
     """
     # Filter for present panoramas (OK or NO_DATE) and drop duplicates; a
     # dateless pano still carries its contributor/copyright attribution.
-    present_panos = df[df['status'].isin(PRESENT_STATUSES)].drop_duplicates(subset=['pano_id'])
+    present_panos = df[df["status"].isin(PRESENT_STATUSES)].drop_duplicates(subset=["pano_id"])
 
     # Count unique pano_ids per photographer
-    photographer_counts = present_panos['copyright_info'].value_counts().to_dict()
-    
+    photographer_counts = present_panos["copyright_info"].value_counts().to_dict()
+
     return PhotographerStats(photographer_counts=photographer_counts)
 
+
 def calculate_pano_stats(
-    df: pd.DataFrame, 
-    now: pd.Timestamp,
-    google_only: bool = False
+    df: pd.DataFrame, now: pd.Timestamp, google_only: bool = False
 ) -> GSVAnalysisResults:
     """
     Calculate comprehensive panorama statistics from a DataFrame.
@@ -506,21 +541,23 @@ def calculate_pano_stats(
         >>> results = calculate_pano_stats(df, now)
         >>> results.print_summary("Analysis Results")
     """
-    filtered_df = df[is_google_copyright(df['copyright_info'])] if google_only else df
+    filtered_df = df[is_google_copyright(df["copyright_info"])] if google_only else df
 
     # Present panoramas (OK or NO_DATE) count toward pano totals; date-based
     # stats below use only the dated (OK) subset.
-    present_panos = filtered_df[filtered_df['status'].isin(PRESENT_STATUSES)].copy()
+    present_panos = filtered_df[filtered_df["status"].isin(PRESENT_STATUSES)].copy()
 
     # Calculate duplicate statistics over every present pano
-    pano_id_counts = present_panos['pano_id'].value_counts()
+    pano_id_counts = present_panos["pano_id"].value_counts()
     duplicate_stats = DuplicateStats(
         total_unique_panos=len(pano_id_counts),
         total_pano_references=len(present_panos),
         duplicate_reference_count=len(present_panos) - len(pano_id_counts),
         most_referenced_count=int(pano_id_counts.max()) if not pano_id_counts.empty else 0,
         panos_with_multiple_refs=int((pano_id_counts > 1).sum()),
-        average_references_per_pano=float(len(present_panos) / len(pano_id_counts)) if len(pano_id_counts) > 0 else 0
+        average_references_per_pano=float(len(present_panos) / len(pano_id_counts))
+        if len(pano_id_counts) > 0
+        else 0,
     )
 
     # For most stats, we want to focus only on unique pano ids or we risk
@@ -528,7 +565,7 @@ def calculate_pano_stats(
     # from different query points
 
     # Age / capture-year / daily stats need a real date, so use dated panos only
-    dated_unique = filtered_df[filtered_df['status'] == 'OK'].drop_duplicates(subset=['pano_id'])
+    dated_unique = filtered_df[filtered_df["status"] == "OK"].drop_duplicates(subset=["pano_id"])
     age_stats = calculate_age_stats(dated_unique, now)
 
     # Coverage describes the sampled grid, not the copyright subset, so it
@@ -540,34 +577,33 @@ def calculate_pano_stats(
     yearly_dist = calculate_yearly_distribution(dated_unique)
     daily_dist = calculate_daily_distribution(dated_unique)
     photographer_stats = calculate_photographer_stats(present_panos)
-    
+
     return GSVAnalysisResults(
         duplicate_stats=duplicate_stats,
         age_stats=age_stats,
         coverage_stats=coverage_stats,
         yearly_distribution=yearly_dist,
         daily_distribution=daily_dist,
-        photographer_stats=photographer_stats
+        photographer_stats=photographer_stats,
     )
+
 
 def calculate_yearly_distribution(df: pd.DataFrame) -> YearlyDistribution:
     """Calculate distribution of panoramas by year."""
     if len(df) == 0:
         return YearlyDistribution(counts={})
-    
-    # Convert capture_date to datetime if necessary
-    if not pd.api.types.is_datetime64_any_dtype(df['capture_date']):
-        df['capture_date'] = pd.to_datetime(df['capture_date'])
-    
-    # Extract year and count occurrences
-    year_counts = df['capture_date'].dt.year.value_counts().sort_index()
-    
-    return YearlyDistribution(
-        counts={int(year): int(count) for year, count in year_counts.items()}
-    )
 
-def calculate_run_stats(df: pd.DataFrame, run_date,
-                        provider: str = 'gsv') -> Dict[str, Any]:
+    # Convert capture_date to datetime if necessary
+    if not pd.api.types.is_datetime64_any_dtype(df["capture_date"]):
+        df["capture_date"] = pd.to_datetime(df["capture_date"])
+
+    # Extract year and count occurrences
+    year_counts = df["capture_date"].dt.year.value_counts().sort_index()
+
+    return YearlyDistribution(counts={int(year): int(count) for year, count in year_counts.items()})
+
+
+def calculate_run_stats(df: pd.DataFrame, run_date, provider: str = "gsv") -> dict[str, Any]:
     """
     Compute the per-run summary stats stored in the runs catalog table.
 
@@ -589,47 +625,45 @@ def calculate_run_stats(df: pd.DataFrame, run_date,
     """
     now = pd.Timestamp(run_date)
 
-    status_ok = int((df['status'] == 'OK').sum())
-    status_no_date = int((df['status'] == 'NO_DATE').sum())
-    status_zero = int((df['status'] == 'ZERO_RESULTS').sum())
+    status_ok = int((df["status"] == "OK").sum())
+    status_no_date = int((df["status"] == "NO_DATE").sum())
+    status_zero = int((df["status"] == "ZERO_RESULTS").sum())
     status_other = int(len(df) - status_ok - status_no_date - status_zero)
 
     # Pano totals count every present pano (OK or NO_DATE); age stats use only
     # the dated subset, since NO_DATE panos carry no usable capture date.
-    present = df[df['status'].isin(PRESENT_STATUSES)]
-    unique = present.drop_duplicates(subset=['pano_id'])
+    present = df[df["status"].isin(PRESENT_STATUSES)]
+    unique = present.drop_duplicates(subset=["pano_id"])
     unique_google_panos = None
-    if provider == 'gsv' and not (len(unique) > 0
-                                  and unique['copyright_info'].isna().all()):
-        is_google = is_google_copyright(unique['copyright_info'])
+    if provider == "gsv" and not (len(unique) > 0 and unique["copyright_info"].isna().all()):
+        is_google = is_google_copyright(unique["copyright_info"])
         unique_google_panos = int(is_google.sum())
 
-    dated_unique = df[df['status'] == 'OK'].drop_duplicates(subset=['pano_id'])
+    dated_unique = df[df["status"] == "OK"].drop_duplicates(subset=["pano_id"])
     age_stats = calculate_age_stats(dated_unique.copy(), now)
     coverage = calculate_coverage_stats(df)
 
     return {
-        'total_points': len(df),
-        'status_ok': status_ok,
-        'status_no_date': status_no_date,
-        'status_zero_results': status_zero,
-        'status_other': status_other,
-        'unique_panos': len(unique),
-        'unique_google_panos': unique_google_panos,
-        'coverage_rate_pct': coverage.coverage_rate,
-        'oldest_capture_date': age_stats.oldest_pano_date,
-        'newest_capture_date': age_stats.newest_pano_date,
-        'median_pano_age_years': age_stats.median_pano_age_years,
+        "total_points": len(df),
+        "status_ok": status_ok,
+        "status_no_date": status_no_date,
+        "status_zero_results": status_zero,
+        "status_other": status_other,
+        "unique_panos": len(unique),
+        "unique_google_panos": unique_google_panos,
+        "coverage_rate_pct": coverage.coverage_rate,
+        "oldest_capture_date": age_stats.oldest_pano_date,
+        "newest_capture_date": age_stats.newest_pano_date,
+        "median_pano_age_years": age_stats.median_pano_age_years,
     }
 
 
 # Response statuses meaning the request itself was rejected
 # (credentials/quota), as opposed to "no imagery here" (ZERO_RESULTS)
-SYSTEMIC_FAILURE_STATUSES = ('REQUEST_DENIED', 'OVER_QUERY_LIMIT')
+SYSTEMIC_FAILURE_STATUSES = ("REQUEST_DENIED", "OVER_QUERY_LIMIT")
 
 
-def detect_systemic_failure(df: pd.DataFrame,
-                            threshold: float = 0.95) -> Optional[str]:
+def detect_systemic_failure(df: pd.DataFrame, threshold: float = 0.95) -> str | None:
     """
     Detect a run whose responses are dominated by credential/quota denials.
 
@@ -659,51 +693,53 @@ def detect_systemic_failure(df: pd.DataFrame,
     """
     if len(df) == 0:
         return None
-    counts = df['status'].value_counts()
+    counts = df["status"].value_counts()
     denied = int(sum(counts.get(s, 0) for s in SYSTEMIC_FAILURE_STATUSES))
     fraction = denied / len(df)
     if fraction < threshold:
         return None
-    breakdown = ", ".join(f"{s}={int(counts[s])}"
-                          for s in SYSTEMIC_FAILURE_STATUSES if s in counts)
-    return (f"{denied:,} of {len(df):,} responses ({fraction:.0%}) were "
-            f"denied ({breakdown}) — check the API credential/quota")
+    breakdown = ", ".join(f"{s}={int(counts[s])}" for s in SYSTEMIC_FAILURE_STATUSES if s in counts)
+    return (
+        f"{denied:,} of {len(df):,} responses ({fraction:.0%}) were "
+        f"denied ({breakdown}) — check the API credential/quota"
+    )
 
 
-def analyze_gsv_status(df: pd.DataFrame) -> Dict[str, Any]:
+def analyze_gsv_status(df: pd.DataFrame) -> dict[str, Any]:
     """
     Analyze GSV metadata status codes in a DataFrame.
-    
+
     Args:
         df: DataFrame containing GSV metadata
-        
+
     Returns:
         Dictionary containing status analysis including counts and percentages
-        
+
     Raises:
         ValueError: If no status column is found in the DataFrame
     """
     # Get the status column
-    status_cols = [col for col in df.columns if 'status' in col.lower()]
+    status_cols = [col for col in df.columns if "status" in col.lower()]
     if not status_cols:
         raise ValueError("No status column found in DataFrame")
     status_col = status_cols[0]
-    
+
     # Calculate status statistics
     status_counts = Counter(df[status_col])
     total_records = len(df)
-    
+
     return {
         "total_records": total_records,
         "status_counts": dict(status_counts),
         "status_percentages": {
-            status: (count/total_records * 100) 
-            for status, count in status_counts.items()
-        }
+            status: (count / total_records * 100) for status, count in status_counts.items()
+        },
     }
 
-def print_df_summary(df: pd.DataFrame, now: Optional[pd.Timestamp] = None,
-                     provider: str = 'gsv') -> None:
+
+def print_df_summary(
+    df: pd.DataFrame, now: pd.Timestamp | None = None, provider: str = "gsv"
+) -> None:
     """
     Print a comprehensive summary of download results.
 
@@ -722,7 +758,7 @@ def print_df_summary(df: pd.DataFrame, now: Optional[pd.Timestamp] = None,
     print("=" * 40)
     all_stats.print_summary()
 
-    if provider == 'gsv':
+    if provider == "gsv":
         google_stats = calculate_pano_stats(df, timestamp, google_only=True)
         print("\nGoogle Panoramas Only")
         print("=" * 40)

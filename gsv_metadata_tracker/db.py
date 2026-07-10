@@ -21,8 +21,7 @@ import logging
 import os
 import sqlite3
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
-from typing import List, Optional
+from datetime import UTC, date, datetime
 
 from .naming import sanitize_city_query_str
 
@@ -229,13 +228,14 @@ ALTER TABLE runs ADD COLUMN status_no_date INTEGER;
 @dataclass
 class CityRow:
     """A row from the cities table."""
+
     city_id: str
     display_name: str
     city_name: str
-    state_name: Optional[str]
-    state_code: Optional[str]
-    country_name: Optional[str]
-    country_code: Optional[str]
+    state_name: str | None
+    state_code: str | None
+    country_name: str | None
+    country_code: str | None
     center_lat: float
     center_lon: float
     grid_width_m: int
@@ -243,39 +243,40 @@ class CityRow:
     step_m: int
     created_at: str
     enabled: bool
-    notes: Optional[str]
+    notes: str | None
 
 
 @dataclass
 class RunRow:
     """A row from the runs table."""
+
     run_id: int
     city_id: str
     provider: str
     run_date: str
     csv_filename: str
-    json_filename: Optional[str]
+    json_filename: str | None
     is_baseline: bool
-    started_at: Optional[str]
-    finished_at: Optional[str]
-    duration_seconds: Optional[float]
-    total_points: Optional[int]
-    status_ok: Optional[int]
-    status_no_date: Optional[int]
-    status_zero_results: Optional[int]
-    status_other: Optional[int]
-    unique_panos: Optional[int]
-    unique_google_panos: Optional[int]
-    coverage_rate_pct: Optional[float]
-    oldest_capture_date: Optional[str]
-    newest_capture_date: Optional[str]
-    median_pano_age_years: Optional[float]
-    api_requests: Optional[int]
+    started_at: str | None
+    finished_at: str | None
+    duration_seconds: float | None
+    total_points: int | None
+    status_ok: int | None
+    status_no_date: int | None
+    status_zero_results: int | None
+    status_other: int | None
+    unique_panos: int | None
+    unique_google_panos: int | None
+    coverage_rate_pct: float | None
+    oldest_capture_date: str | None
+    newest_capture_date: str | None
+    median_pano_age_years: float | None
+    api_requests: int | None
 
 
 def utc_now_iso() -> str:
     """Current UTC time as an ISO 8601 string."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def get_default_db_path(data_dir: str) -> str:
@@ -304,7 +305,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
     if user_version > SCHEMA_VERSION:
         raise RuntimeError(
             f"Database schema version {user_version} is newer than this code "
-            f"supports ({SCHEMA_VERSION}). Update the code before proceeding.")
+            f"supports ({SCHEMA_VERSION}). Update the code before proceeding."
+        )
     if user_version == 1:
         _migrate_v1_to_v2(conn)
         user_version = 2
@@ -332,8 +334,7 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
         conn.executescript(_MIGRATE_V1_TO_V2)
         violations = conn.execute("PRAGMA foreign_key_check").fetchall()
         if violations:
-            raise RuntimeError(
-                f"Schema migration produced foreign key violations: {violations}")
+            raise RuntimeError(f"Schema migration produced foreign key violations: {violations}")
         conn.commit()
     finally:
         conn.execute("PRAGMA foreign_keys=ON")
@@ -347,15 +348,14 @@ def _migrate_v3_to_v4(conn: sqlite3.Connection) -> None:
     column) can still be stamped forward through this step.
     """
     cols = {r[1] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
-    if 'status_no_date' in cols:
+    if "status_no_date" in cols:
         return
     logger.info("Migrating catalog schema v3 -> v4 (adding runs.status_no_date)")
     conn.executescript(_MIGRATE_V3_TO_V4)
     conn.commit()
 
 
-def derive_city_id(city_name: str, state_name: Optional[str],
-                   country_name: Optional[str]) -> str:
+def derive_city_id(city_name: str, state_name: str | None, country_name: str | None) -> str:
     """
     Canonical city id: the sanitized slug of the full (never abbreviated)
     location names, e.g. 'albany--new-york--united-states'. Derived once at
@@ -365,18 +365,21 @@ def derive_city_id(city_name: str, state_name: Optional[str],
     return sanitize_city_query_str(", ".join(components))
 
 
-def register_city(conn: sqlite3.Connection, *,
-                  city_name: str,
-                  state_name: Optional[str],
-                  state_code: Optional[str],
-                  country_name: Optional[str],
-                  country_code: Optional[str],
-                  center_lat: float,
-                  center_lon: float,
-                  grid_width_m: float,
-                  grid_height_m: float,
-                  step_m: float,
-                  notes: Optional[str] = None) -> str:
+def register_city(
+    conn: sqlite3.Connection,
+    *,
+    city_name: str,
+    state_name: str | None,
+    state_code: str | None,
+    country_name: str | None,
+    country_code: str | None,
+    center_lat: float,
+    center_lon: float,
+    grid_width_m: float,
+    grid_height_m: float,
+    step_m: float,
+    notes: str | None = None,
+) -> str:
     """
     Register a city with its frozen grid geometry. Idempotent: if the city
     already exists, the existing row wins (geometry is never overwritten).
@@ -391,20 +394,36 @@ def register_city(conn: sqlite3.Connection, *,
             country_name, country_code, center_lat, center_lon,
             grid_width_m, grid_height_m, step_m, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (city_id, ", ".join(display_parts), city_name, state_name, state_code,
-         country_name, country_code, center_lat, center_lon,
-         int(grid_width_m), int(grid_height_m), int(step_m), utc_now_iso()))
+        (
+            city_id,
+            ", ".join(display_parts),
+            city_name,
+            state_name,
+            state_code,
+            country_name,
+            country_code,
+            center_lat,
+            center_lon,
+            int(grid_width_m),
+            int(grid_height_m),
+            int(step_m),
+            utc_now_iso(),
+        ),
+    )
     conn.commit()
     return city_id
 
 
-def update_city_geometry(conn: sqlite3.Connection, *,
-                         city_id: str,
-                         center_lat: float,
-                         center_lon: float,
-                         grid_width_m: float,
-                         grid_height_m: float,
-                         notes: Optional[str] = None) -> None:
+def update_city_geometry(
+    conn: sqlite3.Connection,
+    *,
+    city_id: str,
+    center_lat: float,
+    center_lon: float,
+    grid_width_m: float,
+    grid_height_m: float,
+    notes: str | None = None,
+) -> None:
     """
     Overwrite a city's frozen grid geometry (center + dimensions).
 
@@ -418,9 +437,8 @@ def update_city_geometry(conn: sqlite3.Connection, *,
     notes so the correction leaves an audit trail on the row.
     """
     if notes:
-        existing = conn.execute(
-            "SELECT notes FROM cities WHERE city_id = ?", (city_id,)).fetchone()
-        prior = existing['notes'] if existing and existing['notes'] else None
+        existing = conn.execute("SELECT notes FROM cities WHERE city_id = ?", (city_id,)).fetchone()
+        prior = existing["notes"] if existing and existing["notes"] else None
         notes = f"{prior}\n{notes}" if prior else notes
 
     cur = conn.execute(
@@ -429,8 +447,8 @@ def update_city_geometry(conn: sqlite3.Connection, *,
                grid_width_m = ?, grid_height_m = ?,
                notes = COALESCE(?, notes)
            WHERE city_id = ?""",
-        (center_lat, center_lon, int(grid_width_m), int(grid_height_m),
-         notes, city_id))
+        (center_lat, center_lon, int(grid_width_m), int(grid_height_m), notes, city_id),
+    )
     if cur.rowcount == 0:
         raise KeyError(f"Cannot update geometry: unknown city_id '{city_id}'")
     conn.commit()
@@ -440,11 +458,12 @@ def add_alias(conn: sqlite3.Connection, alias_slug: str, city_id: str) -> None:
     """Map a legacy filename slug (e.g. 'albany--ny') to a canonical city."""
     conn.execute(
         "INSERT OR IGNORE INTO city_aliases (alias_slug, city_id) VALUES (?, ?)",
-        (alias_slug, city_id))
+        (alias_slug, city_id),
+    )
     conn.commit()
 
 
-def resolve_city(conn: sqlite3.Connection, query: str) -> Optional[CityRow]:
+def resolve_city(conn: sqlite3.Connection, query: str) -> CityRow | None:
     """
     Resolve a city query string or slug to its catalog row.
 
@@ -452,46 +471,50 @@ def resolve_city(conn: sqlite3.Connection, query: str) -> Optional[CityRow]:
     match, then a display_name match (case-insensitive).
     """
     slug = sanitize_city_query_str(query)
-    row = conn.execute(
-        "SELECT * FROM cities WHERE city_id = ?", (slug,)).fetchone()
+    row = conn.execute("SELECT * FROM cities WHERE city_id = ?", (slug,)).fetchone()
     if row is None:
         row = conn.execute(
             """SELECT c.* FROM cities c
                JOIN city_aliases a ON a.city_id = c.city_id
-               WHERE a.alias_slug = ?""", (slug,)).fetchone()
+               WHERE a.alias_slug = ?""",
+            (slug,),
+        ).fetchone()
     if row is None:
         row = conn.execute(
-            "SELECT * FROM cities WHERE lower(display_name) = lower(?)",
-            (query.strip(),)).fetchone()
+            "SELECT * FROM cities WHERE lower(display_name) = lower(?)", (query.strip(),)
+        ).fetchone()
     if row is None:
         return None
     d = dict(row)
-    d['enabled'] = bool(d['enabled'])
+    d["enabled"] = bool(d["enabled"])
     return CityRow(**d)
 
 
-def register_run(conn: sqlite3.Connection, *,
-                 city_id: str,
-                 run_date: date,
-                 csv_filename: str,
-                 provider: str = 'gsv',
-                 json_filename: Optional[str] = None,
-                 is_baseline: bool = False,
-                 started_at: Optional[str] = None,
-                 finished_at: Optional[str] = None,
-                 duration_seconds: Optional[float] = None,
-                 total_points: Optional[int] = None,
-                 status_ok: Optional[int] = None,
-                 status_no_date: Optional[int] = None,
-                 status_zero_results: Optional[int] = None,
-                 status_other: Optional[int] = None,
-                 unique_panos: Optional[int] = None,
-                 unique_google_panos: Optional[int] = None,
-                 coverage_rate_pct: Optional[float] = None,
-                 oldest_capture_date: Optional[str] = None,
-                 newest_capture_date: Optional[str] = None,
-                 median_pano_age_years: Optional[float] = None,
-                 api_requests: Optional[int] = None) -> int:
+def register_run(
+    conn: sqlite3.Connection,
+    *,
+    city_id: str,
+    run_date: date,
+    csv_filename: str,
+    provider: str = "gsv",
+    json_filename: str | None = None,
+    is_baseline: bool = False,
+    started_at: str | None = None,
+    finished_at: str | None = None,
+    duration_seconds: float | None = None,
+    total_points: int | None = None,
+    status_ok: int | None = None,
+    status_no_date: int | None = None,
+    status_zero_results: int | None = None,
+    status_other: int | None = None,
+    unique_panos: int | None = None,
+    unique_google_panos: int | None = None,
+    coverage_rate_pct: float | None = None,
+    oldest_capture_date: str | None = None,
+    newest_capture_date: str | None = None,
+    median_pano_age_years: float | None = None,
+    api_requests: int | None = None,
+) -> int:
     """
     Register a completed collection run. Raises sqlite3.IntegrityError if a
     run already exists for (city_id, provider, run_date) or the csv_filename
@@ -508,72 +531,90 @@ def register_run(conn: sqlite3.Connection, *,
             oldest_capture_date, newest_capture_date, median_pano_age_years,
             api_requests)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (city_id, provider, run_date.isoformat(), csv_filename, json_filename,
-         int(is_baseline), started_at, finished_at, duration_seconds,
-         total_points, status_ok, status_no_date, status_zero_results,
-         status_other, unique_panos, unique_google_panos, coverage_rate_pct,
-         oldest_capture_date, newest_capture_date, median_pano_age_years,
-         api_requests))
+        (
+            city_id,
+            provider,
+            run_date.isoformat(),
+            csv_filename,
+            json_filename,
+            int(is_baseline),
+            started_at,
+            finished_at,
+            duration_seconds,
+            total_points,
+            status_ok,
+            status_no_date,
+            status_zero_results,
+            status_other,
+            unique_panos,
+            unique_google_panos,
+            coverage_rate_pct,
+            oldest_capture_date,
+            newest_capture_date,
+            median_pano_age_years,
+            api_requests,
+        ),
+    )
     conn.commit()
     return cur.lastrowid
 
 
-def update_run_json_filename(conn: sqlite3.Connection, run_id: int,
-                             json_filename: str) -> None:
+def update_run_json_filename(conn: sqlite3.Connection, run_id: int, json_filename: str) -> None:
     """Record the per-run summary JSON filename after it is generated."""
-    conn.execute("UPDATE runs SET json_filename = ? WHERE run_id = ?",
-                 (json_filename, run_id))
+    conn.execute("UPDATE runs SET json_filename = ? WHERE run_id = ?", (json_filename, run_id))
     conn.commit()
 
 
 def _row_to_run(row: sqlite3.Row) -> RunRow:
     d = dict(row)
-    d['is_baseline'] = bool(d['is_baseline'])
+    d["is_baseline"] = bool(d["is_baseline"])
     return RunRow(**d)
 
 
-def get_latest_run(conn: sqlite3.Connection, city_id: str,
-                   provider: str = 'gsv') -> Optional[RunRow]:
+def get_latest_run(conn: sqlite3.Connection, city_id: str, provider: str = "gsv") -> RunRow | None:
     """Most recent run for a (city, provider) by run_date, or None."""
     row = conn.execute(
         """SELECT * FROM runs WHERE city_id = ? AND provider = ?
            ORDER BY run_date DESC LIMIT 1""",
-        (city_id, provider)).fetchone()
+        (city_id, provider),
+    ).fetchone()
     return _row_to_run(row) if row else None
 
 
-def get_previous_run(conn: sqlite3.Connection, city_id: str,
-                     before_date: date,
-                     provider: str = 'gsv') -> Optional[RunRow]:
+def get_previous_run(
+    conn: sqlite3.Connection, city_id: str, before_date: date, provider: str = "gsv"
+) -> RunRow | None:
     """Most recent run strictly before the given date, or None."""
     row = conn.execute(
         """SELECT * FROM runs WHERE city_id = ? AND provider = ?
            AND run_date < ?
            ORDER BY run_date DESC LIMIT 1""",
-        (city_id, provider, before_date.isoformat())).fetchone()
+        (city_id, provider, before_date.isoformat()),
+    ).fetchone()
     return _row_to_run(row) if row else None
 
 
-def get_runs_for_city(conn: sqlite3.Connection, city_id: str,
-                      provider: Optional[str] = 'gsv') -> List[RunRow]:
+def get_runs_for_city(
+    conn: sqlite3.Connection, city_id: str, provider: str | None = "gsv"
+) -> list[RunRow]:
     """
     Runs for a city, oldest first. provider=None returns runs for all
     providers (used by the aggregate builder, which groups them itself).
     """
     if provider is None:
         rows = conn.execute(
-            "SELECT * FROM runs WHERE city_id = ? ORDER BY run_date ASC",
-            (city_id,)).fetchall()
+            "SELECT * FROM runs WHERE city_id = ? ORDER BY run_date ASC", (city_id,)
+        ).fetchall()
     else:
         rows = conn.execute(
             """SELECT * FROM runs WHERE city_id = ? AND provider = ?
                ORDER BY run_date ASC""",
-            (city_id, provider)).fetchall()
+            (city_id, provider),
+        ).fetchall()
     return [_row_to_run(r) for r in rows]
 
 
-def get_all_cities(conn: sqlite3.Connection,
-                   enabled_only: bool = False) -> List[CityRow]:
+def get_all_cities(conn: sqlite3.Connection, enabled_only: bool = False) -> list[CityRow]:
     """All registered cities, ordered by city_id."""
     sql = "SELECT * FROM cities"
     if enabled_only:
@@ -582,24 +623,27 @@ def get_all_cities(conn: sqlite3.Connection,
     out = []
     for row in conn.execute(sql).fetchall():
         d = dict(row)
-        d['enabled'] = bool(d['enabled'])
+        d["enabled"] = bool(d["enabled"])
         out.append(CityRow(**d))
     return out
 
 
-def record_diff(conn: sqlite3.Connection, *,
-                city_id: str,
-                from_run_id: int,
-                to_run_id: int,
-                grid_aligned: bool,
-                panos_added: int,
-                panos_removed: int,
-                panos_persisted: int,
-                capture_date_changed: int,
-                points_gained_coverage: Optional[int],
-                points_lost_coverage: Optional[int],
-                coverage_delta_pct: Optional[float],
-                detail_filename: Optional[str]) -> int:
+def record_diff(
+    conn: sqlite3.Connection,
+    *,
+    city_id: str,
+    from_run_id: int,
+    to_run_id: int,
+    grid_aligned: bool,
+    panos_added: int,
+    panos_removed: int,
+    panos_persisted: int,
+    capture_date_changed: int,
+    points_gained_coverage: int | None,
+    points_lost_coverage: int | None,
+    coverage_delta_pct: float | None,
+    detail_filename: str | None,
+) -> int:
     """Store a run-to-run diff summary. Idempotent on (from_run, to_run)."""
     cur = conn.execute(
         """INSERT OR REPLACE INTO run_diffs
@@ -608,35 +652,49 @@ def record_diff(conn: sqlite3.Connection, *,
             points_gained_coverage, points_lost_coverage, coverage_delta_pct,
             detail_filename, computed_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (city_id, from_run_id, to_run_id, int(grid_aligned),
-         panos_added, panos_removed, panos_persisted, capture_date_changed,
-         points_gained_coverage, points_lost_coverage, coverage_delta_pct,
-         detail_filename, utc_now_iso()))
+        (
+            city_id,
+            from_run_id,
+            to_run_id,
+            int(grid_aligned),
+            panos_added,
+            panos_removed,
+            panos_persisted,
+            capture_date_changed,
+            points_gained_coverage,
+            points_lost_coverage,
+            coverage_delta_pct,
+            detail_filename,
+            utc_now_iso(),
+        ),
+    )
     conn.commit()
     return cur.lastrowid
 
 
-def get_diff_for_run(conn: sqlite3.Connection,
-                     to_run_id: int) -> Optional[sqlite3.Row]:
+def get_diff_for_run(conn: sqlite3.Connection, to_run_id: int) -> sqlite3.Row | None:
     """The diff whose 'to' side is the given run, or None."""
-    return conn.execute(
-        "SELECT * FROM run_diffs WHERE to_run_id = ?", (to_run_id,)).fetchone()
+    return conn.execute("SELECT * FROM run_diffs WHERE to_run_id = ?", (to_run_id,)).fetchone()
 
 
 # ── Historical-dates harvests (issue #2) ───────────────────────────────────
 
-def register_history_harvest(conn: sqlite3.Connection, *,
-                             city_id: str,
-                             harvest_date: date,
-                             csv_filename: str,
-                             provider: str = 'gsv',
-                             grid_points_queried: Optional[int] = None,
-                             unique_panos: Optional[int] = None,
-                             oldest_capture_date: Optional[str] = None,
-                             newest_capture_date: Optional[str] = None,
-                             api_requests: Optional[int] = None,
-                             started_at: Optional[str] = None,
-                             finished_at: Optional[str] = None) -> int:
+
+def register_history_harvest(
+    conn: sqlite3.Connection,
+    *,
+    city_id: str,
+    harvest_date: date,
+    csv_filename: str,
+    provider: str = "gsv",
+    grid_points_queried: int | None = None,
+    unique_panos: int | None = None,
+    oldest_capture_date: str | None = None,
+    newest_capture_date: str | None = None,
+    api_requests: int | None = None,
+    started_at: str | None = None,
+    finished_at: str | None = None,
+) -> int:
     """
     Catalog a completed historical-dates harvest. Idempotent on the filename
     and on (city_id, provider, harvest_date): re-harvesting the same city on the
@@ -645,7 +703,7 @@ def register_history_harvest(conn: sqlite3.Connection, *,
 
     Returns the harvest_id.
     """
-    cur = conn.execute(
+    conn.execute(
         """INSERT INTO history_harvests
            (city_id, provider, harvest_date, csv_filename, grid_points_queried,
             unique_panos, oldest_capture_date, newest_capture_date,
@@ -660,63 +718,80 @@ def register_history_harvest(conn: sqlite3.Connection, *,
              api_requests = excluded.api_requests,
              started_at = excluded.started_at,
              finished_at = excluded.finished_at""",
-        (city_id, provider, harvest_date.isoformat(), csv_filename,
-         grid_points_queried, unique_panos, oldest_capture_date,
-         newest_capture_date, api_requests, started_at, finished_at))
+        (
+            city_id,
+            provider,
+            harvest_date.isoformat(),
+            csv_filename,
+            grid_points_queried,
+            unique_panos,
+            oldest_capture_date,
+            newest_capture_date,
+            api_requests,
+            started_at,
+            finished_at,
+        ),
+    )
     conn.commit()
     row = conn.execute(
         """SELECT harvest_id FROM history_harvests
            WHERE city_id = ? AND provider = ? AND harvest_date = ?""",
-        (city_id, provider, harvest_date.isoformat())).fetchone()
-    return row['harvest_id']
+        (city_id, provider, harvest_date.isoformat()),
+    ).fetchone()
+    return row["harvest_id"]
 
 
-def get_latest_history_harvest(conn: sqlite3.Connection, city_id: str,
-                               provider: str = 'gsv') -> Optional[sqlite3.Row]:
+def get_latest_history_harvest(
+    conn: sqlite3.Connection, city_id: str, provider: str = "gsv"
+) -> sqlite3.Row | None:
     """Most recent history harvest for a (city, provider), or None."""
     return conn.execute(
         """SELECT * FROM history_harvests
            WHERE city_id = ? AND provider = ?
            ORDER BY harvest_date DESC LIMIT 1""",
-        (city_id, provider)).fetchone()
+        (city_id, provider),
+    ).fetchone()
 
 
 # ── API budget ledger ──────────────────────────────────────────────────────
 
-def add_api_usage(conn: sqlite3.Connection, usage_date: date, n: int,
-                  provider: str = 'gsv') -> None:
+
+def add_api_usage(
+    conn: sqlite3.Connection, usage_date: date, n: int, provider: str = "gsv"
+) -> None:
     """Add n requests to the given (date, provider) ledger row."""
     conn.execute(
         """INSERT INTO api_usage (usage_date, provider, requests)
            VALUES (?, ?, ?)
            ON CONFLICT(usage_date, provider)
            DO UPDATE SET requests = requests + ?""",
-        (usage_date.isoformat(), provider, n, n))
+        (usage_date.isoformat(), provider, n, n),
+    )
     conn.commit()
 
 
-def get_api_usage(conn: sqlite3.Connection, usage_date: date,
-                  provider: str = 'gsv') -> int:
+def get_api_usage(conn: sqlite3.Connection, usage_date: date, provider: str = "gsv") -> int:
     """Requests recorded for the given (date, provider) (0 if none)."""
     row = conn.execute(
         "SELECT requests FROM api_usage WHERE usage_date = ? AND provider = ?",
-        (usage_date.isoformat(), provider)).fetchone()
+        (usage_date.isoformat(), provider),
+    ).fetchone()
     return row[0] if row else 0
 
 
 # ── Scheduler state ────────────────────────────────────────────────────────
+
 
 def compute_day_of_cycle(city_id: str, cycle_days: int) -> int:
     """
     Stable stagger assignment: hash the city_id onto a day of the cycle.
     Deterministic across machines and runs.
     """
-    digest = hashlib.sha256(city_id.encode('utf-8')).hexdigest()
+    digest = hashlib.sha256(city_id.encode("utf-8")).hexdigest()
     return int(digest, 16) % cycle_days
 
 
-def assign_schedule(conn: sqlite3.Connection, cycle_days: int,
-                    providers: tuple = ('gsv',)) -> int:
+def assign_schedule(conn: sqlite3.Connection, cycle_days: int, providers: tuple = ("gsv",)) -> int:
     """
     Ensure every enabled city has a schedule_state row per provider with its
     day_of_cycle. The day is hashed from city_id alone, so all providers of
@@ -734,14 +809,21 @@ def assign_schedule(conn: sqlite3.Connection, cycle_days: int,
                    VALUES (?, ?, ?)
                    ON CONFLICT(city_id, provider)
                    DO UPDATE SET day_of_cycle = ?""",
-                (city.city_id, provider, day, day))
+                (city.city_id, provider, day, day),
+            )
     conn.commit()
     return len(cities)
 
 
-def get_due_cities(conn: sqlite3.Connection, *, today: date, cycle_days: int,
-                   grace_days: int, max_consecutive_failures: int,
-                   provider: str = 'gsv') -> List[CityRow]:
+def get_due_cities(
+    conn: sqlite3.Connection,
+    *,
+    today: date,
+    cycle_days: int,
+    grace_days: int,
+    max_consecutive_failures: int,
+    provider: str = "gsv",
+) -> list[CityRow]:
     """
     Cities due for collection today for the given provider, ordered
     stalest-first so backlog self-heals after outages.
@@ -761,20 +843,24 @@ def get_due_cities(conn: sqlite3.Connection, *, today: date, cycle_days: int,
              AND (s.last_success_at IS NULL
                   OR julianday(?) - julianday(s.last_success_at) >= ?)
            ORDER BY s.last_success_at ASC NULLS FIRST, c.city_id ASC""",
-        (provider, max_consecutive_failures, today.isoformat(),
-         threshold)).fetchall()
+        (provider, max_consecutive_failures, today.isoformat(), threshold),
+    ).fetchall()
     out = []
     for row in rows:
-        d = {k: row[k] for k in row.keys()
-             if k not in ('last_success_at', 'consecutive_failures')}
-        d['enabled'] = bool(d['enabled'])
+        d = {k: row[k] for k in row.keys() if k not in ("last_success_at", "consecutive_failures")}
+        d["enabled"] = bool(d["enabled"])
         out.append(CityRow(**d))
     return out
 
 
-def record_attempt(conn: sqlite3.Connection, city_id: str, *,
-                   success: bool, error: Optional[str] = None,
-                   provider: str = 'gsv') -> None:
+def record_attempt(
+    conn: sqlite3.Connection,
+    city_id: str,
+    *,
+    success: bool,
+    error: str | None = None,
+    provider: str = "gsv",
+) -> None:
     """Update schedule_state after a collection attempt."""
     now = utc_now_iso()
     if success:
@@ -786,7 +872,8 @@ def record_attempt(conn: sqlite3.Connection, city_id: str, *,
                ON CONFLICT(city_id, provider) DO UPDATE SET
                  last_attempt_at = ?, last_success_at = ?,
                  consecutive_failures = 0, last_error = NULL""",
-            (city_id, provider, now, now, now, now))
+            (city_id, provider, now, now, now, now),
+        )
     else:
         conn.execute(
             """INSERT INTO schedule_state
@@ -797,5 +884,6 @@ def record_attempt(conn: sqlite3.Connection, city_id: str, *,
                  last_attempt_at = ?,
                  consecutive_failures = consecutive_failures + 1,
                  last_error = ?""",
-            (city_id, provider, now, error, now, error))
+            (city_id, provider, now, error, now, error),
+        )
     conn.commit()
