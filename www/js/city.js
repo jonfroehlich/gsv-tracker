@@ -43,6 +43,15 @@ let copyrightAvailableGlobal = true; // false for archival GSV runs with no copy
 let providerGlobal = "gsv"; // derived from the data filename
 let oldestDateGlobal = null;
 let newestDateGlobal = null;
+
+/**
+ * Parse a pano capture date, returning null when the date is absent (age_stats
+ * are all null for a 0-pano run). Guards against `new Date(null)` silently
+ * rendering as the Unix epoch (12/31/1969) instead of "—".
+ * @param {?string} v - ISO date string, or null/undefined.
+ * @returns {?Date}
+ */
+const panoDateOrNull = (v) => (v ? new Date(v) : null);
 let runsGlobal = [];        // this city's run history from the aggregate
 let currentFileGlobal = ""; // csv.gz filename of the run being displayed
 let changeGlobal = null;    // change_from_previous_run block of this run
@@ -683,8 +692,8 @@ async function loadData() {
     statsGlobal = stats;
     copyrightAvailableGlobal = stats.copyright_info_available !== false;
     panoStatsGlobal = stats.google_panos ?? stats.all_panos;
-    oldestDateGlobal = new Date(panoStatsGlobal.age_stats.oldest_pano_date);
-    newestDateGlobal = new Date(panoStatsGlobal.age_stats.newest_pano_date);
+    oldestDateGlobal = panoDateOrNull(panoStatsGlobal.age_stats.oldest_pano_date);
+    newestDateGlobal = panoDateOrNull(panoStatsGlobal.age_stats.newest_pano_date);
 
     // Draw city bounds outline
     const bounds = stats.city.bounds;
@@ -695,8 +704,8 @@ async function loadData() {
       [bounds.max_lat, bounds.min_lon],
     ];
 
-    const oldestDate = new Date(panoStatsGlobal.age_stats.oldest_pano_date);
-    const newestDate = new Date(panoStatsGlobal.age_stats.newest_pano_date);
+    const oldestDate = panoDateOrNull(panoStatsGlobal.age_stats.oldest_pano_date);
+    const newestDate = panoDateOrNull(panoStatsGlobal.age_stats.newest_pano_date);
 
     const googleLine = stats.google_panos
       ? `Google panoramas: ${stats.google_panos.duplicate_stats.total_unique_panos.toLocaleString()}<br>`
@@ -714,8 +723,8 @@ async function loadData() {
         Search grid area: ${stats.search_grid.area_km2.toFixed(1)} km²<br>
         Total search points: ${stats.search_grid.total_search_points.toLocaleString()}<br>
         Grid step size: ${stats.search_grid.step_length_meters} meters<br><br>
-        Oldest pano: ${oldestDate.toLocaleDateString()}<br>
-        Newest pano: ${newestDate.toLocaleDateString()}<br>
+        Oldest pano: ${oldestDate ? oldestDate.toLocaleDateString() : "—"}<br>
+        Newest pano: ${newestDate ? newestDate.toLocaleDateString() : "—"}<br>
         Median age: ${fmtYears(panoStatsGlobal.age_stats.median_pano_age_years)}<br>
         Average age: ${fmtYears(panoStatsGlobal.age_stats.avg_pano_age_years)}
         ${panoStatsGlobal.age_stats.stdev_pano_age_years != null ? `(SD=${panoStatsGlobal.age_stats.stdev_pano_age_years.toFixed(1)} years)` : ""}<br><br>
