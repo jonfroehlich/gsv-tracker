@@ -87,7 +87,11 @@ function createTooltip(city) {
   // for other providers every pano is already provider imagery
   let panoLinesHtml = `<li>Total Panoramas: ${panoStats.unique_panos.toLocaleString()}</li>`;
   if (city.provider === "gsv" && panoStats.unique_google_panos != null) {
-    const googlePct = ((panoStats.unique_google_panos / panoStats.unique_panos) * 100).toFixed(1);
+    // Guard against a 0-pano run (issue #69): avoid a divide-by-zero
+    // "Infinity%" in the tooltip.
+    const googlePct = panoStats.unique_panos > 0
+      ? ((panoStats.unique_google_panos / panoStats.unique_panos) * 100).toFixed(1)
+      : "0.0";
     panoLinesHtml += `<li>Google Panoramas: ${panoStats.unique_google_panos.toLocaleString()} (${googlePct}%)</li>`;
   }
 
@@ -125,9 +129,9 @@ function createTooltip(city) {
     </ul>
     <div style="margin-top:12px"><strong>Age Statistics:</strong></div>
     <ul class="popup-stats-list">
-      <li>Median Age: ${ageStats.median_pano_age_years ? ageStats.median_pano_age_years.toFixed(1) + " years" : "No data"}</li>
-      <li>Average Age: ${ageStats.avg_pano_age_years ? ageStats.avg_pano_age_years.toFixed(1) + " years" : "No data"}
-        ${ageStats.stdev_pano_age_years ? ` (SD=${ageStats.stdev_pano_age_years.toFixed(1)})` : ""}</li>
+      <li>Median Age: ${ageStats.median_pano_age_years != null ? ageStats.median_pano_age_years.toFixed(1) + " years" : "No data"}</li>
+      <li>Average Age: ${ageStats.avg_pano_age_years != null ? ageStats.avg_pano_age_years.toFixed(1) + " years" : "No data"}
+        ${ageStats.stdev_pano_age_years != null ? ` (SD=${ageStats.stdev_pano_age_years.toFixed(1)})` : ""}</li>
       <li>Newest: ${ageStats.newest_pano_date ? new Date(ageStats.newest_pano_date).toLocaleDateString() : "No data"}</li>
       <li>Oldest: ${ageStats.oldest_pano_date ? new Date(ageStats.oldest_pano_date).toLocaleDateString() : "No data"}</li>
     </ul>
@@ -139,14 +143,20 @@ function createTooltip(city) {
   chartContainer.className = "popup-chart-container";
 
   const currentYear = new Date().getFullYear();
+  // capture_year_histogram may be a {counts: {...}} wrapper, a bare year→count
+  // map, or missing entirely for an empty run — tolerate all three.
   const rawHistogram =
-    city.capture_year_histogram.counts || city.capture_year_histogram;
+    city.capture_year_histogram?.counts || city.capture_year_histogram || {};
 
   const years = Object.keys(rawHistogram).map(Number);
-  const startYear = Math.min(...years);
   const filledHistogram = {};
-  for (let y = startYear; y <= currentYear; y++) {
-    filledHistogram[y] = rawHistogram[y] || 0;
+  // Skip the fill when there are no years (Math.min([]) === Infinity would
+  // otherwise blow up the loop).
+  if (years.length > 0) {
+    const startYear = Math.min(...years);
+    for (let y = startYear; y <= currentYear; y++) {
+      filledHistogram[y] = rawHistogram[y] || 0;
+    }
   }
 
   chartContainer.appendChild(createPopupHistogram(filledHistogram, currentYear));
