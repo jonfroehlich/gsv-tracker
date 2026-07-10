@@ -8,10 +8,10 @@ daily API-request budget, then regenerates the aggregate JSON and
 catalog, so the process is crash-safe and a missed day self-heals (due
 selection is ordered stalest-first).
 
-Usage:
-    python -m gsv_metadata_tracker.scheduler status   [--config PATH]
-    python -m gsv_metadata_tracker.scheduler assign   [--config PATH]
-    python -m gsv_metadata_tracker.scheduler run-due  [--config PATH] [--dry-run] [--limit N]
+Usage (--config accepted on either side of the subcommand):
+    python -m gsv_metadata_tracker.scheduler [--config PATH] status
+    python -m gsv_metadata_tracker.scheduler [--config PATH] assign
+    python -m gsv_metadata_tracker.scheduler [--config PATH] run-due [--dry-run] [--limit N]
 
 Config: TOML (see config/scheduler.toml). Requires Python 3.11+ (tomllib).
 """
@@ -505,27 +505,50 @@ def cmd_run_due(cfg: SchedulerConfig, dry_run: bool = False, limit: int | None =
     return 0 if succeeded == attempted else 1
 
 
-def main() -> int:
+def _add_global_flags(p: argparse.ArgumentParser) -> None:
+    """Add --config/--verbose to a parser.
+
+    Applied to BOTH the top-level parser and every subparser so the flags are
+    accepted on either side of the subcommand (``--config X run-due`` and
+    ``run-due --config X`` both work — systemd/docs historically wrote it after).
+    ``SUPPRESS`` defaults mean an unused copy never clobbers the value parsed at
+    the other position.
+    """
+    p.add_argument(
+        "--config",
+        default=argparse.SUPPRESS,
+        help=f"Path to scheduler TOML (default: {DEFAULT_CONFIG_PATH})",
+    )
+    p.add_argument("--verbose", action="store_true", default=argparse.SUPPRESS)
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m gsv_metadata_tracker.scheduler",
         description="Staggered GSV collection scheduler",
     )
-    parser.add_argument(
-        "--config", default=None, help=f"Path to scheduler TOML (default: {DEFAULT_CONFIG_PATH})"
-    )
-    parser.add_argument("--verbose", action="store_true")
+    _add_global_flags(parser)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("status", help="Show per-city schedule and budget status")
-    sub.add_parser("assign", help="(Re)compute stagger assignments")
+    _add_global_flags(sub.add_parser("status", help="Show per-city schedule and budget status"))
+    _add_global_flags(sub.add_parser("assign", help="(Re)compute stagger assignments"))
     p_run = sub.add_parser("run-due", help="Collect today's due cities")
+    _add_global_flags(p_run)
     p_run.add_argument("--dry-run", action="store_true", help="Print what would run; no downloads")
     p_run.add_argument("--limit", type=int, default=None, help="Process at most N cities (testing)")
-    sub.add_parser("notify-failure", help="Email the recent log (for a systemd OnFailure= hook)")
+    _add_global_flags(
+        sub.add_parser(
+            "notify-failure", help="Email the recent log (for a systemd OnFailure= hook)"
+        )
+    )
+    return parser
 
-    args = parser.parse_args()
-    cfg = load_scheduler_config(args.config)
-    setup_logging(cfg, verbose=args.verbose)
+
+def main() -> int:
+    args = build_parser().parse_args()
+    # getattr fallbacks: SUPPRESS means the attr is absent unless the flag was given.
+    cfg = load_scheduler_config(getattr(args, "config", None))
+    setup_logging(cfg, verbose=getattr(args, "verbose", False))
 
     if args.command == "status":
         return cmd_status(cfg)

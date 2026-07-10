@@ -9,11 +9,19 @@
 # Public URL:   https://makeabilitylab.cs.washington.edu/public/gsv-tracker/data/
 #
 # Usage:
-#   ./sync_data_to_server.sh                  # sync all data
+#   ./sync_data_to_server.sh                  # sync all data (rsync over SSH)
+#   ./sync_data_to_server.sh --local          # copy to a locally-mounted docroot (no SSH)
 #   ./sync_data_to_server.sh --dry-run        # preview what would be transferred
 #   ./sync_data_to_server.sh --file <file>    # sync a single file (relative to data/)
 #   ./sync_data_to_server.sh --verbose        # show detailed transfer info
 #   ./sync_data_to_server.sh --delete         # remove remote files not in local data/
+#
+# Local vs. SSH publishing:
+#   From a laptop, the docroot is remote -> rsync over SSH (the default).
+#   On a host that NFS-mounts the docroot directly (e.g. makelab1, which sees
+#   /cse/web/research/... locally), pass --local (or set GSV_PUBLISH_LOCAL=1) to
+#   copy straight to the filesystem with no SSH hop. This is what the scheduler
+#   uses when [publish] runs on the server.
 #
 # Prerequisites:
 #   - SSH access to the remote host (key-based auth recommended)
@@ -32,6 +40,11 @@ set -euo pipefail
 REMOTE_USER="${GSV_REMOTE_USER:-jonf}"
 REMOTE_HOST="${GSV_REMOTE_HOST:-recycle.cs.washington.edu}"
 REMOTE_DATA_DIR="${GSV_REMOTE_DATA_DIR:-/cse/web/research/makelab/public/gsv-tracker/data}"
+
+# Local publish mode: copy to REMOTE_DATA_DIR on the local filesystem instead of
+# rsync-over-SSH. Enabled with --local or GSV_PUBLISH_LOCAL=1. Used on hosts that
+# NFS-mount the web docroot directly (makelab1), so publishing skips SSH entirely.
+PUBLISH_LOCAL="${GSV_PUBLISH_LOCAL:-}"
 
 # Resolve local data/ relative to this script's location
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -74,6 +87,10 @@ while [[ $# -gt 0 ]]; do
       DRY_RUN="--dry-run"
       shift
       ;;
+    --local)
+      PUBLISH_LOCAL="1"
+      shift
+      ;;
     --file|-f)
       SINGLE_FILE="$2"
       shift 2
@@ -87,11 +104,12 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --help|-h)
-      echo "Usage: $0 [--dry-run] [--file <path>] [--verbose] [--delete]"
+      echo "Usage: $0 [--local] [--dry-run] [--file <path>] [--verbose] [--delete]"
       echo ""
       echo "Syncs local data/ to the UW makeabilitylab server."
       echo ""
       echo "Options:"
+      echo "  --local          Copy to a locally-mounted docroot (no SSH; for makelab1)"
       echo "  --dry-run, -n    Preview changes without transferring"
       echo "  --file, -f       Sync a single file (path relative to data/)"
       echo "  --verbose, -v    Show detailed transfer info"
@@ -141,11 +159,19 @@ done
 # ──────────────────────────────────────────────
 # Sync
 # ──────────────────────────────────────────────
-REMOTE_DEST="${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DATA_DIR}"
+# Local mode targets the filesystem directly (no user@host: prefix); SSH mode
+# targets the remote host. In local mode, ensure the destination dir exists.
+if [[ -n "$PUBLISH_LOCAL" ]]; then
+  REMOTE_DEST="${REMOTE_DATA_DIR}"
+  mkdir -p "$REMOTE_DATA_DIR"
+else
+  REMOTE_DEST="${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DATA_DIR}"
+fi
 
 echo "═══════════════════════════════════════════"
 echo " GSV Tracker Data Sync"
 echo "═══════════════════════════════════════════"
+[[ -n "$PUBLISH_LOCAL" ]] && echo "  Mode:   LOCAL (no SSH)"
 
 if [[ -n "$SINGLE_FILE" ]]; then
   SRC="${LOCAL_DATA_DIR}/${SINGLE_FILE}"
@@ -154,10 +180,14 @@ if [[ -n "$SINGLE_FILE" ]]; then
     exit 1
   fi
 
-  # Ensure remote subdirectory exists for nested paths
+  # Ensure destination subdirectory exists for nested paths
   REMOTE_SUBDIR="$(dirname "$SINGLE_FILE")"
   if [[ "$REMOTE_SUBDIR" != "." ]]; then
-    ssh "${REMOTE_USER}@${REMOTE_HOST}" "mkdir -p '${REMOTE_DATA_DIR}/${REMOTE_SUBDIR}'"
+    if [[ -n "$PUBLISH_LOCAL" ]]; then
+      mkdir -p "${REMOTE_DATA_DIR}/${REMOTE_SUBDIR}"
+    else
+      ssh "${REMOTE_USER}@${REMOTE_HOST}" "mkdir -p '${REMOTE_DATA_DIR}/${REMOTE_SUBDIR}'"
+    fi
   fi
 
   echo "  File:   $SINGLE_FILE"
