@@ -39,13 +39,14 @@ import json
 import logging
 import os
 import sys
-from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gsv_metadata_tracker import db  # noqa: E402
 from gsv_metadata_tracker.boundary_audit import (  # noqa: E402
-    frozen_rect_bounds, rect_polygon_coverage)
+    frozen_rect_bounds,
+    rect_polygon_coverage,
+)
 from gsv_metadata_tracker.paths import get_default_data_dir  # noqa: E402
 
 logger = logging.getLogger("build_boundary_review")
@@ -60,7 +61,7 @@ META_PLACEHOLDER = "/*__META__*/"
 _COORD_DECIMALS = 5
 
 
-def _num(row: dict, key: str) -> Optional[float]:
+def _num(row: dict, key: str) -> float | None:
     """Parse a possibly-blank/NaN CSV cell to float, or None."""
     val = row.get(key, "")
     if val is None or val == "":
@@ -93,9 +94,15 @@ def _round_coords(obj):
     return obj
 
 
-def build_city_payload(city_id: str, *, group: str, current: Optional[dict],
-                       report: Optional[dict], rec_source: dict,
-                       cache: Optional[dict]) -> dict:
+def build_city_payload(
+    city_id: str,
+    *,
+    group: str,
+    current: dict | None,
+    report: dict | None,
+    rec_source: dict,
+    cache: dict | None,
+) -> dict:
     """
     Pure transform: assemble one city's viewer record from its already-parsed
     inputs. Network- and DB-free (all lookups are passed in), so it is directly
@@ -116,20 +123,25 @@ def build_city_payload(city_id: str, *, group: str, current: Optional[dict],
         A JSON-serializable dict with precomputed Leaflet bounds and overlays.
     """
     report = report or {}
-    display_name = (rec_source.get("display_name")
-                    or report.get("display_name") or city_id)
+    display_name = rec_source.get("display_name") or report.get("display_name") or city_id
     verdict = rec_source.get("verdict") or report.get("verdict") or ""
 
     # Frozen (current) grid rectangle — always from live catalog geometry.
     frozen_bounds = None
     frozen_geom = None
     if current is not None:
-        frozen_bounds = _rect_bounds(current["center_lat"], current["center_lon"],
-                                     current["grid_width_m"], current["grid_height_m"])
-        frozen_geom = {"center_lat": current["center_lat"],
-                       "center_lon": current["center_lon"],
-                       "width_m": current["grid_width_m"],
-                       "height_m": current["grid_height_m"]}
+        frozen_bounds = _rect_bounds(
+            current["center_lat"],
+            current["center_lon"],
+            current["grid_width_m"],
+            current["grid_height_m"],
+        )
+        frozen_geom = {
+            "center_lat": current["center_lat"],
+            "center_lon": current["center_lon"],
+            "width_m": current["grid_width_m"],
+            "height_m": current["grid_height_m"],
+        }
 
     # OSM bounding box — from the audit report's suggested center + bbox size.
     ob_lat, ob_lon = _num(report, "suggested_center_lat"), _num(report, "suggested_center_lon")
@@ -137,9 +149,16 @@ def build_city_payload(city_id: str, *, group: str, current: Optional[dict],
     osm_bbox_bounds = _rect_bounds(ob_lat, ob_lon, ob_w, ob_h)
     # ...and as a selectable center+size geometry (the reviewer can pick the OSM
     # bbox as the new grid), mirroring frozen_geom/rec_geom.
-    osm_bbox_geom = (None if None in (ob_lat, ob_lon, ob_w, ob_h)
-                     else {"center_lat": ob_lat, "center_lon": ob_lon,
-                           "width_m": int(ob_w), "height_m": int(ob_h)})
+    osm_bbox_geom = (
+        None
+        if None in (ob_lat, ob_lon, ob_w, ob_h)
+        else {
+            "center_lat": ob_lat,
+            "center_lon": ob_lon,
+            "width_m": int(ob_w),
+            "height_m": int(ob_h),
+        }
+    )
 
     # The resize group verifies an ALREADY-APPLIED fix: show the OLD (pre-fix)
     # rectangle from the audit report's frozen_* snapshot vs the current
@@ -151,17 +170,31 @@ def build_city_payload(city_id: str, *, group: str, current: Optional[dict],
         o_lat, o_lon = _num(report, "frozen_center_lat"), _num(report, "frozen_center_lon")
         o_w, o_h = _num(report, "frozen_width_m"), _num(report, "frozen_height_m")
         old_bounds = _rect_bounds(o_lat, o_lon, o_w, o_h)
-        old_geom = (None if None in (o_lat, o_lon, o_w, o_h)
-                    else {"center_lat": o_lat, "center_lon": o_lon,
-                          "width_m": int(o_w), "height_m": int(o_h)})
+        old_geom = (
+            None
+            if None in (o_lat, o_lon, o_w, o_h)
+            else {
+                "center_lat": o_lat,
+                "center_lon": o_lon,
+                "width_m": int(o_w),
+                "height_m": int(o_h),
+            }
+        )
         rec_basis = rec_source.get("reason", "")
     else:
         rc_lat, rc_lon = _num(rec_source, "rec_center_lat"), _num(rec_source, "rec_center_lon")
         rc_w, rc_h = _num(rec_source, "rec_width_m"), _num(rec_source, "rec_height_m")
         rec_bounds = _rect_bounds(rc_lat, rc_lon, rc_w, rc_h)
-        rec_geom = (None if None in (rc_lat, rc_lon, rc_w, rc_h)
-                    else {"center_lat": rc_lat, "center_lon": rc_lon,
-                          "width_m": int(rc_w), "height_m": int(rc_h)})
+        rec_geom = (
+            None
+            if None in (rc_lat, rc_lon, rc_w, rc_h)
+            else {
+                "center_lat": rc_lat,
+                "center_lon": rc_lon,
+                "width_m": int(rc_w),
+                "height_m": int(rc_h),
+            }
+        )
         rec_basis = rec_source.get("rec_basis", "")
 
     # OSM boundary polygon + representative point, from the Nominatim cache.
@@ -170,8 +203,10 @@ def build_city_payload(city_id: str, *, group: str, current: Optional[dict],
     raw = (cache or {}).get("raw") or {}
     geojson = raw.get("geojson")
     if isinstance(geojson, dict) and geojson.get("type") in ("Polygon", "MultiPolygon"):
-        osm_polygon = {"type": geojson["type"],
-                       "coordinates": _round_coords(geojson.get("coordinates", []))}
+        osm_polygon = {
+            "type": geojson["type"],
+            "coordinates": _round_coords(geojson.get("coordinates", [])),
+        }
     r_lat, r_lon = raw.get("lat"), raw.get("lon")
     if r_lat is not None and r_lon is not None:
         try:
@@ -186,8 +221,11 @@ def build_city_payload(city_id: str, *, group: str, current: Optional[dict],
         if not geom or not isinstance(geojson, dict):
             return None
         return rect_polygon_coverage(
-            geojson, frozen_rect_bounds(geom["center_lat"], geom["center_lon"],
-                                        geom["width_m"], geom["height_m"]))
+            geojson,
+            frozen_rect_bounds(
+                geom["center_lat"], geom["center_lon"], geom["width_m"], geom["height_m"]
+            ),
+        )
 
     coverage_current = _coverage(frozen_geom)
     coverage_before = _coverage(old_geom) if group == "resize" else None
@@ -224,13 +262,18 @@ def build_city_payload(city_id: str, *, group: str, current: Optional[dict],
 def _load_current_geometry(conn) -> dict:
     """Map city_id -> current frozen geometry dict, read live from the catalog."""
     rows = conn.execute(
-        "SELECT city_id, center_lat, center_lon, grid_width_m, grid_height_m, "
-        "step_m FROM cities").fetchall()
-    return {r["city_id"]: {"center_lat": r["center_lat"], "center_lon": r["center_lon"],
-                           "grid_width_m": r["grid_width_m"],
-                           "grid_height_m": r["grid_height_m"],
-                           "step_m": r["step_m"] or 20}
-            for r in rows}
+        "SELECT city_id, center_lat, center_lon, grid_width_m, grid_height_m, step_m FROM cities"
+    ).fetchall()
+    return {
+        r["city_id"]: {
+            "center_lat": r["center_lat"],
+            "center_lon": r["center_lon"],
+            "grid_width_m": r["grid_width_m"],
+            "grid_height_m": r["grid_height_m"],
+            "step_m": r["step_m"] or 20,
+        }
+        for r in rows
+    }
 
 
 def _estimate_points(geom: dict) -> int:
@@ -274,7 +317,7 @@ _CENTER_EPS_DEG = 1e-7
 _SIZE_EPS_M = 1.0
 
 
-def _resize_changed(report: Optional[dict], current: Optional[dict]) -> bool:
+def _resize_changed(report: dict | None, current: dict | None) -> bool:
     """
     True when a city's current (post-fix) geometry differs from the audit
     report's pre-fix ``frozen_*`` snapshot — i.e. the resize was actually
@@ -287,14 +330,22 @@ def _resize_changed(report: Optional[dict], current: Optional[dict]) -> bool:
     o_w, o_h = _num(report, "frozen_width_m"), _num(report, "frozen_height_m")
     if None in (o_lat, o_lon, o_w, o_h):
         return False
-    return (abs(o_lat - current["center_lat"]) > _CENTER_EPS_DEG or
-            abs(o_lon - current["center_lon"]) > _CENTER_EPS_DEG or
-            abs(o_w - current["grid_width_m"]) > _SIZE_EPS_M or
-            abs(o_h - current["grid_height_m"]) > _SIZE_EPS_M)
+    return (
+        abs(o_lat - current["center_lat"]) > _CENTER_EPS_DEG
+        or abs(o_lon - current["center_lon"]) > _CENTER_EPS_DEG
+        or abs(o_w - current["grid_width_m"]) > _SIZE_EPS_M
+        or abs(o_h - current["grid_height_m"]) > _SIZE_EPS_M
+    )
 
 
-def build_payloads(current_by_id: dict, report_by_id: dict, manual_by_id: dict,
-                   plan_by_id: dict, cache_by_id: dict, include_largest: int = 0):
+def build_payloads(
+    current_by_id: dict,
+    report_by_id: dict,
+    manual_by_id: dict,
+    plan_by_id: dict,
+    cache_by_id: dict,
+    include_largest: int = 0,
+):
     """
     Assemble the ordered list of viewer records for all reviewed cities.
 
@@ -311,10 +362,16 @@ def build_payloads(current_by_id: dict, report_by_id: dict, manual_by_id: dict,
     """
     payloads = []
     for city_id, row in manual_by_id.items():
-        payloads.append(build_city_payload(
-            city_id, group="manual", current=current_by_id.get(city_id),
-            report=report_by_id.get(city_id), rec_source=row,
-            cache=cache_by_id.get(city_id)))
+        payloads.append(
+            build_city_payload(
+                city_id,
+                group="manual",
+                current=current_by_id.get(city_id),
+                report=report_by_id.get(city_id),
+                rec_source=row,
+                cache=cache_by_id.get(city_id),
+            )
+        )
     skipped_resize = 0
     for city_id, row in plan_by_id.items():
         report = report_by_id.get(city_id)
@@ -322,21 +379,33 @@ def build_payloads(current_by_id: dict, report_by_id: dict, manual_by_id: dict,
         if not _resize_changed(report, current):
             skipped_resize += 1
             continue
-        payloads.append(build_city_payload(
-            city_id, group="resize", current=current, report=report,
-            rec_source=row, cache=cache_by_id.get(city_id)))
+        payloads.append(
+            build_city_payload(
+                city_id,
+                group="resize",
+                current=current,
+                report=report,
+                rec_source=row,
+                cache=cache_by_id.get(city_id),
+            )
+        )
 
     if include_largest > 0:
         seen = {p["city_id"] for p in payloads}
         ranked = sorted(
             ((cid, g) for cid, g in current_by_id.items() if cid not in seen),
-            key=lambda kv: _estimate_points(kv[1]), reverse=True)
+            key=lambda kv: _estimate_points(kv[1]),
+            reverse=True,
+        )
         for city_id, geom in ranked[:include_largest]:
             p = build_city_payload(
-                city_id, group="large", current=geom,
+                city_id,
+                group="large",
+                current=geom,
                 report=report_by_id.get(city_id),
                 rec_source=report_by_id.get(city_id) or {},
-                cache=cache_by_id.get(city_id))
+                cache=cache_by_id.get(city_id),
+            )
             p["points"] = _estimate_points(geom)
             payloads.append(p)
     return payloads, skipped_resize
@@ -347,8 +416,9 @@ def _json_for_script(obj) -> str:
     return json.dumps(obj, separators=(",", ":"), allow_nan=False).replace("</", "<\\/")
 
 
-def render_html(payloads: list, template_path: str = TEMPLATE_PATH,
-                meta: Optional[dict] = None) -> str:
+def render_html(
+    payloads: list, template_path: str = TEMPLATE_PATH, meta: dict | None = None
+) -> str:
     """Inject the payload JSON (and optional meta block) into the viewer template."""
     with open(template_path) as f:
         template = f.read()
@@ -362,25 +432,37 @@ def render_html(payloads: list, template_path: str = TEMPLATE_PATH,
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--audit-dir", default=DEFAULT_AUDIT_DIR,
-                        help="directory holding the audit CSVs + cache (default: audit/)")
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--audit-dir",
+        default=DEFAULT_AUDIT_DIR,
+        help="directory holding the audit CSVs + cache (default: audit/)",
+    )
     parser.add_argument("--data-dir", default=get_default_data_dir())
-    parser.add_argument("--db-path", default=None,
-                        help="default: {data-dir}/gsv_tracker.db")
+    parser.add_argument("--db-path", default=None, help="default: {data-dir}/gsv_tracker.db")
     parser.add_argument("--template", default=TEMPLATE_PATH)
-    parser.add_argument("--out", default=None,
-                        help="output HTML (default: {audit-dir}/boundary_review.html)")
-    parser.add_argument("--log-level", default="WARNING",
-                        choices=["DEBUG", "INFO", "WARNING", "ERROR"])
-    parser.add_argument("--include-largest", type=int, default=0, metavar="N",
-                        help="also review the N largest-by-grid-points cities not "
-                             "already flagged (a 'LARGE' group), to sanity-check "
-                             "whether the biggest rectangles are justified")
+    parser.add_argument(
+        "--out", default=None, help="output HTML (default: {audit-dir}/boundary_review.html)"
+    )
+    parser.add_argument(
+        "--log-level", default="WARNING", choices=["DEBUG", "INFO", "WARNING", "ERROR"]
+    )
+    parser.add_argument(
+        "--include-largest",
+        type=int,
+        default=0,
+        metavar="N",
+        help="also review the N largest-by-grid-points cities not "
+        "already flagged (a 'LARGE' group), to sanity-check "
+        "whether the biggest rectangles are justified",
+    )
     args = parser.parse_args()
 
-    logging.basicConfig(level=getattr(logging, args.log_level),
-                        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
 
     db_path = args.db_path or db.get_default_db_path(args.data_dir)
     out_path = args.out or os.path.join(args.audit_dir, "boundary_review.html")
@@ -403,7 +485,8 @@ def main() -> int:
         _load_csv_by_id(manual_path),
         _load_csv_by_id(plan_path),
         _load_cache(cache_path),
-        include_largest=args.include_largest)
+        include_largest=args.include_largest,
+    )
 
     n_manual = sum(1 for p in payloads if p["group"] == "manual")
     n_resize = sum(1 for p in payloads if p["group"] == "resize")

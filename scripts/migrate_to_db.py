@@ -32,7 +32,6 @@ import os
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 from tqdm import tqdm
@@ -43,9 +42,13 @@ from gsv_metadata_tracker import db  # noqa: E402
 from gsv_metadata_tracker.analysis import calculate_run_stats  # noqa: E402
 from gsv_metadata_tracker.fileutils import load_city_csv_file  # noqa: E402
 from gsv_metadata_tracker.geoutils import (  # noqa: E402
-    get_city_location_data, get_state_abbreviation, get_country_code)
+    get_city_location_data,
+    get_country_code,
+    get_state_abbreviation,
+)
 from gsv_metadata_tracker.json_summarizer import (  # noqa: E402
-    generate_city_metadata_summary_as_json)
+    generate_city_metadata_summary_as_json,
+)
 from gsv_metadata_tracker.naming import parse_filename, slug_to_query_str  # noqa: E402
 from gsv_metadata_tracker.paths import get_default_data_dir  # noqa: E402
 
@@ -55,55 +58,59 @@ logger = logging.getLogger("migrate")
 @dataclass
 class FileInfo:
     """Everything we learn about one legacy csv.gz file."""
+
     csv_path: str
     slug: str
     width: int
     height: int
     step: int
-    city_name: Optional[str] = None
-    state_name: Optional[str] = None
-    country_name: Optional[str] = None
-    center_lat: Optional[float] = None
-    center_lon: Optional[float] = None
-    run_date: Optional[pd.Timestamp] = None
-    json_path: Optional[str] = None
-    json_ok: bool = False        # sibling json exists and parses strictly
-    identity_source: str = ""    # 'json' | 'nominatim' | 'failed'
-    problems: List[str] = field(default_factory=list)
+    city_name: str | None = None
+    state_name: str | None = None
+    country_name: str | None = None
+    center_lat: float | None = None
+    center_lon: float | None = None
+    run_date: pd.Timestamp | None = None
+    json_path: str | None = None
+    json_ok: bool = False  # sibling json exists and parses strictly
+    identity_source: str = ""  # 'json' | 'nominatim' | 'failed'
+    problems: list[str] = field(default_factory=list)
 
     @property
     def csv_filename(self) -> str:
         return os.path.basename(self.csv_path)
 
     @property
-    def geometry(self) -> Tuple[int, int, int]:
+    def geometry(self) -> tuple[int, int, int]:
         return (self.width, self.height, self.step)
 
 
-def strict_json_load(path: str) -> Optional[dict]:
+def strict_json_load(path: str) -> dict | None:
     """Load JSON, raising on NaN/Infinity tokens (returns None on failure)."""
+
     def _reject(token):
         raise ValueError(f"invalid JSON token {token}")
+
     try:
-        with gzip.open(path, 'rt', encoding='utf-8') as f:
+        with gzip.open(path, "rt", encoding="utf-8") as f:
             return json.load(f, parse_constant=_reject)
     except Exception:
         return None
 
 
-def read_run_date(csv_path: str) -> Optional[pd.Timestamp]:
+def read_run_date(csv_path: str) -> pd.Timestamp | None:
     """Newest query_timestamp in the file (cheap usecols read)."""
     try:
-        ts = pd.read_csv(csv_path, usecols=['query_timestamp'])['query_timestamp']
-        return pd.to_datetime(ts, format='ISO8601', utc=True).max()
+        ts = pd.read_csv(csv_path, usecols=["query_timestamp"])["query_timestamp"]
+        return pd.to_datetime(ts, format="ISO8601", utc=True).max()
     except Exception as e:
         logger.warning(f"Could not read query_timestamp from {csv_path}: {e}")
         return None
 
 
-def scan_files(data_dir: str, use_nominatim_fallback: bool) -> Tuple[List[FileInfo], List[str]]:
+def scan_files(data_dir: str, use_nominatim_fallback: bool) -> tuple[list[FileInfo], list[str]]:
     """Parse + identify every legacy csv.gz in data_dir."""
     import glob
+
     all_csvs = sorted(glob.glob(os.path.join(data_dir, "**/*.csv.gz"), recursive=True))
     infos, unparseable = [], []
 
@@ -116,12 +123,16 @@ def scan_files(data_dir: str, use_nominatim_fallback: bool) -> Tuple[List[FileIn
         if parsed.run_date is not None:
             continue  # already a dated (post-migration) file
 
-        info = FileInfo(csv_path=csv_path, slug=parsed.slug,
-                        width=parsed.width_meters, height=parsed.height_meters,
-                        step=parsed.step_meters)
+        info = FileInfo(
+            csv_path=csv_path,
+            slug=parsed.slug,
+            width=parsed.width_meters,
+            height=parsed.height_meters,
+            step=parsed.step_meters,
+        )
 
         # Identity from the sibling JSON when possible
-        json_path = csv_path.rsplit('.csv.gz', 1)[0] + '.json.gz'
+        json_path = csv_path.rsplit(".csv.gz", 1)[0] + ".json.gz"
         if os.path.exists(json_path):
             info.json_path = json_path
             data = strict_json_load(json_path)
@@ -141,7 +152,7 @@ def scan_files(data_dir: str, use_nominatim_fallback: bool) -> Tuple[List[FileIn
                 # Content is unusable for identity but structure may be fine;
                 # try a lenient read just for the city block
                 try:
-                    with gzip.open(json_path, 'rt', encoding='utf-8') as f:
+                    with gzip.open(json_path, "rt", encoding="utf-8") as f:
                         data = json.load(f)  # lenient: accepts NaN
                     info.city_name = data["city"]["name"]
                     info.state_name = data["city"]["state"]["name"]
@@ -155,7 +166,7 @@ def scan_files(data_dir: str, use_nominatim_fallback: bool) -> Tuple[List[FileIn
             info.problems.append("no sibling json")
 
         if info.city_name is None and use_nominatim_fallback:
-            query = slug_to_query_str(info.slug.replace('_', ', '))
+            query = slug_to_query_str(info.slug.replace("_", ", "))
             loc = get_city_location_data(query)
             if loc and loc.city:
                 info.city_name = loc.city
@@ -177,33 +188,44 @@ def scan_files(data_dir: str, use_nominatim_fallback: bool) -> Tuple[List[FileIn
     return infos, unparseable
 
 
-def choose_baseline(files: List[FileInfo], city_id: str) -> FileInfo:
+def choose_baseline(files: list[FileInfo], city_id: str) -> FileInfo:
     """
     Pick the baseline file for a (city_id, geometry) group: prefer the file
     whose slug is the canonical full-name slug, then the newest data.
     """
+
     def sort_key(f: FileInfo):
-        return (f.slug == city_id,                      # canonical slug wins
-                f.run_date or pd.Timestamp(0, tz='UTC'))  # then newest
+        return (
+            f.slug == city_id,  # canonical slug wins
+            f.run_date or pd.Timestamp(0, tz="UTC"),
+        )  # then newest
+
     return max(files, key=sort_key)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--data-dir', default=get_default_data_dir())
-    parser.add_argument('--db-path', default=None,
-                        help='default: {data-dir}/gsv_tracker.db')
-    parser.add_argument('--execute', action='store_true',
-                        help='Apply changes (default is a dry run)')
-    parser.add_argument('--no-nominatim', action='store_true',
-                        help='Skip the Nominatim fallback for files without JSON')
-    parser.add_argument('--log-level', default='WARNING',
-                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'])
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--data-dir", default=get_default_data_dir())
+    parser.add_argument("--db-path", default=None, help="default: {data-dir}/gsv_tracker.db")
+    parser.add_argument(
+        "--execute", action="store_true", help="Apply changes (default is a dry run)"
+    )
+    parser.add_argument(
+        "--no-nominatim",
+        action="store_true",
+        help="Skip the Nominatim fallback for files without JSON",
+    )
+    parser.add_argument(
+        "--log-level", default="WARNING", choices=["DEBUG", "INFO", "WARNING", "ERROR"]
+    )
     args = parser.parse_args()
 
-    logging.basicConfig(level=getattr(logging, args.log_level),
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
 
     db_path = args.db_path or db.get_default_db_path(args.data_dir)
     mode = "EXECUTE" if args.execute else "DRY RUN"
@@ -217,20 +239,19 @@ def main() -> int:
     failed = [i for i in infos if i not in resolved]
 
     # Group by canonical identity, then by geometry within each city
-    by_city: Dict[str, List[FileInfo]] = defaultdict(list)
+    by_city: dict[str, list[FileInfo]] = defaultdict(list)
     for info in resolved:
         city_id = db.derive_city_id(info.city_name, info.state_name, info.country_name)
         by_city[city_id].append(info)
 
-    plan_rows = []          # (city_id, baseline FileInfo, aliases, variant files)
+    plan_rows = []  # (city_id, baseline FileInfo, aliases, variant files)
     for city_id, files in sorted(by_city.items()):
         # Canonical geometry: that of the LARGEST capture for this city
         # (by compressed size, tie-break newest). Junk/degenerate test
         # files can be newer and even reverse-geocode to a real city's
         # identity (e.g. a 4-point "balance--tennessee" file resolving to
         # Nashville) — size, not recency, identifies the real capture.
-        biggest = max(files, key=lambda f: (os.path.getsize(f.csv_path),
-                                            f.run_date))
+        biggest = max(files, key=lambda f: (os.path.getsize(f.csv_path), f.run_date))
         canonical_geom = biggest.geometry
         group = [f for f in files if f.geometry == canonical_geom]
         variants = [f for f in files if f.geometry != canonical_geom]
@@ -286,10 +307,12 @@ def main() -> int:
     conn = db.connect(db_path)
     n_cities = n_runs = n_regen = n_skipped = 0
 
-    for city_id, baseline, aliases, dup_files, _ in tqdm(plan_rows, desc="Registering", unit="city"):
+    for city_id, baseline, aliases, _dup_files, _ in tqdm(
+        plan_rows, desc="Registering", unit="city"
+    ):
         already = conn.execute(
-            "SELECT 1 FROM runs WHERE csv_filename = ?",
-            (baseline.csv_filename,)).fetchone()
+            "SELECT 1 FROM runs WHERE csv_filename = ?", (baseline.csv_filename,)
+        ).fetchone()
         if already:
             n_skipped += 1
             continue
@@ -304,8 +327,8 @@ def main() -> int:
             state_code=get_state_abbreviation(baseline.state_name),
             country_name=baseline.country_name,
             country_code=get_country_code(baseline.country_name),
-            center_lat=float(df['query_lat'].mean()),
-            center_lon=float(df['query_lon'].mean()),
+            center_lat=float(df["query_lat"].mean()),
+            center_lon=float(df["query_lon"].mean()),
             grid_width_m=baseline.width,
             grid_height_m=baseline.height,
             step_m=baseline.step,
@@ -321,10 +344,18 @@ def main() -> int:
         json_path = baseline.json_path
         if json_path is None or not baseline.json_ok:
             json_path = generate_city_metadata_summary_as_json(
-                baseline.csv_path, df,
-                baseline.city_name, baseline.state_name, baseline.country_name,
-                baseline.width, baseline.height, baseline.step,
-                force_recreate_file=True, run_date=run_date, is_baseline=True)
+                baseline.csv_path,
+                df,
+                baseline.city_name,
+                baseline.state_name,
+                baseline.country_name,
+                baseline.width,
+                baseline.height,
+                baseline.step,
+                force_recreate_file=True,
+                run_date=run_date,
+                is_baseline=True,
+            )
             n_regen += 1
 
         stats = calculate_run_stats(df, run_date)
@@ -342,13 +373,17 @@ def main() -> int:
 
     db.assign_schedule(conn, cycle_days=90)
 
-    print(f"\nDone. Registered {n_cities} cities, {n_runs} baseline runs "
-          f"({n_skipped} already registered, {n_regen} JSONs regenerated).")
+    print(
+        f"\nDone. Registered {n_cities} cities, {n_runs} baseline runs "
+        f"({n_skipped} already registered, {n_regen} JSONs regenerated)."
+    )
     if n_dupes or n_variants:
-        print("Aliased duplicate and geometry-variant files were left on disk "
-              "unregistered — see the report above to review/remove them.")
+        print(
+            "Aliased duplicate and geometry-variant files were left on disk "
+            "unregistered — see the report above to review/remove them."
+        )
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

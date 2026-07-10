@@ -10,19 +10,24 @@ import os
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _spec = importlib.util.spec_from_file_location(
-    "apply_decisions",
-    os.path.join(PROJECT_ROOT, "scripts", "apply_decisions.py"))
+    "apply_decisions", os.path.join(PROJECT_ROOT, "scripts", "apply_decisions.py")
+)
 ad = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ad)
 
-CURRENT = ad.Current(center_lat=42.35, center_lon=-71.06,
-                     width_m=20000, height_m=20000)
+CURRENT = ad.Current(center_lat=42.35, center_lon=-71.06, width_m=20000, height_m=20000)
 
 
 def row(**kw):
-    base = {"city_id": "boston", "display_name": "Boston", "decision": "accept",
-            "chosen_center_lat": "42.31", "chosen_center_lon": "-71.00",
-            "chosen_width_m": "31885", "chosen_height_m": "18779"}
+    base = {
+        "city_id": "boston",
+        "display_name": "Boston",
+        "decision": "accept",
+        "chosen_center_lat": "42.31",
+        "chosen_center_lon": "-71.00",
+        "chosen_width_m": "31885",
+        "chosen_height_m": "18779",
+    }
     base.update(kw)
     return base
 
@@ -35,8 +40,13 @@ def test_apply_when_chosen_differs():
 
 
 def test_nochange_when_chosen_equals_current():
-    same = row(chosen_center_lat="42.35", chosen_center_lon="-71.06",
-               chosen_width_m="20000", chosen_height_m="20000", decision="keep_current")
+    same = row(
+        chosen_center_lat="42.35",
+        chosen_center_lon="-71.06",
+        chosen_width_m="20000",
+        chosen_height_m="20000",
+        decision="keep_current",
+    )
     p = ad.plan_row(same, CURRENT)
     assert p.action == "NOCHANGE"
 
@@ -49,8 +59,16 @@ def test_skip_when_no_decision():
 
 def test_skip_when_decision_but_blank_geometry():
     # skip/defer/rework export a decision but no chosen_* geometry.
-    p = ad.plan_row(row(decision="skip", chosen_center_lat="", chosen_center_lon="",
-                        chosen_width_m="", chosen_height_m=""), CURRENT)
+    p = ad.plan_row(
+        row(
+            decision="skip",
+            chosen_center_lat="",
+            chosen_center_lon="",
+            chosen_width_m="",
+            chosen_height_m="",
+        ),
+        CURRENT,
+    )
     assert p.action == "SKIP"
     assert "no geometry" in p.reason
 

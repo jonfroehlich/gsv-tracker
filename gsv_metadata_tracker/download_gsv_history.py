@@ -46,9 +46,9 @@ import os
 import random
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import aiohttp
 import backoff
@@ -57,8 +57,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from .download_async import (DownloadError, generate_grid_points,
-                             standardize_capture_date)
+from .download_async import DownloadError, generate_grid_points, standardize_capture_date
 
 logger = logging.getLogger(__name__)
 
@@ -66,14 +65,14 @@ logger = logging.getLogger(__name__)
 # Distinct from config.METADATA_DTYPES (a per-grid-point run sample); this is a
 # per-pano historical census, so it gets its own columns.
 HISTORY_DTYPES = {
-    'pano_id': str,
-    'capture_date': str,                 # ISO YYYY-MM-DD (day defaults to 01;
-                                         # the endpoint's precision is a month)
-    'pano_lat': np.float64,
-    'pano_lon': np.float64,
-    'nearest_query_lat': np.float64,     # grid point whose search first
-    'nearest_query_lon': np.float64,     # surfaced this pano
-    'harvested_at': str,                 # UTC ISO 8601
+    "pano_id": str,
+    "capture_date": str,  # ISO YYYY-MM-DD (day defaults to 01;
+    # the endpoint's precision is a month)
+    "pano_lat": np.float64,
+    "pano_lon": np.float64,
+    "nearest_query_lat": np.float64,  # grid point whose search first
+    "nearest_query_lon": np.float64,  # surfaced this pano
+    "harvested_at": str,  # UTC ISO 8601
 }
 
 _SEARCH_URL = (
@@ -87,16 +86,19 @@ _CALLBACK_RE = re.compile(r"callbackfunc\( (.*) \)$", re.DOTALL)
 _NO_IMAGES_SENTINEL = [[5, "generic", "Search returned no images."]]
 
 # A realistic browser UA; the endpoint is meant to be called from Maps JS.
-_USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-               "AppleWebKit/537.36 (KHTML, like Gecko) "
-               "Chrome/126.0 Safari/537.36")
+_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/126.0 Safari/537.36"
+)
 
 
 @dataclass(frozen=True)
 class HistoricalPano:
     """One official Google panorama and its capture month."""
+
     pano_id: str
-    capture_date: str            # standardized ISO 'YYYY-MM-DD'
+    capture_date: str  # standardized ISO 'YYYY-MM-DD'
     lat: float
     lon: float
 
@@ -114,7 +116,7 @@ def build_search_url(lat: float, lon: float) -> str:
     return _SEARCH_URL.format(lat=lat, lon=lon)
 
 
-def parse_search_response(text: str) -> List[HistoricalPano]:
+def parse_search_response(text: str) -> list[HistoricalPano]:
     """
     Extract dated official-Google panoramas from one endpoint response.
 
@@ -146,14 +148,14 @@ def parse_search_response(text: str) -> List[HistoricalPano]:
     except (IndexError, KeyError, TypeError):
         return []
 
-    dates: List[str] = []
+    dates: list[str] = []
     for d in raw_dates:
         try:
             dates.append(f"{d[1][0]}-{int(d[1][1]):02d}")
         except (IndexError, KeyError, TypeError, ValueError):
             dates.append("")
 
-    out: List[HistoricalPano] = []
+    out: list[HistoricalPano] = []
     for i, pano in enumerate(raw_panos):
         raw_date = dates[i] if i < len(dates) else ""
         iso = standardize_capture_date(raw_date)
@@ -165,8 +167,9 @@ def parse_search_response(text: str) -> List[HistoricalPano]:
             lon = pano[2][0][3]
         except (IndexError, KeyError, TypeError):
             continue
-        out.append(HistoricalPano(pano_id=str(pano_id), capture_date=iso,
-                                  lat=float(lat), lon=float(lon)))
+        out.append(
+            HistoricalPano(pano_id=str(pano_id), capture_date=iso, lat=float(lat), lon=float(lon))
+        )
     return out
 
 
@@ -194,10 +197,12 @@ class _CircuitBreaker:
         return self.consecutive >= self.limit
 
 
-@backoff.on_exception(backoff.expo, (asyncio.TimeoutError, aiohttp.ClientError),
-                      max_tries=4, max_time=90)
-async def _fetch_search(session: aiohttp.ClientSession, url: str,
-                        timeout: aiohttp.ClientTimeout) -> str:
+@backoff.on_exception(
+    backoff.expo, (asyncio.TimeoutError, aiohttp.ClientError), max_tries=4, max_time=90
+)
+async def _fetch_search(
+    session: aiohttp.ClientSession, url: str, timeout: aiohttp.ClientTimeout
+) -> str:
     """
     One search request with retry/backoff. Throttle-ish statuses (429/403/503)
     raise ClientResponseError so backoff retries with growing delay; if the
@@ -219,40 +224,43 @@ async def _fetch_search(session: aiohttp.ClientSession, url: str,
 
 # ── Checkpoint (resume) ────────────────────────────────────────────────────
 
+
 def _checkpoint_path(output_csv_gz_path: str) -> str:
     return output_csv_gz_path + ".harvesting"
 
 
-def _load_checkpoint(path: str) -> Tuple[set, Dict[str, dict], int]:
+def _load_checkpoint(path: str) -> tuple[set, dict[str, dict], int]:
     """Return (done grid indices, panos-by-id, api_requests) from a checkpoint."""
     if not os.path.exists(path):
         return set(), {}, 0
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             state = json.load(f)
         done = {tuple(ij) for ij in state.get("done", [])}
         panos = state.get("panos", {})
         api_requests = int(state.get("api_requests", 0))
-        logger.info(f"Resuming harvest from {path}: "
-                    f"{len(done)} grid points already done, "
-                    f"{len(panos)} panos so far")
+        logger.info(
+            f"Resuming harvest from {path}: "
+            f"{len(done)} grid points already done, "
+            f"{len(panos)} panos so far"
+        )
         return done, panos, api_requests
     except (ValueError, OSError, KeyError):
         logger.warning(f"Ignoring unreadable checkpoint {path}")
         return set(), {}, 0
 
 
-def _save_checkpoint(path: str, done: set, panos: Dict[str, dict],
-                     api_requests: int) -> None:
+def _save_checkpoint(path: str, done: set, panos: dict[str, dict], api_requests: int) -> None:
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"done": [list(ij) for ij in done],
-                   "panos": panos,
-                   "api_requests": api_requests}, f)
+        json.dump(
+            {"done": [list(ij) for ij in done], "panos": panos, "api_requests": api_requests}, f
+        )
     os.replace(tmp, path)  # atomic
 
 
 # ── Harvest ────────────────────────────────────────────────────────────────
+
 
 async def harvest_gsv_history_async(
     city_name: str,
@@ -264,10 +272,10 @@ async def harvest_gsv_history_async(
     output_csv_gz_path: str,
     connection_limit: int = 2,
     request_timeout: float = 30,
-    jitter_seconds: Tuple[float, float] = (0.2, 0.6),
+    jitter_seconds: tuple[float, float] = (0.2, 0.6),
     chunk_size: int = 25,
     circuit_breaker_limit: int = 8,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Sweep a city's frozen grid and harvest every official Google panorama's
     capture date from the unpublished single-image-search endpoint.
@@ -284,32 +292,31 @@ async def harvest_gsv_history_async(
     Raises HarvestBlockedError if the endpoint appears to be throttling us (the
     checkpoint is kept for a later resume).
     """
-    started_at = datetime.now(timezone.utc).isoformat()
+    started_at = datetime.now(UTC).isoformat()
     if not output_csv_gz_path.endswith(".csv.gz"):
-        raise ValueError(
-            f"output_csv_gz_path must end in .csv.gz, got: {output_csv_gz_path}")
-    Path(os.path.dirname(os.path.abspath(output_csv_gz_path))).mkdir(
-        parents=True, exist_ok=True)
+        raise ValueError(f"output_csv_gz_path must end in .csv.gz, got: {output_csv_gz_path}")
+    Path(os.path.dirname(os.path.abspath(output_csv_gz_path))).mkdir(parents=True, exist_ok=True)
 
     width_steps = int(grid_width / step_length)
     height_steps = int(grid_height / step_length)
     origin = geopy.Point(center_lat, center_lon)
-    grid_points = generate_grid_points(origin, width_steps, height_steps,
-                                        step_length)
+    grid_points = generate_grid_points(origin, width_steps, height_steps, step_length)
 
     checkpoint = _checkpoint_path(output_csv_gz_path)
     done, panos, api_requests = _load_checkpoint(checkpoint)
-    remaining = [(lat, lon, i, j) for (lat, lon, i, j) in grid_points
-                 if (i, j) not in done]
-    logger.info(f"Harvesting GSV history for {city_name}: {len(remaining)} of "
-                f"{len(grid_points)} grid points to query "
-                f"(connection_limit={connection_limit}, gentle mode)")
+    remaining = [(lat, lon, i, j) for (lat, lon, i, j) in grid_points if (i, j) not in done]
+    logger.info(
+        f"Harvesting GSV history for {city_name}: {len(remaining)} of "
+        f"{len(grid_points)} grid points to query "
+        f"(connection_limit={connection_limit}, gentle mode)"
+    )
 
     breaker = _CircuitBreaker(limit=circuit_breaker_limit)
     semaphore = asyncio.Semaphore(connection_limit)
     timeout = aiohttp.ClientTimeout(total=request_timeout)
-    progress = tqdm(total=len(grid_points), initial=len(done),
-                    desc=f"Harvesting GSV history for {city_name}")
+    progress = tqdm(
+        total=len(grid_points), initial=len(done), desc=f"Harvesting GSV history for {city_name}"
+    )
 
     async def query_point(session, lat, lon, i, j):
         nonlocal api_requests
@@ -317,9 +324,8 @@ async def harvest_gsv_history_async(
             await asyncio.sleep(random.uniform(*jitter_seconds))
             api_requests += 1
             try:
-                text = await _fetch_search(session, build_search_url(lat, lon),
-                                           timeout)
-            except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+                text = await _fetch_search(session, build_search_url(lat, lon), timeout)
+            except (TimeoutError, aiohttp.ClientError) as e:
                 breaker.record(ok=False)
                 return (i, j, lat, lon, None, e)
         breaker.record(ok=True)
@@ -329,10 +335,10 @@ async def harvest_gsv_history_async(
     blocked = False
     async with aiohttp.ClientSession(headers=headers) as session:
         for start in range(0, len(remaining), chunk_size):
-            chunk = remaining[start:start + chunk_size]
+            chunk = remaining[start : start + chunk_size]
             results = await asyncio.gather(
-                *(query_point(session, lat, lon, i, j)
-                  for (lat, lon, i, j) in chunk))
+                *(query_point(session, lat, lon, i, j) for (lat, lon, i, j) in chunk)
+            )
             for i, j, lat, lon, found, err in results:
                 progress.update(1)
                 if err is not None:
@@ -360,18 +366,22 @@ async def harvest_gsv_history_async(
         raise HarvestBlockedError(
             f"Harvest aborted for {city_name}: {breaker.consecutive} consecutive "
             f"failed searches suggest the endpoint is throttling us. Progress "
-            f"saved to {checkpoint}; rerun to resume.")
+            f"saved to {checkpoint}; rerun to resume."
+        )
 
-    harvested_at = datetime.now(timezone.utc).isoformat()
-    rows = [{
-        "pano_id": pid,
-        "capture_date": rec["capture_date"],
-        "pano_lat": rec["pano_lat"],
-        "pano_lon": rec["pano_lon"],
-        "nearest_query_lat": rec["nearest_query_lat"],
-        "nearest_query_lon": rec["nearest_query_lon"],
-        "harvested_at": harvested_at,
-    } for pid, rec in panos.items()]
+    harvested_at = datetime.now(UTC).isoformat()
+    rows = [
+        {
+            "pano_id": pid,
+            "capture_date": rec["capture_date"],
+            "pano_lat": rec["pano_lat"],
+            "pano_lon": rec["pano_lon"],
+            "nearest_query_lat": rec["nearest_query_lat"],
+            "nearest_query_lon": rec["nearest_query_lon"],
+            "harvested_at": harvested_at,
+        }
+        for pid, rec in panos.items()
+    ]
     df = pd.DataFrame(rows, columns=list(HISTORY_DTYPES.keys()))
     df = df.sort_values(["capture_date", "pano_id"]).reset_index(drop=True)
 
@@ -383,9 +393,11 @@ async def harvest_gsv_history_async(
     dates = df["capture_date"].dropna()
     oldest = dates.min() if len(dates) else None
     newest = dates.max() if len(dates) else None
-    logger.info(f"Harvested {len(df)} unique official Google panos for "
-                f"{city_name} ({oldest}..{newest}) from {api_requests} searches "
-                f"-> {output_csv_gz_path}")
+    logger.info(
+        f"Harvested {len(df)} unique official Google panos for "
+        f"{city_name} ({oldest}..{newest}) from {api_requests} searches "
+        f"-> {output_csv_gz_path}"
+    )
 
     return {
         "df": df,

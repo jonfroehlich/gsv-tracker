@@ -1,34 +1,33 @@
 # gsv_metadata_tracker/vis.py
 
-import folium
-from folium import plugins, FeatureGroup, Element
-import branca.colormap as cm
-import pandas as pd
-from datetime import datetime
 import json
 import logging
+from datetime import datetime
+from math import cos, pi
+
+import branca.colormap as cm
+import folium
+import matplotlib.colors
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import pandas as pd
 import seaborn as sns
 from tqdm import tqdm
-import matplotlib.colors
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from math import cos, pi
-from typing import Optional
-import zlib
-import base64
-import sys
+
 from .analysis import is_google_copyright
-from .geoutils import get_best_folium_zoom_level
-from .geoutils import get_bounding_box_size
-from .geoutils import get_bounding_box
+from .geoutils import get_best_folium_zoom_level, get_bounding_box, get_bounding_box_size
 
 logger = logging.getLogger(__name__)
 
-def display_search_area(city_name: str, city_center_lat: float,
-                       city_center_lng: float,
-                       search_grid_width_in_meters: float,
-                       search_grid_height_in_meters: float,
-                       step_size_in_meters: float = 20) -> folium.Map:
+
+def display_search_area(
+    city_name: str,
+    city_center_lat: float,
+    city_center_lng: float,
+    search_grid_width_in_meters: float,
+    search_grid_height_in_meters: float,
+    step_size_in_meters: float = 20,
+) -> folium.Map:
     """
     Creates an interactive map visualization showing a city's search area with grid overlay.
 
@@ -49,11 +48,11 @@ def display_search_area(city_name: str, city_center_lat: float,
     """
 
     # Grid styling parameters
-    GRID_BACKGROUND_COLOR = '#3B82F6'  # Medium blue
+    GRID_BACKGROUND_COLOR = "#3B82F6"  # Medium blue
     GRID_BACKGROUND_OPACITY = 0.15
-    GRID_BORDER_COLOR = '#2563EB'      # Slightly darker blue
+    GRID_BORDER_COLOR = "#2563EB"  # Slightly darker blue
     GRID_BORDER_WEIGHT = 2
-    GRID_LINE_COLOR = 'blue'
+    GRID_LINE_COLOR = "blue"
     GRID_LINE_WEIGHT = 1.0
     GRID_LINE_OPACITY = 0.5
 
@@ -61,7 +60,7 @@ def display_search_area(city_name: str, city_center_lat: float,
     points_width = int(search_grid_width_in_meters / step_size_in_meters) + 1
     points_height = int(search_grid_height_in_meters / step_size_in_meters) + 1
     total_points = points_width * points_height
-    
+
     # Calculate estimated download time (40 points/second)
     points_per_second = 40
     estimated_seconds = total_points / points_per_second
@@ -75,15 +74,17 @@ def display_search_area(city_name: str, city_center_lat: float,
         time_str = f"{minutes}m {seconds}s"
     else:
         time_str = f"{seconds}s"
-    
+
     # Create map centered on the city
-    zoom_level = get_best_folium_zoom_level(search_grid_width_in_meters, search_grid_height_in_meters)
-   
+    zoom_level = get_best_folium_zoom_level(
+        search_grid_width_in_meters, search_grid_height_in_meters
+    )
+
     # Map base style
-    m = folium.Map(location=[city_center_lat, city_center_lng], 
-                zoom_start=zoom_level,
-                tiles='CartoDB positron')
-    
+    m = folium.Map(
+        location=[city_center_lat, city_center_lng], zoom_start=zoom_level, tiles="CartoDB positron"
+    )
+
     # Create styled HTML for popup
     popup_html = f"""
     <div style="font-family: Arial, sans-serif; line-height: 1.5; padding: 5px;">
@@ -117,7 +118,7 @@ def display_search_area(city_name: str, city_center_lat: float,
     folium.Marker(
         [city_center_lat, city_center_lng],
         popup=folium.Popup(popup_html, max_width=300),
-        icon=folium.Icon(color='red', icon='info-sign')
+        icon=folium.Icon(color="red", icon="info-sign"),
     ).add_to(m)
 
     # Calculate degrees using proper latitude adjustment
@@ -131,8 +132,8 @@ def display_search_area(city_name: str, city_center_lat: float,
 
     # Calculate bounds
     bounds = [
-        [city_center_lat - height_deg/2, city_center_lng - width_deg/2],
-        [city_center_lat + height_deg/2, city_center_lng + width_deg/2]
+        [city_center_lat - height_deg / 2, city_center_lng - width_deg / 2],
+        [city_center_lat + height_deg / 2, city_center_lng + width_deg / 2],
     ]
 
     # Draw rectangle for search area
@@ -143,7 +144,7 @@ def display_search_area(city_name: str, city_center_lat: float,
         weight=GRID_BORDER_WEIGHT,
         fillColor=GRID_BACKGROUND_COLOR,
         fillOpacity=GRID_BACKGROUND_OPACITY,
-        popup=f'Search Area: {search_grid_width_in_meters}m x {search_grid_height_in_meters}m'
+        popup=f"Search Area: {search_grid_width_in_meters}m x {search_grid_height_in_meters}m",
     ).add_to(m)
 
     # Add grid overlay
@@ -155,10 +156,7 @@ def display_search_area(city_name: str, city_center_lat: float,
     while lng <= bounds[1][1]:
         points = [[bounds[0][0], lng], [bounds[1][0], lng]]
         folium.PolyLine(
-            points,
-            color=GRID_LINE_COLOR,
-            weight=GRID_LINE_WEIGHT,
-            opacity=GRID_LINE_OPACITY
+            points, color=GRID_LINE_COLOR, weight=GRID_LINE_WEIGHT, opacity=GRID_LINE_OPACITY
         ).add_to(m)
         lng += step_size_lng
 
@@ -167,36 +165,33 @@ def display_search_area(city_name: str, city_center_lat: float,
     while lat <= bounds[1][0]:
         points = [[lat, bounds[0][1]], [lat, bounds[1][1]]]
         folium.PolyLine(
-            points,
-            color=GRID_LINE_COLOR,
-            weight=GRID_LINE_WEIGHT,
-            opacity=GRID_LINE_OPACITY
+            points, color=GRID_LINE_COLOR, weight=GRID_LINE_WEIGHT, opacity=GRID_LINE_OPACITY
         ).add_to(m)
         lat += step_size_lat
 
     # Add scale bar
-    folium.plugins.MeasureControl(position='bottomleft').add_to(m)
+    folium.plugins.MeasureControl(position="bottomleft").add_to(m)
 
     return m
+
 
 # User-facing labels and pano viewer deep-links per provider (mirrors the
 # PROVIDERS registry in www/js/gsv-utils.js)
 PROVIDER_DISPLAY = {
-    'gsv': {
-        'label': 'GSV',
-        'viewer_url': lambda pano_id:
-            f'https://www.google.com/maps/@?api=1&map_action=pano&pano={pano_id}',
+    "gsv": {
+        "label": "GSV",
+        "viewer_url": lambda pano_id: (
+            f"https://www.google.com/maps/@?api=1&map_action=pano&pano={pano_id}"
+        ),
     },
-    'mapillary': {
-        'label': 'Mapillary',
-        'viewer_url': lambda pano_id:
-            f'https://www.mapillary.com/app/?pKey={pano_id}',
+    "mapillary": {
+        "label": "Mapillary",
+        "viewer_url": lambda pano_id: f"https://www.mapillary.com/app/?pKey={pano_id}",
     },
 }
 
 
-def create_visualization_map(df: pd.DataFrame, city_name: str,
-                             provider: str = 'gsv') -> folium.Map:
+def create_visualization_map(df: pd.DataFrame, city_name: str, provider: str = "gsv") -> folium.Map:
     """
     Create an interactive map visualization of a run's pano metadata with a
     temporal histogram.
@@ -211,30 +206,25 @@ def create_visualization_map(df: pd.DataFrame, city_name: str,
         folium.Map object with the visualization
     """
     display = PROVIDER_DISPLAY[provider]
-    label = display['label']
-    logger.debug(f"Creating visualization map for {city_name} [{provider}] "
-                 f"with {len(df)} rows")
+    label = display["label"]
+    logger.debug(f"Creating visualization map for {city_name} [{provider}] with {len(df)} rows")
 
     # Filter for valid data
-    valid_rows = df[
-        (df['status'] == 'OK') &
-        (df['pano_lat'].notna()) &
-        (df['pano_lon'].notna())
-    ]
+    valid_rows = df[(df["status"] == "OK") & (df["pano_lat"].notna()) & (df["pano_lon"].notna())]
     logger.info(f"Rows with valid pano coordinates: {len(valid_rows)}")
 
     # Official-imagery filter applies only to GSV (Mapillary rows are all
     # provider imagery already)
-    if provider == 'gsv':
-        valid_rows = valid_rows[is_google_copyright(valid_rows['copyright_info'])]
+    if provider == "gsv":
+        valid_rows = valid_rows[is_google_copyright(valid_rows["copyright_info"])]
         logger.info(f"Filtered rows with official Google imagery: {len(valid_rows)}")
 
     # Filter for valid dates (same as before)
-    valid_rows = valid_rows.dropna(subset=['capture_date'])
+    valid_rows = valid_rows.dropna(subset=["capture_date"])
     logger.info(f"Filtered rows with valid capture dates: {len(valid_rows)}")
 
     # Filter for unique pano_ids
-    valid_rows = valid_rows.drop_duplicates(subset='pano_id')
+    valid_rows = valid_rows.drop_duplicates(subset="pano_id")
     logger.info(f"Final valid rows with unique pano_ids: {len(valid_rows)}")
 
     if len(valid_rows) == 0:
@@ -242,18 +232,20 @@ def create_visualization_map(df: pd.DataFrame, city_name: str,
         return folium.Map()
 
     # Calculate map center
-    map_center = [valid_rows['pano_lat'].mean(), valid_rows['pano_lon'].mean()]
+    map_center = [valid_rows["pano_lat"].mean(), valid_rows["pano_lon"].mean()]
 
     # Get bounding box using existing function
     bbox = get_bounding_box(valid_rows)
     bbox_coords = [
-        [bbox['south'], bbox['west']],  # Southwest corner
-        [bbox['north'], bbox['east']],  # Northeast corner
+        [bbox["south"], bbox["west"]],  # Southwest corner
+        [bbox["north"], bbox["east"]],  # Northeast corner
     ]
 
     # Calculate bounding box dimensions
     width_meters, height_meters = get_bounding_box_size(valid_rows)
-    logger.debug(f"Bounding box dimensions: {width_meters:.1f} x {height_meters:.1f} meters from {valid_rows.shape[0]} panos")
+    logger.debug(
+        f"Bounding box dimensions: {width_meters:.1f} x {height_meters:.1f} meters from {valid_rows.shape[0]} panos"
+    )
 
     area_km2 = (width_meters * height_meters) / 1_000_000  # Convert to km²
     zoom_level = get_best_folium_zoom_level(width_meters, height_meters)
@@ -265,38 +257,36 @@ def create_visualization_map(df: pd.DataFrame, city_name: str,
     # print(valid_rows['capture_date'].dtypes)
     # print(valid_rows['capture_date'].head())
     now = datetime.now()
-    valid_rows['capture_date'] = pd.to_datetime(valid_rows['capture_date'])
-    valid_rows['age_years'] = (now - valid_rows['capture_date']).dt.days / 365.25
-    
-    avg_age = valid_rows['age_years'].mean()
-    age_std = valid_rows['age_years'].std()
-    median_age = valid_rows['age_years'].median()
+    valid_rows["capture_date"] = pd.to_datetime(valid_rows["capture_date"])
+    valid_rows["age_years"] = (now - valid_rows["capture_date"]).dt.days / 365.25
+
+    avg_age = valid_rows["age_years"].mean()
+    age_std = valid_rows["age_years"].std()
+    median_age = valid_rows["age_years"].median()
     total_panos = len(valid_rows)
 
-    logger.info(f"Average age: {avg_age:.1f} years, Median age: {median_age:.1f} years, Total panos: {total_panos}, Area: {area_km2:.1f} km²")
-    
+    logger.info(
+        f"Average age: {avg_age:.1f} years, Median age: {median_age:.1f} years, Total panos: {total_panos}, Area: {area_km2:.1f} km²"
+    )
+
     # Calculate coverage density. Guard against a degenerate 0-area bbox (a
     # single pano, or collinear panos, gives a 0 x 0 bounding box), which would
     # otherwise raise ZeroDivisionError and crash the run's local viz step
     # after the run is already cataloged (issue #69).
-    density_per_km2 = total_panos / area_km2 if area_km2 > 0 else float('nan')
+    density_per_km2 = total_panos / area_km2 if area_km2 > 0 else float("nan")
     density_str = f"{density_per_km2:.1f}" if area_km2 > 0 else "n/a"
-    
+
     # Calculate temporal coverage
-    date_range = (valid_rows['capture_date'].max() - valid_rows['capture_date'].min()).days / 365.25
+    date_range = (valid_rows["capture_date"].max() - valid_rows["capture_date"].min()).days / 365.25
 
     # Create base map
-    folium_map = folium.Map(
-        location=map_center,
-        zoom_start=zoom_level,
-        tiles=None
-    )
+    folium_map = folium.Map(location=map_center, zoom_start=zoom_level, tiles=None)
 
     # Add dark theme tile layer
     folium.TileLayer(
-        tiles='cartodbdark_matter',
+        tiles="cartodbdark_matter",
         attr='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        opacity=0.8
+        opacity=0.8,
     ).add_to(folium_map)
 
     # Create enhanced tooltip HTML
@@ -319,55 +309,62 @@ def create_visualization_map(df: pd.DataFrame, city_name: str,
             <strong>Temporal Coverage:</strong> {date_range:.1f} years
         </div>
         <div style='margin-bottom: 4px'>
-            <strong>Date Range:</strong> {valid_rows['capture_date'].min().strftime('%Y-%m')} to {valid_rows['capture_date'].max().strftime('%Y-%m')}
+            <strong>Date Range:</strong> {valid_rows["capture_date"].min().strftime("%Y-%m")} to {valid_rows["capture_date"].max().strftime("%Y-%m")}
         </div>
     </div>
     """
 
-     # Add bounding box rectangle with enhanced tooltip
+    # Add bounding box rectangle with enhanced tooltip
     folium.Rectangle(
         bounds=bbox_coords,
-        color='#4CC3D9',  # Muted cyan-blue
+        color="#4CC3D9",  # Muted cyan-blue
         weight=2,
         fill=False,
         opacity=0.7,
         popup=bbox_tooltip_html,  # Using the same content for popup and tooltip
-        tooltip=bbox_tooltip_html
+        tooltip=bbox_tooltip_html,
     ).add_to(folium_map)
 
     # Change the colormap creation to use years
-    oldest_date = valid_rows['capture_date'].min()
+    oldest_date = valid_rows["capture_date"].min()
     years_since_oldest = (datetime.now() - oldest_date).days / 365.25
     colormap = cm.linear.YlOrRd_09.scale(0, years_since_oldest)
-    colormap.caption = 'Age (Years)'  # Update caption
+    colormap.caption = "Age (Years)"  # Update caption
 
     # Prepare histogram data - now using years instead of days
-    hist_data = valid_rows.groupby('capture_date').size().reset_index()
-    hist_data.columns = ['date', 'count']
-    hist_data['date_str'] = hist_data['date'].dt.strftime('%Y-%m')
-    hist_data['years_ago'] = (datetime.now() - hist_data['date']).dt.days / 365.25
-    hist_data['color'] = hist_data['years_ago'].apply(lambda x: matplotlib.colors.to_hex(colormap(x)))
+    hist_data = valid_rows.groupby("capture_date").size().reset_index()
+    hist_data.columns = ["date", "count"]
+    hist_data["date_str"] = hist_data["date"].dt.strftime("%Y-%m")
+    hist_data["years_ago"] = (datetime.now() - hist_data["date"]).dt.days / 365.25
+    hist_data["color"] = hist_data["years_ago"].apply(
+        lambda x: matplotlib.colors.to_hex(colormap(x))
+    )
 
     # Add markers
     marker_data = []
     markers_fg = folium.FeatureGroup(name="Pano Markers")  # Create feature group for markers
-    for idx, row in tqdm(valid_rows.iterrows(), total=len(valid_rows), desc=f"Creating {label} point map markers"):
-        capture_date = row['capture_date']
-        date_str = capture_date.strftime('%Y-%m')
+    for idx, row in tqdm(
+        valid_rows.iterrows(), total=len(valid_rows), desc=f"Creating {label} point map markers"
+    ):
+        capture_date = row["capture_date"]
+        date_str = capture_date.strftime("%Y-%m")
         age_years = (datetime.now() - capture_date).days / 365.25
         color = matplotlib.colors.to_hex(colormap(age_years))
 
-        popup = folium.Popup(f"""
+        popup = folium.Popup(
+            f"""
             <div>
                 Capture Date: {date_str}
                 <br>Age: {age_years:.1f} years
-                <br>Photographer: {row['copyright_info']}
-                <br><a href="{display['viewer_url'](row['pano_id'])}" target="_blank">View in {label}</a>
+                <br>Photographer: {row["copyright_info"]}
+                <br><a href="{display["viewer_url"](row["pano_id"])}" target="_blank">View in {label}</a>
             </div>
-        """, max_width=300)
+        """,
+            max_width=300,
+        )
 
         circle_marker = folium.CircleMarker(
-            location=[row['pano_lat'], row['pano_lon']],
+            location=[row["pano_lat"], row["pano_lon"]],
             radius=2,
             color=color,
             stroke=False,
@@ -375,19 +372,16 @@ def create_visualization_map(df: pd.DataFrame, city_name: str,
             fill_color=color,
             fill_opacity=0.8,
             popup=popup,
-            tooltip=f"Capture Date: {date_str}<br>Age: {age_years:.1f} years", 
-            name='gsv-pano-marker'   
+            tooltip=f"Capture Date: {date_str}<br>Age: {age_years:.1f} years",
+            name="gsv-pano-marker",
         )
 
         # Add custom data attributes
-        #circle_marker.add_child(Element(f'<div data-date="{date_str}" data-age="{age_years}"></div>'))
+        # circle_marker.add_child(Element(f'<div data-date="{date_str}" data-age="{age_years}"></div>'))
         # circle_marker.add_child(Element(f'<path data-date="{date_str}" data-age="{age_years}"></path>'))
         markers_fg.add_child(circle_marker)
 
-        marker_data.append({
-            'element_id': f'marker_{idx}',
-            'date': date_str
-        })
+        marker_data.append({"element_id": f"marker_{idx}", "date": date_str})
 
     # Add feature group to map
     markers_fg.add_to(folium_map)
@@ -470,16 +464,18 @@ def create_visualization_map(df: pd.DataFrame, city_name: str,
     folium_map.get_root().html.add_child(folium.Element(legend_and_hist_html))
 
     # Add required JavaScript libraries
-    folium_map.get_root().html.add_child(folium.Element("""
+    folium_map.get_root().html.add_child(
+        folium.Element("""
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-datalabels/2.0.0/chartjs-plugin-datalabels.min.js"></script>
     <script>
     Chart.register(ChartDataLabels);
     </script>
-    """))
+    """)
+    )
 
     # Add JavaScript for interactive features
-    hist_data_json = json.dumps(hist_data.to_dict('records'), default=str)
+    hist_data_json = json.dumps(hist_data.to_dict("records"), default=str)
     marker_data_json = json.dumps(marker_data)
     histogram_js = f"""
     <script>
@@ -757,53 +753,55 @@ def create_visualization_map(df: pd.DataFrame, city_name: str,
 
     return folium_map
 
+
 def plot_status_distribution(df: pd.DataFrame, city_name: str, figsize: tuple = (10, 6)) -> None:
     """
     Draw a bar plot showing the distribution of different API response status types.
-    
+
     Args:
         df: DataFrame containing the GSV metadata
         city_name: Name of the city for the plot title
         figsize: Tuple of (width, height) for the plot
     """
     plt.figure(figsize=figsize)
-    
+
     # Create bar plot using seaborn
-    ax = sns.countplot(x='status', data=df)
-    
+    ax = sns.countplot(x="status", data=df)
+
     # Customize the plot
-    plt.title(f'Distribution of Status Occurrences in {city_name}')
-    plt.xlabel('Status')
-    plt.ylabel('Count')
-    
+    plt.title(f"Distribution of Status Occurrences in {city_name}")
+    plt.xlabel("Status")
+    plt.ylabel("Count")
+
     # Add count labels on top of bars
     for p in ax.patches:
         ax.annotate(
-            f'{int(p.get_height())}',
-            (p.get_x() + p.get_width() / 2., p.get_height()),
-            ha='center',
-            va='bottom'
+            f"{int(p.get_height())}",
+            (p.get_x() + p.get_width() / 2.0, p.get_height()),
+            ha="center",
+            va="bottom",
         )
-    
+
     # Rotate x-axis labels for better readability
-    plt.xticks(rotation=45, ha='right')
-    
+    plt.xticks(rotation=45, ha="right")
+
     # Adjust layout to prevent label cutoff
     plt.tight_layout()
-    
+
     plt.show()
+
 
 def plot_temporal_distribution(
     df: pd.DataFrame,
     city_name: str,
     figsize: tuple = (12, 6),
-    bin_freq: str = 'M',  # 'M' for month, 'Y' for year, etc.
-    color: str = 'blue',
-    kde: bool = False
+    bin_freq: str = "M",  # 'M' for month, 'Y' for year, etc.
+    color: str = "blue",
+    kde: bool = False,
 ) -> None:
     """
     Create a histogram showing the distribution of GSV images over time.
-    
+
     Args:
         df: DataFrame containing the GSV metadata
         city_name: Name of the city for the plot title
@@ -813,112 +811,96 @@ def plot_temporal_distribution(
         kde: Whether to show the kernel density estimation curve
     """
     # Filter for successful panos with valid dates
-    valid_data = df[
-        (df['status'] == 'OK') & 
-        (df['capture_date'].notna())
-    ].copy()
-    
+    valid_data = df[(df["status"] == "OK") & (df["capture_date"].notna())].copy()
+
     if len(valid_data) == 0:
         logger.warning("No valid data for temporal distribution plot")
         return
-    
+
     # Create figure and axes
     fig, ax = plt.subplots(figsize=figsize)
-    
+
     # Convert capture_date to datetime if it isn't already
-    valid_data['capture_date'] = pd.to_datetime(valid_data['capture_date'])
-    
+    valid_data["capture_date"] = pd.to_datetime(valid_data["capture_date"])
+
     # Create the histogram
-    sns.histplot(
-        data=valid_data,
-        x='capture_date',
-        bins=30,
-        kde=kde,
-        color=color,
-        ax=ax
-    )
-    
+    sns.histplot(data=valid_data, x="capture_date", bins=30, kde=kde, color=color, ax=ax)
+
     # Customize the plot
-    ax.set_title(f'Distribution of Street View Images Over Time in {city_name}')
-    ax.set_xlabel('Capture Date')
-    ax.set_ylabel('Number of Images')
-    
+    ax.set_title(f"Distribution of Street View Images Over Time in {city_name}")
+    ax.set_xlabel("Capture Date")
+    ax.set_ylabel("Number of Images")
+
     # Format x-axis to show dates nicely
-    if bin_freq == 'M':
+    if bin_freq == "M":
         ax.xaxis.set_major_locator(mdates.YearLocator())
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
     else:
         ax.xaxis.set_major_locator(mdates.YearLocator())
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
-    
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+
     # Add count labels on top of bars
     for p in ax.patches:
         ax.annotate(
-            f'{int(p.get_height())}',
-            (p.get_x() + p.get_width() / 2., p.get_height()),
-            ha='center',
-            va='bottom'
+            f"{int(p.get_height())}",
+            (p.get_x() + p.get_width() / 2.0, p.get_height()),
+            ha="center",
+            va="bottom",
         )
-    
+
     # Rotate and align the tick labels so they look better
-    plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
-    
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+
     # Use a tight layout to prevent label cutoff
     plt.tight_layout()
-    
+
     plt.show()
+
 
 def create_summary_visualization(df: pd.DataFrame, city_name: str) -> None:
     """
     Create a comprehensive statistical visualization including status distribution
     and temporal distribution.
-    
+
     Args:
         df: DataFrame containing the GSV metadata
         city_name: Name of the city being analyzed
     """
     # Create a figure with two subplots
-    fig = plt.figure(figsize=(15, 6))
-    
+    plt.figure(figsize=(15, 6))
+
     # Add status distribution subplot
     plt.subplot(121)
-    ax1 = sns.countplot(x='status', data=df)
-    plt.title(f'Status Distribution in {city_name}')
-    plt.xlabel('Status')
-    plt.ylabel('Count')
-    plt.xticks(rotation=45, ha='right')
-    
+    ax1 = sns.countplot(x="status", data=df)
+    plt.title(f"Status Distribution in {city_name}")
+    plt.xlabel("Status")
+    plt.ylabel("Count")
+    plt.xticks(rotation=45, ha="right")
+
     # Add count labels
     for p in ax1.patches:
         ax1.annotate(
-            f'{int(p.get_height())}',
-            (p.get_x() + p.get_width() / 2., p.get_height()),
-            ha='center',
-            va='bottom'
+            f"{int(p.get_height())}",
+            (p.get_x() + p.get_width() / 2.0, p.get_height()),
+            ha="center",
+            va="bottom",
         )
-    
+
     # Add temporal distribution subplot
     plt.subplot(122)
-    valid_data = df[
-        (df['status'] == 'OK') & 
-        (df['capture_date'].notna())
-    ].copy()
-    
+    valid_data = df[(df["status"] == "OK") & (df["capture_date"].notna())].copy()
+
     if len(valid_data) > 0:
-        sns.histplot(
-            data=valid_data,
-            x='capture_date',
-            bins=30,
-            color='blue'
-        )
-        plt.title(f'Temporal Distribution in {city_name}')
-        plt.xlabel('Capture Date')
-        plt.ylabel('Number of Images')
-        plt.xticks(rotation=45, ha='right')
-    
+        sns.histplot(data=valid_data, x="capture_date", bins=30, color="blue")
+        plt.title(f"Temporal Distribution in {city_name}")
+        plt.xlabel("Capture Date")
+        plt.ylabel("Number of Images")
+        plt.xticks(rotation=45, ha="right")
+
     # Adjust layout
     plt.tight_layout()
     plt.show()
+
 
 # Example usage:
 """

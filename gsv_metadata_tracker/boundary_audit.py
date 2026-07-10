@@ -18,7 +18,7 @@ flagging.
 import logging
 import math
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from geopy.distance import geodesic
 
@@ -27,7 +27,7 @@ from .db import CityRow
 logger = logging.getLogger(__name__)
 
 # (south, north, west, east) in degrees — Nominatim boundingbox order
-BBox = Tuple[float, float, float, float]
+BBox = tuple[float, float, float, float]
 
 # Meters per degree of latitude / of longitude at the equator (WGS84 mean).
 # Used for the frozen-rectangle inverse and shoelace scaling; geodesic() is
@@ -39,50 +39,53 @@ _M_PER_DEG_LON_EQUATOR = 111_320.0
 @dataclass
 class OsmBoundary:
     """Parsed Nominatim result: identity, bbox, and polygon area if any."""
+
     display_name: str
-    osm_type: Optional[str]        # node / way / relation
-    place_class: Optional[str]     # e.g. 'boundary', 'place'
-    place_type: Optional[str]      # e.g. 'administrative', 'city'
+    osm_type: str | None  # node / way / relation
+    place_class: str | None  # e.g. 'boundary', 'place'
+    place_type: str | None  # e.g. 'administrative', 'city'
     lat: float
     lon: float
-    bbox: Optional[BBox]
-    geometry_type: Optional[str]   # Polygon / MultiPolygon / Point / ...
-    polygon_area_m2: Optional[float]
+    bbox: BBox | None
+    geometry_type: str | None  # Polygon / MultiPolygon / Point / ...
+    polygon_area_m2: float | None
 
 
 @dataclass
 class Thresholds:
     """Audit cutoffs; both raw ratios are reported so a reviewer can re-sort
     with different values without re-fetching."""
-    min_coverage: float = 0.75   # UNDER when frozen∩osm / osm bbox area < this
+
+    min_coverage: float = 0.75  # UNDER when frozen∩osm / osm bbox area < this
     over_area_ratio: float = 4.0  # OVER when frozen area / osm bbox area > this
 
 
 @dataclass
 class AuditResult:
     """One report row: verdict plus every metric behind it."""
+
     verdict: str  # OK | UNDER | OVER | WRONG_PLACE | NO_POLYGON |
     #               BBOX_SUSPECT | NOT_FOUND | NOT_FETCHED
-    osm_display_name: Optional[str] = None
-    osm_type: Optional[str] = None
-    place_class: Optional[str] = None
-    place_type: Optional[str] = None
-    geometry_type: Optional[str] = None
-    center_in_osm_bbox: Optional[bool] = None
-    center_dist_km: Optional[float] = None
-    osm_bbox_width_m: Optional[float] = None
-    osm_bbox_height_m: Optional[float] = None
-    osm_bbox_area_km2: Optional[float] = None
-    osm_polygon_area_km2: Optional[float] = None
-    bbox_coverage_frac: Optional[float] = None
-    over_area_ratio: Optional[float] = None
-    suggested_center_lat: Optional[float] = None
-    suggested_center_lon: Optional[float] = None
-    suggested_width_m: Optional[int] = None
-    suggested_height_m: Optional[int] = None
+    osm_display_name: str | None = None
+    osm_type: str | None = None
+    place_class: str | None = None
+    place_type: str | None = None
+    geometry_type: str | None = None
+    center_in_osm_bbox: bool | None = None
+    center_dist_km: float | None = None
+    osm_bbox_width_m: float | None = None
+    osm_bbox_height_m: float | None = None
+    osm_bbox_area_km2: float | None = None
+    osm_polygon_area_km2: float | None = None
+    bbox_coverage_frac: float | None = None
+    over_area_ratio: float | None = None
+    suggested_center_lat: float | None = None
+    suggested_center_lon: float | None = None
+    suggested_width_m: int | None = None
+    suggested_height_m: int | None = None
 
 
-def parse_osm_result(raw: Dict[str, Any]) -> OsmBoundary:
+def parse_osm_result(raw: dict[str, Any]) -> OsmBoundary:
     """
     Parse a raw Nominatim JSON result into an OsmBoundary.
 
@@ -90,31 +93,31 @@ def parse_osm_result(raw: Dict[str, Any]) -> OsmBoundary:
     [south, north, west, east] order, and both 'boundingbox' and 'geojson'
     may be absent.
     """
-    bbox: Optional[BBox] = None
-    raw_bbox = raw.get('boundingbox')
+    bbox: BBox | None = None
+    raw_bbox = raw.get("boundingbox")
     if raw_bbox is not None and len(raw_bbox) == 4:
         try:
             bbox = tuple(float(v) for v in raw_bbox)  # type: ignore[assignment]
         except (TypeError, ValueError):
             logger.warning(f"Unparseable boundingbox: {raw_bbox!r}")
 
-    geometry = raw.get('geojson')
-    geometry_type = geometry.get('type') if isinstance(geometry, dict) else None
+    geometry = raw.get("geojson")
+    geometry_type = geometry.get("type") if isinstance(geometry, dict) else None
 
     return OsmBoundary(
-        display_name=raw.get('display_name', ''),
-        osm_type=raw.get('osm_type'),
-        place_class=raw.get('class'),
-        place_type=raw.get('type'),
-        lat=float(raw['lat']),
-        lon=float(raw['lon']),
+        display_name=raw.get("display_name", ""),
+        osm_type=raw.get("osm_type"),
+        place_class=raw.get("class"),
+        place_type=raw.get("type"),
+        lat=float(raw["lat"]),
+        lon=float(raw["lon"]),
         bbox=bbox,
         geometry_type=geometry_type,
         polygon_area_m2=polygon_area_m2(geometry) if geometry else None,
     )
 
 
-def bbox_dims_m(bbox: BBox) -> Tuple[float, float]:
+def bbox_dims_m(bbox: BBox) -> tuple[float, float]:
     """
     (width_m, height_m) of a (south, north, west, east) bbox, measured
     geodesically — width along the middle latitude, matching
@@ -127,8 +130,9 @@ def bbox_dims_m(bbox: BBox) -> Tuple[float, float]:
     return width, height
 
 
-def frozen_rect_bounds(center_lat: float, center_lon: float,
-                       width_m: float, height_m: float) -> BBox:
+def frozen_rect_bounds(
+    center_lat: float, center_lon: float, width_m: float, height_m: float
+) -> BBox:
     """
     The frozen search rectangle as a (south, north, west, east) bbox —
     the inverse of the meters-from-degrees conversion, good to well under
@@ -137,8 +141,12 @@ def frozen_rect_bounds(center_lat: float, center_lon: float,
     half_h_deg = (height_m / 2) / _M_PER_DEG_LAT
     m_per_deg_lon = _M_PER_DEG_LON_EQUATOR * math.cos(math.radians(center_lat))
     half_w_deg = (width_m / 2) / m_per_deg_lon
-    return (center_lat - half_h_deg, center_lat + half_h_deg,
-            center_lon - half_w_deg, center_lon + half_w_deg)
+    return (
+        center_lat - half_h_deg,
+        center_lat + half_h_deg,
+        center_lon - half_w_deg,
+        center_lon + half_w_deg,
+    )
 
 
 def bbox_intersection_frac(rect: BBox, target: BBox) -> float:
@@ -160,7 +168,7 @@ def bbox_intersection_frac(rect: BBox, target: BBox) -> float:
     return (lat_overlap * lon_overlap) / (target_lat * target_lon)
 
 
-def _ring_area_m2(ring: List[List[float]]) -> float:
+def _ring_area_m2(ring: list[list[float]]) -> float:
     """
     Unsigned shoelace area of one GeoJSON ring ([lon, lat] pairs) in a
     local equirectangular frame anchored at the ring's mean latitude.
@@ -171,12 +179,12 @@ def _ring_area_m2(ring: List[List[float]]) -> float:
     kx = _M_PER_DEG_LON_EQUATOR * math.cos(math.radians(mean_lat))
     ky = _M_PER_DEG_LAT
     total = 0.0
-    for (lon1, lat1), (lon2, lat2) in zip(ring, ring[1:] + ring[:1]):
+    for (lon1, lat1), (lon2, lat2) in zip(ring, ring[1:] + ring[:1], strict=False):
         total += (lon1 * kx) * (lat2 * ky) - (lon2 * kx) * (lat1 * ky)
     return abs(total) / 2
 
 
-def polygon_area_m2(geometry: Optional[Dict[str, Any]]) -> Optional[float]:
+def polygon_area_m2(geometry: dict[str, Any] | None) -> float | None:
     """
     Area of a GeoJSON Polygon (exterior minus holes) or MultiPolygon
     (summed), in square meters. None for Point/LineString/anything else —
@@ -184,24 +192,25 @@ def polygon_area_m2(geometry: Optional[Dict[str, Any]]) -> Optional[float]:
     """
     if not isinstance(geometry, dict):
         return None
-    gtype = geometry.get('type')
-    if gtype == 'Polygon':
-        rings = geometry.get('coordinates', [])
+    gtype = geometry.get("type")
+    if gtype == "Polygon":
+        rings = geometry.get("coordinates", [])
         if not rings:
             return None
         area = _ring_area_m2(rings[0])
         for hole in rings[1:]:
             area -= _ring_area_m2(hole)
         return max(area, 0.0)
-    if gtype == 'MultiPolygon':
-        areas = [polygon_area_m2({'type': 'Polygon', 'coordinates': rings})
-                 for rings in geometry.get('coordinates', [])]
+    if gtype == "MultiPolygon":
+        areas = [
+            polygon_area_m2({"type": "Polygon", "coordinates": rings})
+            for rings in geometry.get("coordinates", [])
+        ]
         return sum(a for a in areas if a is not None) or None
     return None
 
 
-def _intersect(p1: List[float], p2: List[float], axis: int,
-               val: float) -> List[float]:
+def _intersect(p1: list[float], p2: list[float], axis: int, val: float) -> list[float]:
     """The point on segment p1->p2 where coordinate[axis] == val (linear)."""
     other = 1 - axis
     d = p2[axis] - p1[axis]
@@ -212,7 +221,7 @@ def _intersect(p1: List[float], p2: List[float], axis: int,
     return pt
 
 
-def _clip_ring_to_bbox(ring: List[List[float]], bbox: BBox) -> List[List[float]]:
+def _clip_ring_to_bbox(ring: list[list[float]], bbox: BBox) -> list[list[float]]:
     """
     Sutherland-Hodgman clip of a [lon, lat] ring against a (south, north,
     west, east) axis-aligned rectangle. Returns an open ring (no repeated
@@ -220,14 +229,13 @@ def _clip_ring_to_bbox(ring: List[List[float]], bbox: BBox) -> List[List[float]]
     """
     south, north, west, east = bbox
     # Drop an explicit closing vertex; the area/clip math treats rings as closed.
-    poly = (ring[:-1] if len(ring) > 1 and ring[0] == ring[-1] else list(ring))
+    poly = ring[:-1] if len(ring) > 1 and ring[0] == ring[-1] else list(ring)
     # (axis, threshold, keep_greater_equal): west, east, south, north edges.
-    edges = [(0, west, True), (0, east, False),
-             (1, south, True), (1, north, False)]
+    edges = [(0, west, True), (0, east, False), (1, south, True), (1, north, False)]
     for axis, val, keep_ge in edges:
         if not poly:
             break
-        clipped: List[List[float]] = []
+        clipped: list[list[float]] = []
         for i in range(len(poly)):
             cur, prev = poly[i], poly[i - 1]
             cur_in = cur[axis] >= val if keep_ge else cur[axis] <= val
@@ -242,26 +250,26 @@ def _clip_ring_to_bbox(ring: List[List[float]], bbox: BBox) -> List[List[float]]
     return poly
 
 
-def _clipped_polygon_area_m2(geometry: Dict[str, Any], bbox: BBox) -> float:
+def _clipped_polygon_area_m2(geometry: dict[str, Any], bbox: BBox) -> float:
     """Area (m²) of the part of a GeoJSON polygon inside `bbox`."""
-    gtype = geometry.get('type')
-    if gtype == 'Polygon':
-        rings = geometry.get('coordinates', [])
+    gtype = geometry.get("type")
+    if gtype == "Polygon":
+        rings = geometry.get("coordinates", [])
         if not rings:
             return 0.0
         area = _ring_area_m2(_clip_ring_to_bbox(rings[0], bbox))
         for hole in rings[1:]:
             area -= _ring_area_m2(_clip_ring_to_bbox(hole, bbox))
         return max(area, 0.0)
-    if gtype == 'MultiPolygon':
-        return sum(_clipped_polygon_area_m2({'type': 'Polygon',
-                                             'coordinates': rings}, bbox)
-                   for rings in geometry.get('coordinates', []))
+    if gtype == "MultiPolygon":
+        return sum(
+            _clipped_polygon_area_m2({"type": "Polygon", "coordinates": rings}, bbox)
+            for rings in geometry.get("coordinates", [])
+        )
     return 0.0
 
 
-def rect_polygon_coverage(geometry: Optional[Dict[str, Any]],
-                          bbox: Optional[BBox]) -> Optional[float]:
+def rect_polygon_coverage(geometry: dict[str, Any] | None, bbox: BBox | None) -> float | None:
     """
     Fraction of a GeoJSON boundary polygon's area that falls inside a
     (south, north, west, east) rectangle — "how much of the real city does
@@ -280,8 +288,13 @@ def rect_polygon_coverage(geometry: Optional[Dict[str, Any]],
     return max(0.0, min(1.0, inside / total))
 
 
-def classify(city: CityRow, osm: Optional[OsmBoundary],
-             thresholds: Thresholds = Thresholds()) -> AuditResult:
+# Module-level singleton so the default isn't a function call in the signature (B008).
+_DEFAULT_THRESHOLDS = Thresholds()
+
+
+def classify(
+    city: CityRow, osm: OsmBoundary | None, thresholds: Thresholds = _DEFAULT_THRESHOLDS
+) -> AuditResult:
     """
     Compare a city's frozen rectangle to its OSM boundary.
 
@@ -301,24 +314,24 @@ def classify(city: CityRow, osm: Optional[OsmBoundary],
       OK
     """
     if osm is None:
-        return AuditResult(verdict='NOT_FOUND')
+        return AuditResult(verdict="NOT_FOUND")
 
     result = AuditResult(
-        verdict='OK',
+        verdict="OK",
         osm_display_name=osm.display_name,
         osm_type=osm.osm_type,
         place_class=osm.place_class,
         place_type=osm.place_type,
         geometry_type=osm.geometry_type,
-        center_dist_km=geodesic((city.center_lat, city.center_lon),
-                                (osm.lat, osm.lon)).kilometers,
-        osm_polygon_area_km2=(osm.polygon_area_m2 / 1e6
-                              if osm.polygon_area_m2 is not None else None),
+        center_dist_km=geodesic((city.center_lat, city.center_lon), (osm.lat, osm.lon)).kilometers,
+        osm_polygon_area_km2=(
+            osm.polygon_area_m2 / 1e6 if osm.polygon_area_m2 is not None else None
+        ),
     )
 
     bbox = osm.bbox
     if bbox is None or bbox[2] > bbox[3] or (bbox[3] - bbox[2]) > 180:
-        result.verdict = 'BBOX_SUSPECT'
+        result.verdict = "BBOX_SUSPECT"
         return result
 
     south, north, west, east = bbox
@@ -330,23 +343,24 @@ def classify(city: CityRow, osm: Optional[OsmBoundary],
     result.suggested_center_lon = (west + east) / 2
     result.suggested_width_m = math.ceil(osm_w)
     result.suggested_height_m = math.ceil(osm_h)
-    result.center_in_osm_bbox = (south <= city.center_lat <= north
-                                 and west <= city.center_lon <= east)
+    result.center_in_osm_bbox = (
+        south <= city.center_lat <= north and west <= city.center_lon <= east
+    )
 
-    frozen_rect = frozen_rect_bounds(city.center_lat, city.center_lon,
-                                     city.grid_width_m, city.grid_height_m)
+    frozen_rect = frozen_rect_bounds(
+        city.center_lat, city.center_lon, city.grid_width_m, city.grid_height_m
+    )
     frozen_area_km2 = (city.grid_width_m * city.grid_height_m) / 1e6
     result.bbox_coverage_frac = bbox_intersection_frac(frozen_rect, bbox)
     if result.osm_bbox_area_km2 and result.osm_bbox_area_km2 > 0:
         result.over_area_ratio = frozen_area_km2 / result.osm_bbox_area_km2
 
     if not result.center_in_osm_bbox:
-        result.verdict = 'WRONG_PLACE'
-    elif osm.geometry_type not in ('Polygon', 'MultiPolygon'):
-        result.verdict = 'NO_POLYGON'
+        result.verdict = "WRONG_PLACE"
+    elif osm.geometry_type not in ("Polygon", "MultiPolygon"):
+        result.verdict = "NO_POLYGON"
     elif result.bbox_coverage_frac < thresholds.min_coverage:
-        result.verdict = 'UNDER'
-    elif (result.over_area_ratio is not None
-          and result.over_area_ratio > thresholds.over_area_ratio):
-        result.verdict = 'OVER'
+        result.verdict = "UNDER"
+    elif result.over_area_ratio is not None and result.over_area_ratio > thresholds.over_area_ratio:
+        result.verdict = "OVER"
     return result

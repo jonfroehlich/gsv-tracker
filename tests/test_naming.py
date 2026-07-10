@@ -5,8 +5,12 @@ from datetime import date
 import pytest
 
 from gsv_metadata_tracker.naming import (
-    generate_base_filename, generate_run_filename, parse_filename,
-    same_grid_geometry, sanitize_city_query_str)
+    generate_base_filename,
+    generate_run_filename,
+    parse_filename,
+    same_grid_geometry,
+    sanitize_city_query_str,
+)
 
 
 def test_parse_legacy_int_name():
@@ -27,7 +31,8 @@ def test_parse_buggy_float_step_name():
 
 def test_parse_dated_name():
     p = parse_filename(
-        "bend--oregon--united-states_width_5000_height_5000_step_20_2026-07-02.json.gz")
+        "bend--oregon--united-states_width_5000_height_5000_step_20_2026-07-02.json.gz"
+    )
     assert p.run_date == date(2026, 7, 2)
     assert p.slug == "bend--oregon--united-states"
     assert p.provider == "gsv"
@@ -58,8 +63,7 @@ def test_generate_base_filename_int_casts_step():
 
 
 def test_generate_run_filename_roundtrip():
-    name = generate_run_filename("bend--oregon--united-states", 5000, 5000, 20,
-                                 date(2026, 7, 2))
+    name = generate_run_filename("bend--oregon--united-states", 5000, 5000, 20, date(2026, 7, 2))
     p = parse_filename(name + ".csv.gz")
     assert p.slug == "bend--oregon--united-states"
     assert p.run_date == date(2026, 7, 2)
@@ -69,14 +73,15 @@ def test_generate_run_filename_roundtrip():
 def test_generate_run_filename_gsv_has_no_provider_token():
     # Explicit provider='gsv' must produce byte-identical names to the
     # pre-provider convention (published URLs depend on this).
-    assert generate_run_filename("bend--or", 5000, 5000, 20, date(2026, 7, 2),
-                                 provider="gsv") == \
-        generate_run_filename("bend--or", 5000, 5000, 20, date(2026, 7, 2))
+    assert generate_run_filename(
+        "bend--or", 5000, 5000, 20, date(2026, 7, 2), provider="gsv"
+    ) == generate_run_filename("bend--or", 5000, 5000, 20, date(2026, 7, 2))
 
 
 def test_parse_mapillary_dated_name():
     p = parse_filename(
-        "bend--oregon--united-states_width_5000_height_5000_step_20_mapillary_2026-07-05.csv.gz")
+        "bend--oregon--united-states_width_5000_height_5000_step_20_mapillary_2026-07-05.csv.gz"
+    )
     assert p.provider == "mapillary"
     assert p.run_date == date(2026, 7, 5)
     assert p.slug == "bend--oregon--united-states"
@@ -90,8 +95,9 @@ def test_parse_mapillary_with_float_step():
 
 
 def test_generate_mapillary_run_filename_roundtrip():
-    name = generate_run_filename("st.-louis--mo--usa", 1000, 1000, 20,
-                                 date(2026, 7, 5), provider="mapillary")
+    name = generate_run_filename(
+        "st.-louis--mo--usa", 1000, 1000, 20, date(2026, 7, 5), provider="mapillary"
+    )
     assert name == "st.-louis--mo--usa_width_1000_height_1000_step_20_mapillary_2026-07-05"
     p = parse_filename(name + ".csv.gz")
     assert p.provider == "mapillary"
@@ -106,8 +112,7 @@ def test_parse_rejects_unknown_provider_token():
 
 def test_generate_run_filename_rejects_unknown_provider():
     with pytest.raises(ValueError):
-        generate_run_filename("bend--or", 5000, 5000, 20, date(2026, 7, 5),
-                              provider="kartaview")
+        generate_run_filename("bend--or", 5000, 5000, 20, date(2026, 7, 5), provider="kartaview")
 
 
 def test_parse_archival_step_30_dated_name():
@@ -122,26 +127,33 @@ def test_parse_archival_step_30_dated_name():
 def test_same_grid_geometry_ignores_date_and_provider():
     assert same_grid_geometry(
         "seattle--wa_width_5000_height_5000_step_20_2026-07-02.csv.gz",
-        "seattle--wa_width_5000_height_5000_step_20_2026-04-01.csv.gz")
+        "seattle--wa_width_5000_height_5000_step_20_2026-04-01.csv.gz",
+    )
     assert same_grid_geometry(
         "seattle--wa_width_5000_height_5000_step_20_2026-07-02.csv.gz",
-        "seattle--wa_width_5000_height_5000_step_20_mapillary_2026-07-02.csv.gz")
+        "seattle--wa_width_5000_height_5000_step_20_mapillary_2026-07-02.csv.gz",
+    )
     # Legacy undated vs dated: geometry is all that matters
     assert same_grid_geometry(
         "seattle--wa_width_5000_height_5000_step_20.csv.gz",
-        "seattle--wa_width_5000_height_5000_step_20_2026-07-02.csv.gz")
+        "seattle--wa_width_5000_height_5000_step_20_2026-07-02.csv.gz",
+    )
 
 
 def test_same_grid_geometry_rejects_mismatches():
     modern = "seattle--wa_width_5000_height_5000_step_20_2026-07-02.csv.gz"
     assert not same_grid_geometry(
-        modern, "seattle--wa_width_1000_height_1000_step_30_2023-11-05.csv.gz")
+        modern, "seattle--wa_width_1000_height_1000_step_30_2023-11-05.csv.gz"
+    )
     assert not same_grid_geometry(
-        modern, "seattle--wa_width_5000_height_5000_step_30_2026-07-02.csv.gz")
+        modern, "seattle--wa_width_5000_height_5000_step_30_2026-07-02.csv.gz"
+    )
     assert not same_grid_geometry(
-        modern, "seattle--wa_width_4000_height_5000_step_20_2026-07-02.csv.gz")
+        modern, "seattle--wa_width_4000_height_5000_step_20_2026-07-02.csv.gz"
+    )
     assert not same_grid_geometry(
-        modern, "seattle--wa_width_5000_height_4000_step_20_2026-07-02.csv.gz")
+        modern, "seattle--wa_width_5000_height_4000_step_20_2026-07-02.csv.gz"
+    )
 
 
 def test_same_grid_geometry_unparseable_is_false():
@@ -156,5 +168,7 @@ def test_sanitize_city_query_str():
     assert sanitize_city_query_str("Grand Marais") == "grand-marais"
     assert sanitize_city_query_str("Port Angeles, WA") == "port-angeles--wa"
     # Nominatim sometimes returns non-breaking spaces in place names
-    assert sanitize_city_query_str("Ann\xa0Arbor Charter Township, Michigan") == \
-        "ann-arbor-charter-township--michigan"
+    assert (
+        sanitize_city_query_str("Ann\xa0Arbor Charter Township, Michigan")
+        == "ann-arbor-charter-township--michigan"
+    )

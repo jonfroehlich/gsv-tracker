@@ -26,13 +26,18 @@ from gsv_metadata_tracker.fileutils import load_city_csv_file
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description='Compare two GSV metadata files')
-    parser.add_argument('file_old', help='Path to the earlier GSV metadata file (.csv.gz)')
-    parser.add_argument('file_new', help='Path to the later GSV metadata file (.csv.gz)')
-    parser.add_argument('--verbose', '-v', action='store_true',
-                        help='Show per-file status counts and change detail rows')
-    parser.add_argument('--out', metavar='DIFF.csv.gz',
-                        help='Write the detailed change rows to a gzipped CSV')
+    parser = argparse.ArgumentParser(description="Compare two GSV metadata files")
+    parser.add_argument("file_old", help="Path to the earlier GSV metadata file (.csv.gz)")
+    parser.add_argument("file_new", help="Path to the later GSV metadata file (.csv.gz)")
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show per-file status counts and change detail rows",
+    )
+    parser.add_argument(
+        "--out", metavar="DIFF.csv.gz", help="Write the detailed change rows to a gzipped CSV"
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -60,9 +65,9 @@ def main() -> int:
 
         if args.verbose:
             print(f"\nFile 1 ({args.file_old}): {len(df_old):,} rows")
-            print(df_old['status'].value_counts().to_string())
+            print(df_old["status"].value_counts().to_string())
             print(f"\nFile 2 ({args.file_new}): {len(df_new):,} rows")
-            print(df_new['status'].value_counts().to_string())
+            print(df_new["status"].value_counts().to_string())
             if diff.has_changes:
                 print("\nChange detail:")
                 print(diff.detail.to_string(index=False, max_rows=50))
@@ -78,5 +83,5 @@ def main() -> int:
         return 2
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

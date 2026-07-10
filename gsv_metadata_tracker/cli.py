@@ -25,31 +25,31 @@ Concurrent API requests are controlled by two key parameters:
 """
 
 import argparse
-import sys
+import asyncio
 import logging
 import os
-import asyncio
-from datetime import date, datetime, timezone
+import sys
+from datetime import UTC, date, datetime
+
 from dotenv import load_dotenv
 
-from . import db
-from .analysis import print_df_summary, calculate_run_stats, detect_systemic_failure
-from .diff import compute_run_diff, generate_diff_filename, write_diff_detail
-from .fileutils import load_city_csv_file
-from .json_summarizer import generate_city_metadata_summary_as_json, generate_aggregate_v2
-from .naming import generate_run_filename, same_grid_geometry, sanitize_city_query_str
-from .paths import get_default_data_dir, get_default_vis_dir
-
 from . import (
-    load_config,
-    get_city_location_data,
-    get_search_dimensions,
     create_visualization_map,
+    db,
     display_search_area,
     download_gsv_metadata_async,
     download_mapillary_metadata_async,
-    open_in_browser
+    get_city_location_data,
+    get_search_dimensions,
+    load_config,
+    open_in_browser,
 )
+from .analysis import calculate_run_stats, detect_systemic_failure, print_df_summary
+from .diff import compute_run_diff, generate_diff_filename, write_diff_detail
+from .fileutils import load_city_csv_file
+from .json_summarizer import generate_aggregate_v2, generate_city_metadata_summary_as_json
+from .naming import generate_run_filename, same_grid_geometry, sanitize_city_query_str
+from .paths import get_default_data_dir, get_default_vis_dir
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,8 @@ def _cap_dimensions(grid_width, grid_height, city):
         logger.warning(
             f"Derived grid for '{city}' is {grid_width:.0f}x{grid_height:.0f}m; "
             f"clamping to {capped_w:.0f}x{capped_h:.0f}m (the OSM boundary is far "
-            f"larger than a typical city sample). Use --width/--height to override.")
+            f"larger than a typical city sample). Use --width/--height to override."
+        )
     return capped_w, capped_h
 
 
@@ -111,154 +112,140 @@ def parse_args():
         argparse.Namespace: Parsed command line arguments
     """
     parser = argparse.ArgumentParser(
-        description='GSV Metadata Tracker',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        description="GSV Metadata Tracker", formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+
+    parser.add_argument("city", help="City name to analyze")
+
+    parser.add_argument(
+        "--provider",
+        choices=["both", "gsv", "mapillary"],
+        default="both",
+        help="Imagery provider(s) to collect. The default collects GSV then "
+        "Mapillary back-to-back with the same run date so the two "
+        "series stay in sync. Each provider keeps its own independent "
+        "run series (dated files, diffs, skip policy) on the same "
+        "frozen city grid.",
     )
 
     parser.add_argument(
-        'city',
-        help='City name to analyze'
-    )
-
-    parser.add_argument(
-        '--provider',
-        choices=['both', 'gsv', 'mapillary'],
-        default='both',
-        help='Imagery provider(s) to collect. The default collects GSV then '
-             'Mapillary back-to-back with the same run date so the two '
-             'series stay in sync. Each provider keeps its own independent '
-             'run series (dated files, diffs, skip policy) on the same '
-             'frozen city grid.'
-    )
-
-    parser.add_argument(
-        '--download-dir',
+        "--download-dir",
         type=str,
-        help='Dir to save downloaded data (defaults to ./data)',
-        default=get_default_data_dir()
+        help="Dir to save downloaded data (defaults to ./data)",
+        default=get_default_data_dir(),
     )
 
     parser.add_argument(
-        '--width',
+        "--width",
         type=float,
         default=None,
-        help='Search grid width in meters. Only used when the city is not '
-             'yet registered; registered cities reuse frozen geometry. '
-             '(Default if inference fails: 1000m)'
+        help="Search grid width in meters. Only used when the city is not "
+        "yet registered; registered cities reuse frozen geometry. "
+        "(Default if inference fails: 1000m)",
     )
 
     parser.add_argument(
-        '--height',
+        "--height", type=float, default=None, help="Search grid height in meters. See --width."
+    )
+
+    parser.add_argument(
+        "--lat",
         type=float,
         default=None,
-        help='Search grid height in meters. See --width.'
+        help="Latitude of city center. Must be used with --lng. Only used "
+        "when the city is not yet registered.",
     )
 
     parser.add_argument(
-        '--lat',
-        type=float,
-        default=None,
-        help='Latitude of city center. Must be used with --lng. Only used '
-             'when the city is not yet registered.'
+        "--lng", type=float, default=None, help="Longitude of city center. Must be used with --lat."
     )
 
     parser.add_argument(
-        '--lng',
-        type=float,
-        default=None,
-        help='Longitude of city center. Must be used with --lat.'
-    )
-
-    parser.add_argument(
-        '--step',
+        "--step",
         type=float,
         default=20,
-        help='Step size in meters between sample points in the grid '
-             '(only used when the city is not yet registered)'
+        help="Step size in meters between sample points in the grid "
+        "(only used when the city is not yet registered)",
     )
 
     # Temporal tracking / run policy
-    run_group = parser.add_argument_group('Run Policy')
+    run_group = parser.add_argument_group("Run Policy")
     run_group.add_argument(
-        '--run-date',
+        "--run-date",
         type=date.fromisoformat,
         default=None,
-        metavar='YYYY-MM-DD',
-        help='Date recorded for this run (default: today, UTC). Embedded in '
-             'the output filename.'
+        metavar="YYYY-MM-DD",
+        help="Date recorded for this run (default: today, UTC). Embedded in the output filename.",
     )
     run_group.add_argument(
-        '--force',
-        action='store_true',
-        help='Collect even if a recent run exists'
+        "--force", action="store_true", help="Collect even if a recent run exists"
     )
     run_group.add_argument(
-        '--min-days-since-last-run',
+        "--min-days-since-last-run",
         type=int,
         default=80,
-        help='Skip (exit 0) if the latest run is newer than this many days'
+        help="Skip (exit 0) if the latest run is newer than this many days",
     )
     run_group.add_argument(
-        '--db-path',
+        "--db-path",
         type=str,
         default=None,
-        help='Path to the run catalog database (default: {download-dir}/gsv_tracker.db)'
+        help="Path to the run catalog database (default: {download-dir}/gsv_tracker.db)",
     )
     run_group.add_argument(
-        '--no-publish-json',
-        action='store_true',
-        help='Skip regenerating the aggregate cities.json.gz (the per-run '
-             'JSON is always written). Useful in batch/scheduler contexts '
-             'that regenerate the aggregate once at the end.'
+        "--no-publish-json",
+        action="store_true",
+        help="Skip regenerating the aggregate cities.json.gz (the per-run "
+        "JSON is always written). Useful in batch/scheduler contexts "
+        "that regenerate the aggregate once at the end.",
     )
 
     # Parameters controlling concurrent processing
-    concurrency_group = parser.add_argument_group('Concurrency Control')
+    concurrency_group = parser.add_argument_group("Concurrency Control")
     concurrency_group.add_argument(
-        '--batch-size',
+        "--batch-size",
         type=int,
         default=100,
-        help='''Number of requests to prepare and queue at once.
+        help="""Number of requests to prepare and queue at once.
              Should be >= connection-limit. Higher values use more memory
-             but can be more efficient. API limit is 500/second.'''
+             but can be more efficient. API limit is 500/second.""",
     )
 
     concurrency_group.add_argument(
-        '--connection-limit',
+        "--connection-limit",
         type=int,
         default=50,
-        help='''Maximum number of concurrent connections to the API.
+        help="""Maximum number of concurrent connections to the API.
              Controls how many requests are actually in-flight at once.
              Should be <= batch-size. Conservative values prevent overwhelming
-             the network or API.'''
+             the network or API.""",
     )
 
     parser.add_argument(
-        '--timeout',
+        "--timeout",
         type=float,
         default=30.0,
-        help='Timeout in seconds for each individual API request'
+        help="Timeout in seconds for each individual API request",
     )
 
     parser.add_argument(
-        '--check-boundary', '--check-size',
-        action='store_true',
-        help='Generate visualization of search area without downloading data. '
-            'Useful for verifying the area before starting a download.'
+        "--check-boundary",
+        "--check-size",
+        action="store_true",
+        help="Generate visualization of search area without downloading data. "
+        "Useful for verifying the area before starting a download.",
     )
 
     parser.add_argument(
-        '--no-visual',
-        action='store_true',
-        help='Skip generating visualizations of the results'
+        "--no-visual", action="store_true", help="Skip generating visualizations of the results"
     )
 
     parser.add_argument(
-        '--log-level',
+        "--log-level",
         type=str,
-        default='WARNING',
-        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-        help='Set the logging level for output messages'
+        default="WARNING",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Set the logging level for output messages",
     )
 
     args = parser.parse_args()
@@ -289,8 +276,11 @@ def _resolve_geometry(conn, args):
     """
     city_row = db.resolve_city(conn, args.city)
     if city_row is not None:
-        overrides = [o for o, v in (('--lat/--lng', args.lat),
-                                    ('--width/--height', args.width)) if v is not None]
+        overrides = [
+            o
+            for o, v in (("--lat/--lng", args.lat), ("--width/--height", args.width))
+            if v is not None
+        ]
         if overrides:
             logger.warning(
                 f"{' and '.join(overrides)} ignored: '{args.city}' is already "
@@ -298,7 +288,8 @@ def _resolve_geometry(conn, args):
                 f"(center {city_row.center_lat:.5f},{city_row.center_lon:.5f}, "
                 f"{city_row.grid_width_m}x{city_row.grid_height_m}m, "
                 f"step {city_row.step_m}m). Changing geometry would break "
-                f"run-to-run diffs.")
+                f"run-to-run diffs."
+            )
         return city_row, False
 
     # Unknown city: geocode once and register with frozen geometry
@@ -310,8 +301,10 @@ def _resolve_geometry(conn, args):
     elif city_loc_data:
         center_lat, center_lng = _resolve_center(city_loc_data)
     else:
-        logger.error(f"Could not find coordinates for {args.city}. "
-                     f"Use --lat and --lng to provide them manually.")
+        logger.error(
+            f"Could not find coordinates for {args.city}. "
+            f"Use --lat and --lng to provide them manually."
+        )
         sys.exit(1)
 
     if args.width is not None:
@@ -321,7 +314,7 @@ def _resolve_geometry(conn, args):
         grid_width, grid_height = get_search_dimensions(args.city, 1000, 1000)
         grid_width, grid_height = _cap_dimensions(grid_width, grid_height, args.city)
 
-    city_name = city_loc_data.city if city_loc_data else args.city.split(',')[0].strip()
+    city_name = city_loc_data.city if city_loc_data else args.city.split(",")[0].strip()
     state_name = city_loc_data.state if city_loc_data else None
     state_code = city_loc_data.state_code if city_loc_data else None
     country_name = city_loc_data.country if city_loc_data else None
@@ -351,8 +344,9 @@ def _resolve_geometry(conn, args):
     return db.resolve_city(conn, city_id), True
 
 
-def _compute_and_record_diff(conn, city_row, prev_run, run_id, run_date,
-                             df_new, download_dir, provider='gsv'):
+def _compute_and_record_diff(
+    conn, city_row, prev_run, run_id, run_date, df_new, download_dir, provider="gsv"
+):
     """
     Diff the new run against the previous one of the same provider, persist
     the summary row (and detail csv.gz when there are changes), and return
@@ -369,8 +363,8 @@ def _compute_and_record_diff(conn, city_row, prev_run, run_id, run_date,
     detail_filename = None
     if diff.has_changes:
         detail_filename = generate_diff_filename(
-            city_row.city_id, prev_run.run_date, run_date.isoformat(),
-            provider=provider)
+            city_row.city_id, prev_run.run_date, run_date.isoformat(), provider=provider
+        )
         write_diff_detail(diff, os.path.join(download_dir, detail_filename))
 
     db.record_diff(
@@ -422,17 +416,17 @@ async def async_main():
 
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
 
     os.makedirs(args.download_dir, exist_ok=True)
     logging.info(f"Using download directory: {args.download_dir}")
 
-    run_date = args.run_date or datetime.now(timezone.utc).date()
+    run_date = args.run_date or datetime.now(UTC).date()
     db_path = args.db_path or db.get_default_db_path(args.download_dir)
 
-    providers = ['gsv', 'mapillary'] if args.provider == 'both' else [args.provider]
+    providers = ["gsv", "mapillary"] if args.provider == "both" else [args.provider]
 
     try:
         # Fail fast: require every requested provider's credential before
@@ -450,17 +444,20 @@ async def async_main():
         city_row, newly_registered = _resolve_geometry(conn, args)
 
         print(f"City: {city_row.display_name} ({city_row.city_id})")
-        print(f"Grid: {city_row.grid_width_m}m x {city_row.grid_height_m}m, "
-              f"step {city_row.step_m}m, centered at "
-              f"{city_row.center_lat:.5f}, {city_row.center_lon:.5f}")
+        print(
+            f"Grid: {city_row.grid_width_m}m x {city_row.grid_height_m}m, "
+            f"step {city_row.step_m}m, centered at "
+            f"{city_row.center_lat:.5f}, {city_row.center_lon:.5f}"
+        )
 
         # Collect each provider in turn (same run_date, so series pair up).
         # One provider failing must not prevent the other from collecting.
         failed = []
         for provider in providers:
             try:
-                await _collect_one_run(conn, args, city_row, run_date,
-                                       provider, configs[provider], vis_path)
+                await _collect_one_run(
+                    conn, args, city_row, run_date, provider, configs[provider], vis_path
+                )
             except Exception as e:
                 logging.exception(f"{provider} collection failed: {e}")
                 failed.append(provider)
@@ -478,8 +475,7 @@ async def async_main():
         sys.exit(1)
 
 
-async def _collect_one_run(conn, args, city_row, run_date, provider, config,
-                           vis_path) -> None:
+async def _collect_one_run(conn, args, city_row, run_date, provider, config, vis_path) -> None:
     """
     Collect, catalog, diff, and summarize one (city, provider) run.
     Returns silently when the skip policy applies; raises on failure.
@@ -490,26 +486,35 @@ async def _collect_one_run(conn, args, city_row, run_date, provider, config,
     if latest is not None:
         days_since = (run_date - date.fromisoformat(latest.run_date)).days
         if latest.run_date == run_date.isoformat():
-            print(f"A {provider} run already exists for {city_row.city_id} "
-                  f"on {run_date} ({latest.csv_filename}); nothing to do. "
-                  f"Use --run-date to record a different date.")
+            print(
+                f"A {provider} run already exists for {city_row.city_id} "
+                f"on {run_date} ({latest.csv_filename}); nothing to do. "
+                f"Use --run-date to record a different date."
+            )
             return
         if not args.force and days_since < args.min_days_since_last_run:
-            print(f"SKIP: latest {provider} run for {city_row.city_id} is "
-                  f"{days_since} days old ({latest.run_date}), newer than "
-                  f"--min-days-since-last-run={args.min_days_since_last_run}. "
-                  f"Use --force to collect anyway.")
+            print(
+                f"SKIP: latest {provider} run for {city_row.city_id} is "
+                f"{days_since} days old ({latest.run_date}), newer than "
+                f"--min-days-since-last-run={args.min_days_since_last_run}. "
+                f"Use --force to collect anyway."
+            )
             return
 
     # Dated, immutable output file for this run
     run_base = generate_run_filename(
-        city_row.city_id, city_row.grid_width_m, city_row.grid_height_m,
-        city_row.step_m, run_date, provider=provider)
+        city_row.city_id,
+        city_row.grid_width_m,
+        city_row.grid_height_m,
+        city_row.step_m,
+        run_date,
+        provider=provider,
+    )
     output_csv_gz_path = os.path.join(args.download_dir, f"{run_base}.csv.gz")
 
     logging.info(f"Collecting {provider} run {run_date} for {city_row.city_id}")
 
-    if provider == 'mapillary':
+    if provider == "mapillary":
         dict_results = await download_mapillary_metadata_async(
             city_name=city_row.display_name,
             center_lat=city_row.center_lat,
@@ -517,13 +522,14 @@ async def _collect_one_run(conn, args, city_row, run_date, provider, config,
             grid_width=city_row.grid_width_m,
             grid_height=city_row.grid_height_m,
             step_length=city_row.step_m,
-            access_token=config['access_token'],
+            access_token=config["access_token"],
             output_csv_gz_path=output_csv_gz_path,
-            request_timeout=args.timeout
+            request_timeout=args.timeout,
         )
     else:
-        logging.info(f"Using batch_size={args.batch_size}, "
-                     f"connection_limit={args.connection_limit}")
+        logging.info(
+            f"Using batch_size={args.batch_size}, connection_limit={args.connection_limit}"
+        )
         dict_results = await download_gsv_metadata_async(
             city_name=city_row.display_name,
             center_lat=city_row.center_lat,
@@ -531,18 +537,17 @@ async def _collect_one_run(conn, args, city_row, run_date, provider, config,
             grid_width=city_row.grid_width_m,
             grid_height=city_row.grid_height_m,
             step_length=city_row.step_m,
-            api_key=config['api_key'],
+            api_key=config["api_key"],
             output_csv_gz_path=output_csv_gz_path,
             batch_size=args.batch_size,
             connection_limit=args.connection_limit,
-            request_timeout=args.timeout
+            request_timeout=args.timeout,
         )
     df = dict_results["df"]
 
     # Record API usage in the daily per-provider budget ledger (the
     # requests were spent even if the run is rejected below)
-    db.add_api_usage(conn, run_date, dict_results["api_requests"],
-                     provider=provider)
+    db.add_api_usage(conn, run_date, dict_results["api_requests"], provider=provider)
 
     # Refuse to catalog a run dominated by credential/quota denials: it
     # says nothing about the city, and once registered it would become the
@@ -554,7 +559,8 @@ async def _collect_one_run(conn, args, city_row, run_date, provider, config,
         os.replace(output_csv_gz_path, rejected_path)
         raise RuntimeError(
             f"{provider} run rejected, not cataloged: {failure_reason}. "
-            f"Raw responses kept at {rejected_path}")
+            f"Raw responses kept at {rejected_path}"
+        )
 
     print(f"\nDownload Summary for {city_row.display_name} [{provider}]")
     print("=" * 50)
@@ -566,8 +572,9 @@ async def _collect_one_run(conn, args, city_row, run_date, provider, config,
     started = dict_results.get("started_at")
     finished = dict_results.get("finished_at")
     if started and finished:
-        duration = (datetime.fromisoformat(finished)
-                    - datetime.fromisoformat(started)).total_seconds()
+        duration = (
+            datetime.fromisoformat(finished) - datetime.fromisoformat(started)
+        ).total_seconds()
     run_id = db.register_run(
         conn,
         city_id=city_row.city_id,
@@ -587,38 +594,41 @@ async def _collect_one_run(conn, args, city_row, run_date, provider, config,
     # the filename; a cross-geometry diff would compare different sampled
     # areas and produce meaningless added/removed counts.
     change_block = None
-    prev_run = db.get_previous_run(conn, city_row.city_id, run_date,
-                                   provider=provider)
+    prev_run = db.get_previous_run(conn, city_row.city_id, run_date, provider=provider)
     if prev_run is not None:
         new_csv_filename = os.path.basename(output_csv_gz_path)
         if same_grid_geometry(prev_run.csv_filename, new_csv_filename):
             change_block = _compute_and_record_diff(
-                conn, city_row, prev_run, run_id, run_date, df,
-                args.download_dir, provider=provider)
+                conn, city_row, prev_run, run_id, run_date, df, args.download_dir, provider=provider
+            )
         else:
             logger.warning(
                 f"Skipping diff for {city_row.city_id} [{provider}]: previous "
                 f"run {prev_run.csv_filename} has different grid geometry than "
                 f"{new_csv_filename}; diffs resume once two same-geometry runs "
-                f"exist")
+                f"exist"
+            )
 
     # Per-run summary JSON (schema v2, ages pinned to run_date)
     json_path = generate_city_metadata_summary_as_json(
-        output_csv_gz_path, df,
+        output_csv_gz_path,
+        df,
         city_row.city_name,
         city_row.state_name,
         city_row.country_name,
-        city_row.grid_width_m, city_row.grid_height_m, city_row.step_m,
+        city_row.grid_width_m,
+        city_row.grid_height_m,
+        city_row.step_m,
         force_recreate_file=True,
         run_date=run_date,
         change_from_previous_run=change_block,
-        provider=provider)
+        provider=provider,
+    )
     db.update_run_json_filename(conn, run_id, os.path.basename(json_path))
 
     if not args.no_visual:
         map_path = os.path.join(vis_path, f"{run_base}.html")
-        map_obj = create_visualization_map(df, city_row.display_name,
-                                           provider=provider)
+        map_obj = create_visualization_map(df, city_row.display_name, provider=provider)
         print(f"Saving map visualization to {map_path}")
         map_obj.save(map_path)
         logging.info(f"Map visualization saved to {map_path}")
@@ -638,14 +648,17 @@ def _check_boundary(conn, args, vis_path: str) -> int:
 
     city_row = db.resolve_city(conn, args.city)
     if city_row is not None:
-        overrides = [o for o, v in (('--lat/--lng', args.lat),
-                                    ('--width/--height', args.width)) if v is not None]
+        overrides = [
+            o
+            for o, v in (("--lat/--lng", args.lat), ("--width/--height", args.width))
+            if v is not None
+        ]
         if overrides:
             logger.warning(
                 f"{' and '.join(overrides)} ignored: '{args.city}' is already "
-                f"registered as {city_row.city_id} with frozen grid geometry")
-        print(f"'{args.city}' is registered as {city_row.city_id}; "
-              f"previewing its frozen geometry")
+                f"registered as {city_row.city_id} with frozen grid geometry"
+            )
+        print(f"'{args.city}' is registered as {city_row.city_id}; previewing its frozen geometry")
         city_id = city_row.city_id
         center_lat, center_lng = city_row.center_lat, city_row.center_lon
         grid_width, grid_height = city_row.grid_width_m, city_row.grid_height_m
@@ -657,8 +670,10 @@ def _check_boundary(conn, args, vis_path: str) -> int:
         elif city_loc_data:
             center_lat, center_lng = _resolve_center(city_loc_data)
         else:
-            logging.error(f"Could not find coordinates for {args.city}. "
-                          f"Use --lat and --lng to provide them manually.")
+            logging.error(
+                f"Could not find coordinates for {args.city}. "
+                f"Use --lat and --lng to provide them manually."
+            )
             return 1
 
         if args.width is not None:
@@ -671,8 +686,9 @@ def _check_boundary(conn, args, vis_path: str) -> int:
         # Same canonical id register_city would derive, so the preview
         # filename matches the files an eventual run will produce
         if city_loc_data:
-            city_id = db.derive_city_id(city_loc_data.city, city_loc_data.state,
-                                        city_loc_data.country)
+            city_id = db.derive_city_id(
+                city_loc_data.city, city_loc_data.state, city_loc_data.country
+            )
         else:
             city_id = db.derive_city_id(args.city, None, None)
 
@@ -682,7 +698,8 @@ def _check_boundary(conn, args, vis_path: str) -> int:
     boundary_vis_full_path = os.path.join(vis_path, f"{base_name}_search_boundary.html")
 
     search_area_map = display_search_area(
-        args.city, center_lat, center_lng, grid_width, grid_height, args.step)
+        args.city, center_lat, center_lng, grid_width, grid_height, args.step
+    )
     search_area_map.save(boundary_vis_full_path)
 
     print(f"\nSearch area preview saved to: {boundary_vis_full_path}")
@@ -692,7 +709,9 @@ def _check_boundary(conn, args, vis_path: str) -> int:
     success, error_msg = open_in_browser(boundary_vis_full_path)
     if not success:
         logging.warning(f"Could not automatically open visualization: {error_msg}")
-        print(f"Please open {boundary_vis_full_path} in your web browser to view the visualization.")
+        print(
+            f"Please open {boundary_vis_full_path} in your web browser to view the visualization."
+        )
 
     return 0
 
@@ -712,7 +731,7 @@ def main():
     # 1. ProactorEventLoop (default): Good for subprocess/pipes but can have issues with some async operations
     # 2. SelectorEventLoop: More compatible with networking operations like what we're doing
     # So, on Windows, we explicitly set the event loop to use SelectorEventLoop
-    if sys.platform.startswith('win'):
+    if sys.platform.startswith("win"):
         # Override default Windows event loop policy to ensure compatibility
         # with aiohttp's async networking operations
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -726,5 +745,6 @@ def main():
         logging.exception(f"Fatal error: {str(e)}")
         sys.exit(1)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
