@@ -1,3 +1,6 @@
+/* exported switchRun, toggleYear */
+// (switchRun/toggleYear are invoked from onchange/onclick attributes in the
+// HTML this file generates, so ESLint can't see those string references.)
 /**
  * city.js
  * Per-city detail-view logic for GSV City Explorer.
@@ -44,14 +47,8 @@ let providerGlobal = "gsv"; // derived from the data filename
 let oldestDateGlobal = null;
 let newestDateGlobal = null;
 
-/**
- * Parse a pano capture date, returning null when the date is absent (age_stats
- * are all null for a 0-pano run). Guards against `new Date(null)` silently
- * rendering as the Unix epoch (12/31/1969) instead of "—".
- * @param {?string} v - ISO date string, or null/undefined.
- * @returns {?Date}
- */
-const panoDateOrNull = (v) => (v ? new Date(v) : null);
+// panoDateOrNull() and isGoogleCopyright() are shared helpers from gsv-utils.js
+// (loaded first), reused here for the info-panel dates and the © Google filter.
 let runsGlobal = [];        // this city's run history from the aggregate
 let currentFileGlobal = ""; // csv.gz filename of the run being displayed
 let changeGlobal = null;    // change_from_previous_run block of this run
@@ -794,7 +791,7 @@ async function loadData() {
           // official Google. Other providers' rows are all provider panos.
           // Archival runs never recorded copyright, so all rows are kept.
           (providerGlobal === "gsv" && copyrightAvailableGlobal &&
-            row.copyright_info !== "© Google") ||
+            !isGoogleCopyright(row.copyright_info)) ||
           !row.capture_date ||
           !row.pano_id ||
           !row.pano_lat ||
