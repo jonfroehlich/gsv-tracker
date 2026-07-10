@@ -288,8 +288,8 @@ def test_migrate_v1_to_v2(tmp_path):
     raw.commit()
     raw.close()
 
-    conn = db.connect(db_path)  # triggers the migration
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    conn = db.connect(db_path)  # triggers the migration (v1 -> current)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
 
     run = db.get_latest_run(conn, 'bend--or')
     assert run.run_id == 7 and run.provider == 'gsv'
