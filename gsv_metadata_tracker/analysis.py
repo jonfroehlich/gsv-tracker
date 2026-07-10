@@ -24,6 +24,15 @@ logger = logging.getLogger(__name__)
 # Tours Agency'). Must stay in sync with the exact match in www/js/city.js.
 GOOGLE_COPYRIGHT = '© Google'
 
+# Statuses that mean "imagery is present at this grid point". A pano the
+# provider returned counts even when we could not read a usable capture date
+# (status NO_DATE): it is still imagery within reach, so it counts toward both
+# coverage and pano totals. Date-based stats (age, capture-year histograms)
+# necessarily use only the dated subset (status == 'OK'). ZERO_RESULTS means
+# "no imagery here"; everything else (REQUEST_DENIED, OVER_QUERY_LIMIT, ...) is
+# an error, not an absence.
+PRESENT_STATUSES = ('OK', 'NO_DATE')
+
 
 def is_google_copyright(copyright_info: pd.Series) -> pd.Series:
     """
@@ -211,19 +220,21 @@ def calculate_coverage_stats(df: pd.DataFrame) -> CoverageStats:
     point_cols = ['query_lat', 'query_lon']
     num_total_points = len(df[point_cols].drop_duplicates())
 
-    ok_rows = df[df['status'] == 'OK']
-    num_points_with_panos = len(ok_rows[point_cols].drop_duplicates())
+    # A grid point is covered if it holds >= 1 present pano (OK or NO_DATE):
+    # a dateless pano is still imagery within reach (see PRESENT_STATUSES).
+    present_rows = df[df['status'].isin(PRESENT_STATUSES)]
+    num_points_with_panos = len(present_rows[point_cols].drop_duplicates())
     logger.debug(f"Grid points with panoramas: {num_points_with_panos}")
 
-    # ZERO_RESULTS rows exist only at grid points with no pano, so they
-    # never overlap the OK points; whatever remains saw only errors
-    # (REQUEST_DENIED, NO_DATE, ...)
+    # ZERO_RESULTS rows exist only at grid points with no pano, so they never
+    # overlap the covered points; whatever remains saw only errors
+    # (REQUEST_DENIED, OVER_QUERY_LIMIT, ...)
     num_points_without_panos = len(
         df.loc[df['status'] == 'ZERO_RESULTS', point_cols].drop_duplicates())
     num_points_with_errors = (num_total_points - num_points_with_panos
                               - num_points_without_panos)
 
-    successful_df_no_duplicates = ok_rows.drop_duplicates(subset=['pano_id']).copy()
+    successful_df_no_duplicates = present_rows.drop_duplicates(subset=['pano_id']).copy()
     num_unique_panos = len(successful_df_no_duplicates)
     logger.debug(f"Unique panoramas: {num_unique_panos}")
 
@@ -463,11 +474,12 @@ def calculate_photographer_stats(df: pd.DataFrame) -> PhotographerStats:
     Returns:
         PhotographerStats containing photographer contribution analysis
     """
-    # Filter for successful panoramas and drop duplicates
-    ok_panos = df[df['status'] == 'OK'].drop_duplicates(subset=['pano_id'])
-    
+    # Filter for present panoramas (OK or NO_DATE) and drop duplicates; a
+    # dateless pano still carries its contributor/copyright attribution.
+    present_panos = df[df['status'].isin(PRESENT_STATUSES)].drop_duplicates(subset=['pano_id'])
+
     # Count unique pano_ids per photographer
-    photographer_counts = ok_panos['copyright_info'].value_counts().to_dict()
+    photographer_counts = present_panos['copyright_info'].value_counts().to_dict()
     
     return PhotographerStats(photographer_counts=photographer_counts)
 
@@ -495,38 +507,39 @@ def calculate_pano_stats(
         >>> results.print_summary("Analysis Results")
     """
     filtered_df = df[is_google_copyright(df['copyright_info'])] if google_only else df
-    
-    # Get successful panoramas
-    ok_panos = filtered_df[filtered_df['status'] == 'OK'].copy()
-    
-    # Calculate duplicate statistics
-    pano_id_counts = ok_panos['pano_id'].value_counts()
+
+    # Present panoramas (OK or NO_DATE) count toward pano totals; date-based
+    # stats below use only the dated (OK) subset.
+    present_panos = filtered_df[filtered_df['status'].isin(PRESENT_STATUSES)].copy()
+
+    # Calculate duplicate statistics over every present pano
+    pano_id_counts = present_panos['pano_id'].value_counts()
     duplicate_stats = DuplicateStats(
         total_unique_panos=len(pano_id_counts),
-        total_pano_references=len(ok_panos),
-        duplicate_reference_count=len(ok_panos) - len(pano_id_counts),
+        total_pano_references=len(present_panos),
+        duplicate_reference_count=len(present_panos) - len(pano_id_counts),
         most_referenced_count=int(pano_id_counts.max()) if not pano_id_counts.empty else 0,
         panos_with_multiple_refs=int((pano_id_counts > 1).sum()),
-        average_references_per_pano=float(len(ok_panos) / len(pano_id_counts)) if len(pano_id_counts) > 0 else 0
+        average_references_per_pano=float(len(present_panos) / len(pano_id_counts)) if len(pano_id_counts) > 0 else 0
     )
 
     # For most stats, we want to focus only on unique pano ids or we risk
     # skewing our statistics for duplicate pano ids that are referenced multiple times
     # from different query points
-    
-    # Calculate age statistics for unique panoramas
-    unique_panos = ok_panos.drop_duplicates(subset=['pano_id'])
-    age_stats = calculate_age_stats(unique_panos, now)
-    
+
+    # Age / capture-year / daily stats need a real date, so use dated panos only
+    dated_unique = filtered_df[filtered_df['status'] == 'OK'].drop_duplicates(subset=['pano_id'])
+    age_stats = calculate_age_stats(dated_unique, now)
+
     # Coverage describes the sampled grid, not the copyright subset, so it
     # is always computed over the full frame (the google_only filter would
     # drop the ZERO_RESULTS rows that anchor the denominator)
     coverage_stats = calculate_coverage_stats(df)
-    
+
     # Calculate distributions and photographer stats
-    yearly_dist = calculate_yearly_distribution(unique_panos)
-    daily_dist = calculate_daily_distribution(unique_panos)
-    photographer_stats = calculate_photographer_stats(unique_panos)
+    yearly_dist = calculate_yearly_distribution(dated_unique)
+    daily_dist = calculate_daily_distribution(dated_unique)
+    photographer_stats = calculate_photographer_stats(present_panos)
     
     return GSVAnalysisResults(
         duplicate_stats=duplicate_stats,
@@ -577,23 +590,28 @@ def calculate_run_stats(df: pd.DataFrame, run_date,
     now = pd.Timestamp(run_date)
 
     status_ok = int((df['status'] == 'OK').sum())
+    status_no_date = int((df['status'] == 'NO_DATE').sum())
     status_zero = int((df['status'] == 'ZERO_RESULTS').sum())
-    status_other = int(len(df) - status_ok - status_zero)
+    status_other = int(len(df) - status_ok - status_no_date - status_zero)
 
-    ok = df[df['status'] == 'OK']
-    unique = ok.drop_duplicates(subset=['pano_id'])
+    # Pano totals count every present pano (OK or NO_DATE); age stats use only
+    # the dated subset, since NO_DATE panos carry no usable capture date.
+    present = df[df['status'].isin(PRESENT_STATUSES)]
+    unique = present.drop_duplicates(subset=['pano_id'])
     unique_google_panos = None
     if provider == 'gsv' and not (len(unique) > 0
                                   and unique['copyright_info'].isna().all()):
         is_google = is_google_copyright(unique['copyright_info'])
         unique_google_panos = int(is_google.sum())
 
-    age_stats = calculate_age_stats(unique.copy(), now)
+    dated_unique = df[df['status'] == 'OK'].drop_duplicates(subset=['pano_id'])
+    age_stats = calculate_age_stats(dated_unique.copy(), now)
     coverage = calculate_coverage_stats(df)
 
     return {
         'total_points': len(df),
         'status_ok': status_ok,
+        'status_no_date': status_no_date,
         'status_zero_results': status_zero,
         'status_other': status_other,
         'unique_panos': len(unique),

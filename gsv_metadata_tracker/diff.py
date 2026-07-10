@@ -20,6 +20,8 @@ from typing import Optional
 
 import pandas as pd
 
+from .analysis import PRESENT_STATUSES
+
 logger = logging.getLogger(__name__)
 
 # Rounding used to key grid points; matches the precision the query
@@ -153,8 +155,10 @@ def compute_run_diff(df_old: pd.DataFrame, df_new: pd.DataFrame) -> RunDiff:
         new_status = new_status[~new_status.index.duplicated(keep='first')]
         new_status = new_status.reindex(old_status.index)
 
-        old_ok = old_status == 'OK'
-        new_ok = new_status == 'OK'
+        # A point is covered if it holds present imagery (OK or NO_DATE),
+        # matching analysis.calculate_coverage_stats.
+        old_ok = old_status.isin(PRESENT_STATUSES)
+        new_ok = new_status.isin(PRESENT_STATUSES)
         points_gained = int((~old_ok & new_ok).sum())
         points_lost = int((old_ok & ~new_ok).sum())
 

@@ -5,7 +5,21 @@ from datetime import date
 import pandas as pd
 
 from gsv_metadata_tracker.diff import compute_run_diff, generate_diff_filename
-from tests.conftest import make_city_df
+from tests.conftest import COLUMNS, make_city_df
+
+
+def _two_point_df(point_b_status, point_b_pano, point_b_date):
+    """Grid of two points: A always holds an OK pano; B varies by status."""
+    ts = '2026-01-15T12:00:00+00:00'
+    rows = [(44.000, -121.0, ts, 44.0001, -121.0001, 'a', '2020-01-01',
+             '© Google', 'OK')]
+    if point_b_status == 'ZERO_RESULTS':
+        rows.append((44.001, -121.0, ts, None, None, None, None, None,
+                     'ZERO_RESULTS'))
+    else:
+        rows.append((44.001, -121.0, ts, 44.0011, -121.0011, point_b_pano,
+                     point_b_date, '© Google', point_b_status))
+    return pd.DataFrame(rows, columns=COLUMNS)
 
 
 def test_no_changes_between_identical_runs():
@@ -40,6 +54,26 @@ def test_coverage_transitions_on_aligned_grid():
     assert d.grid_aligned
     assert d.points_gained_coverage == 1 and d.points_lost_coverage == 0
     assert abs(d.coverage_delta_pct - 100 / 3) < 1e-9
+
+
+def test_no_date_point_gains_coverage():
+    # Point B goes ZERO_RESULTS -> NO_DATE: dateless imagery appeared, so the
+    # point is now covered (schema v3).
+    old = _two_point_df('ZERO_RESULTS', None, None)
+    new = _two_point_df('NO_DATE', 'b', None)
+    d = compute_run_diff(old, new)
+    assert d.grid_aligned
+    assert d.points_gained_coverage == 1 and d.points_lost_coverage == 0
+    assert abs(d.coverage_delta_pct - 50.0) < 1e-9
+
+
+def test_no_date_point_lost_coverage():
+    # Reverse: NO_DATE -> ZERO_RESULTS is a loss of coverage.
+    old = _two_point_df('NO_DATE', 'b', None)
+    new = _two_point_df('ZERO_RESULTS', None, None)
+    d = compute_run_diff(old, new)
+    assert d.points_gained_coverage == 0 and d.points_lost_coverage == 1
+    assert abs(d.coverage_delta_pct + 50.0) < 1e-9
 
 
 def test_misaligned_grid_skips_point_stats():

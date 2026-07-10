@@ -28,7 +28,7 @@ from .naming import sanitize_city_query_str
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS cities (
@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS runs (
     duration_seconds    REAL,
     total_points        INTEGER,
     status_ok           INTEGER,
+    status_no_date      INTEGER,
     status_zero_results INTEGER,
     status_other        INTEGER,
     unique_panos        INTEGER,
@@ -215,6 +216,15 @@ DROP TABLE schedule_state;
 ALTER TABLE schedule_state_v2 RENAME TO schedule_state;
 """
 
+# v3 -> v4: split "present but dateless" panos out of the status_other error
+# bucket so they can count toward coverage and pano totals. Purely additive —
+# a plain ADD COLUMN, no table rebuild. Existing rows get status_no_date=NULL
+# (unknown until scripts/recompute_run_stats.py backfills it from the CSVs and
+# recomputes coverage_rate_pct / unique_panos).
+_MIGRATE_V3_TO_V4 = """
+ALTER TABLE runs ADD COLUMN status_no_date INTEGER;
+"""
+
 
 @dataclass
 class CityRow:
@@ -251,6 +261,7 @@ class RunRow:
     duration_seconds: Optional[float]
     total_points: Optional[int]
     status_ok: Optional[int]
+    status_no_date: Optional[int]
     status_zero_results: Optional[int]
     status_other: Optional[int]
     unique_panos: Optional[int]
@@ -296,9 +307,14 @@ def init_schema(conn: sqlite3.Connection) -> None:
             f"supports ({SCHEMA_VERSION}). Update the code before proceeding.")
     if user_version == 1:
         _migrate_v1_to_v2(conn)
+        user_version = 2
     # v2 -> v3 is purely additive (the history_harvests table), so it needs no
     # rebuild migration: the CREATE TABLE IF NOT EXISTS in _SCHEMA creates it on
     # any older catalog, and the version stamp below records the upgrade.
+    if user_version == 2:
+        user_version = 3
+    if user_version == 3:
+        _migrate_v3_to_v4(conn)
     conn.executescript(_SCHEMA)
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -321,6 +337,21 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
         conn.commit()
     finally:
         conn.execute("PRAGMA foreign_keys=ON")
+
+
+def _migrate_v3_to_v4(conn: sqlite3.Connection) -> None:
+    """Add the status_no_date column to runs (additive; no table rebuild).
+
+    Idempotent: skips the ADD COLUMN if the column already exists, so a
+    catalog created fresh at the current schema (runs already carries the
+    column) can still be stamped forward through this step.
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
+    if 'status_no_date' in cols:
+        return
+    logger.info("Migrating catalog schema v3 -> v4 (adding runs.status_no_date)")
+    conn.executescript(_MIGRATE_V3_TO_V4)
+    conn.commit()
 
 
 def derive_city_id(city_name: str, state_name: Optional[str],
@@ -451,6 +482,7 @@ def register_run(conn: sqlite3.Connection, *,
                  duration_seconds: Optional[float] = None,
                  total_points: Optional[int] = None,
                  status_ok: Optional[int] = None,
+                 status_no_date: Optional[int] = None,
                  status_zero_results: Optional[int] = None,
                  status_other: Optional[int] = None,
                  unique_panos: Optional[int] = None,
@@ -471,15 +503,15 @@ def register_run(conn: sqlite3.Connection, *,
         """INSERT INTO runs
            (city_id, provider, run_date, csv_filename, json_filename,
             is_baseline, started_at, finished_at, duration_seconds,
-            total_points, status_ok, status_zero_results, status_other,
-            unique_panos, unique_google_panos, coverage_rate_pct,
+            total_points, status_ok, status_no_date, status_zero_results,
+            status_other, unique_panos, unique_google_panos, coverage_rate_pct,
             oldest_capture_date, newest_capture_date, median_pano_age_years,
             api_requests)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (city_id, provider, run_date.isoformat(), csv_filename, json_filename,
          int(is_baseline), started_at, finished_at, duration_seconds,
-         total_points, status_ok, status_zero_results, status_other,
-         unique_panos, unique_google_panos, coverage_rate_pct,
+         total_points, status_ok, status_no_date, status_zero_results,
+         status_other, unique_panos, unique_google_panos, coverage_rate_pct,
          oldest_capture_date, newest_capture_date, median_pano_age_years,
          api_requests))
     conn.commit()
