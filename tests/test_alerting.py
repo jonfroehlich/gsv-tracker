@@ -7,7 +7,7 @@ scheduler config loader to confirm the wiring.
 
 import pytest
 
-from gsv_metadata_tracker.alerting import (
+from streetscape_metadata_tracker.alerting import (
     AlertConfig,
     build_send_plan,
     send_alert,
@@ -83,14 +83,14 @@ class TestSendAlert:
             transport="command",
             recipient="x@y.z",
             subject_prefix="[p]",
-            command=f'echo "$GSV_ALERT_SUBJECT -> $GSV_ALERT_TO" > {out}',
+            command=f'echo "$STREETSCAPE_ALERT_SUBJECT -> $STREETSCAPE_ALERT_TO" > {out}',
         )
         assert send_alert(cfg, "boom", "body") is True
         assert out.read_text().strip() == "[p] boom -> x@y.z"
 
 
 def test_config_loader_reads_alerts_section(tmp_path):
-    from gsv_metadata_tracker.scheduler import load_scheduler_config
+    from streetscape_metadata_tracker.scheduler import load_scheduler_config
 
     p = tmp_path / "s.toml"
     p.write_text(
@@ -108,7 +108,7 @@ def test_config_loader_reads_alerts_section(tmp_path):
 
 
 def test_config_loader_alerts_default_off(tmp_path):
-    from gsv_metadata_tracker.scheduler import load_scheduler_config
+    from streetscape_metadata_tracker.scheduler import load_scheduler_config
 
     p = tmp_path / "s.toml"
     p.write_text("[schedule]\ncycle_days = 90\n")

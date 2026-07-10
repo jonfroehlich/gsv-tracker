@@ -1,8 +1,8 @@
-// ESLint flat config for the GSV Tracker static frontend (issue #123).
+// ESLint flat config for the Streetscape Tracker static frontend (issue #123).
 //
 // The site loads the three js/*.js files as plain browser <script> tags (no
 // bundler, no ES modules), so they share one global scope: helpers defined in
-// gsv-utils.js are globals to index.js/city.js, and the vendored libraries
+// streetscape-utils.js are globals to index.js/city.js, and the vendored libraries
 // (Leaflet, Chart.js, PapaParse, pako, moment) are globals to all of them.
 // We declare those explicitly so `no-undef` catches real typos (the B1–B4
 // undefined/NaN class) without false-flagging the intentional shared globals.
@@ -24,11 +24,11 @@ const vendorGlobals = {
   dataLayer: "readonly",
 };
 
-// Public symbols gsv-utils.js DEFINES and the other two scripts CONSUME as
-// globals (gsv-utils.js is loaded first). Declared only for the consumers so
-// gsv-utils.js's own definitions aren't flagged as `no-redeclare`.
+// Public symbols streetscape-utils.js DEFINES and the other two scripts CONSUME as
+// globals (streetscape-utils.js is loaded first). Declared only for the consumers so
+// streetscape-utils.js's own definitions aren't flagged as `no-redeclare`.
 const sharedGlobals = {
-  GSV_DATA_BASE_URL: "readonly",
+  STREETSCAPE_DATA_BASE_URL: "readonly",
   PROVIDERS: "readonly",
   getColor: "readonly",
   getProviderFromFilename: "readonly",
@@ -55,7 +55,7 @@ module.exports = [
   {
     // The shared module: defines the sharedGlobals, so it must NOT list them
     // as globals. Its Node export shim references `module`.
-    files: ["js/gsv-utils.js"],
+    files: ["js/streetscape-utils.js"],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "script",
@@ -64,7 +64,7 @@ module.exports = [
     rules: browserRules,
   },
   {
-    // Page scripts that consume the gsv-utils.js globals.
+    // Page scripts that consume the streetscape-utils.js globals.
     files: ["js/index.js", "js/city.js"],
     languageOptions: {
       ecmaVersion: 2022,

@@ -8,9 +8,9 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from gsv_metadata_tracker import db
-from gsv_metadata_tracker.fileutils import load_city_csv_file
-from gsv_metadata_tracker.json_summarizer import (
+from streetscape_metadata_tracker import db
+from streetscape_metadata_tracker.fileutils import load_city_csv_file
+from streetscape_metadata_tracker.json_summarizer import (
     generate_aggregate_v2,
     generate_city_metadata_summary_as_json,
     sanitize_for_json,
@@ -184,7 +184,7 @@ def test_copyright_unknown_run_json(data_dir):
 
 
 def test_run_stats_google_panos_none_when_copyright_unknown():
-    from gsv_metadata_tracker.analysis import calculate_run_stats
+    from streetscape_metadata_tracker.analysis import calculate_run_stats
 
     run_date = date(2023, 11, 5)
     df_unknown = make_city_df([("p1", "2020-05-01")], run_date=run_date, copyright_info=None)

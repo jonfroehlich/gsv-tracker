@@ -9,7 +9,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 # Add parent directory to Python path
 sys.path.append(str(Path(__file__).parent.parent))
-from gsv_metadata_tracker import geoutils
+from streetscape_metadata_tracker import geoutils
 
 # Configure logging
 logger = logging.getLogger(__name__)

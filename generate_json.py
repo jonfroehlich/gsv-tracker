@@ -1,8 +1,8 @@
 import logging
 import os
 
-from gsv_metadata_tracker import get_default_data_dir
-from gsv_metadata_tracker.json_summarizer import (
+from streetscape_metadata_tracker import get_default_data_dir
+from streetscape_metadata_tracker.json_summarizer import (
     generate_aggregate_summary_as_json,
     generate_missing_city_json_files,
 )
@@ -15,14 +15,14 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Generate missing JSON metadata files for GSV data"
+        description="Generate missing JSON metadata files for run data"
     )
 
     parser.add_argument(
         "--data-dir",
         type=str,
         default=get_default_data_dir(),
-        help="Directory containing GSV metadata files (default: project data directory)",
+        help="Directory containing run metadata files (default: project data directory)",
     )
 
     parser.add_argument(

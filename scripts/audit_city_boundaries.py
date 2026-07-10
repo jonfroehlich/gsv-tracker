@@ -41,16 +41,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from geopy.exc import GeocoderServiceError  # noqa: E402
 
-from gsv_metadata_tracker import db  # noqa: E402
-from gsv_metadata_tracker.boundary_audit import (  # noqa: E402
+from streetscape_metadata_tracker import db  # noqa: E402
+from streetscape_metadata_tracker.boundary_audit import (  # noqa: E402
     AuditResult,
     OsmBoundary,
     Thresholds,
     classify,
     parse_osm_result,
 )
-from gsv_metadata_tracker.geoutils import geocode_boundary_raw  # noqa: E402
-from gsv_metadata_tracker.paths import (  # noqa: E402
+from streetscape_metadata_tracker.geoutils import geocode_boundary_raw  # noqa: E402
+from streetscape_metadata_tracker.paths import (  # noqa: E402
     get_default_data_dir,
     get_project_root,
 )

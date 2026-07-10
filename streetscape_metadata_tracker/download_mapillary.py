@@ -43,7 +43,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from .config import METADATA_DTYPES
-from .download_async import DownloadError, generate_grid_points
+from .download_common import DownloadError, generate_grid_points
 from .fileutils import load_city_csv_file
 
 logger = logging.getLogger(__name__)

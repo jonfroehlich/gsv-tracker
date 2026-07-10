@@ -1,8 +1,8 @@
 {
-  "name": "gsv-tracker-frontend",
+  "name": "streetscape-tracker-frontend",
   "version": "0.0.0",
   "private": true,
-  "description": "Lint + offline unit tests for the GSV Tracker static frontend (www/js). No build step; the site itself ships as plain <script> tags.",
+  "description": "Lint + offline unit tests for the Streetscape Tracker static frontend (www/js). No build step; the site itself ships as plain <script> tags.",
   "type": "commonjs",
   "scripts": {
     "lint": "eslint js",

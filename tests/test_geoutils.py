@@ -2,7 +2,7 @@
 
 from geopy.location import Location
 
-from gsv_metadata_tracker.geoutils import EnhancedLocation
+from streetscape_metadata_tracker.geoutils import EnhancedLocation
 
 
 def _location(raw):

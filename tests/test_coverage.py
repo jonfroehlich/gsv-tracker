@@ -11,7 +11,7 @@ from datetime import date
 
 import pandas as pd
 
-from gsv_metadata_tracker.analysis import (
+from streetscape_metadata_tracker.analysis import (
     calculate_coverage_stats,
     calculate_pano_stats,
     calculate_run_stats,

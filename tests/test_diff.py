@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from gsv_metadata_tracker.diff import compute_run_diff, generate_diff_filename
+from streetscape_metadata_tracker.diff import compute_run_diff, generate_diff_filename
 from tests.conftest import COLUMNS, make_city_df
 
 

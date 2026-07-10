@@ -1,0 +1,13 @@
+# Failure notifier for streetscape-tracker (user unit). Triggered by an OnFailure=
+# hook on streetscape-tracker.service; %i is the name of the unit that failed.
+# Emails the recent log via the [alerts] transport in scheduler.toml.
+# Install: see deploy/README.md
+[Unit]
+Description=Email that %i failed
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/streetscape-tracker
+# Same env as the main service (transport creds if the mailer needs them)
+EnvironmentFile=%h/streetscape-tracker/.env
+ExecStart=%h/streetscape-tracker/.venv/bin/python -m streetscape_metadata_tracker.scheduler notify-failure --config %h/streetscape-tracker/config/scheduler.toml

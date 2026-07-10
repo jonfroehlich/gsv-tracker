@@ -1,7 +1,7 @@
 """
-SQLite catalog for GSV Tracker temporal data.
+SQLite catalog for Streetscape Tracker temporal data.
 
-The database (default: data/gsv_tracker.db) is the operational source of
+The database (default: data/streetscape_tracker.db) is the operational source of
 truth for city identity, frozen grid geometry, collection runs, run-to-run
 diffs, the daily API-request budget ledger, and scheduler state. It is a
 local catalog only — published artifacts (csv.gz / json.gz) are generated
@@ -281,7 +281,29 @@ def utc_now_iso() -> str:
 
 def get_default_db_path(data_dir: str) -> str:
     """The catalog lives alongside the data it describes."""
-    return os.path.join(data_dir, "gsv_tracker.db")
+    return os.path.join(data_dir, "streetscape_tracker.db")
+
+
+# Legacy catalog filename from before the GSV Tracker → Streetscape Tracker
+# rename. connect() transparently migrates it to the new name on first open so
+# existing local/deployed catalogs are never orphaned.
+_LEGACY_DB_FILENAME = "gsv_tracker.db"
+
+
+def _migrate_legacy_db_if_present(db_path: str) -> None:
+    """If the target DB is absent but a legacy ``gsv_tracker.db`` sits alongside
+    it, rename the legacy file (and any WAL/SHM sidecars) to the new name. This
+    is a no-op once migrated or when starting from a fresh catalog."""
+    if os.path.exists(db_path):
+        return
+    legacy_path = os.path.join(os.path.dirname(os.path.abspath(db_path)), _LEGACY_DB_FILENAME)
+    if not os.path.exists(legacy_path):
+        return
+    for suffix in ("", "-wal", "-shm"):
+        src = legacy_path + suffix
+        if os.path.exists(src):
+            os.rename(src, db_path + suffix)
+    logger.info("Migrated legacy catalog %s -> %s", legacy_path, db_path)
 
 
 def connect(db_path: str) -> sqlite3.Connection:
@@ -290,6 +312,7 @@ def connect(db_path: str) -> sqlite3.Connection:
     foreign keys enabled, and ensure the schema exists.
     """
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+    _migrate_legacy_db_if_present(db_path)
     conn = sqlite3.connect(db_path, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")

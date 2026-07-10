@@ -57,7 +57,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from .download_async import DownloadError, generate_grid_points, standardize_capture_date
+from .download_common import DownloadError, generate_grid_points, standardize_capture_date
 
 logger = logging.getLogger(__name__)
 

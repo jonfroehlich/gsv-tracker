@@ -1,26 +1,26 @@
-# GSV Tracker daily collection service (user unit).
+# Streetscape Tracker daily collection service (user unit).
 # Install: see deploy/README.md
 [Unit]
-Description=GSV Tracker: collect today's due cities
+Description=Streetscape Tracker: collect today's due cities
 Wants=network-online.target
 After=network-online.target
 # Opt-in raw safety net: email whenever this unit exits nonzero. run-due
 # returns nonzero on ANY failed city, so the scheduler's own threshold email
 # ([alerts] in scheduler.toml) is usually the better signal; enable this too
 # only if you want a belt-and-suspenders notice on every failure/crash.
-#OnFailure=gsv-tracker-notify@%n.service
+#OnFailure=streetscape-tracker-notify@%n.service
 
 [Service]
 Type=oneshot
-# %h/gsv-tracker is a symlink to the real checkout on lab storage
-# (/projects/makeabilitylab/gsv-tracker); see deploy/README.md.
-WorkingDirectory=%h/gsv-tracker
+# %h/streetscape-tracker is a symlink to the real checkout on lab storage
+# (/projects/makeabilitylab/streetscape-tracker); see deploy/README.md.
+WorkingDirectory=%h/streetscape-tracker
 # GMAPS_API_KEY / MAPILLARY_ACCESS_TOKEN live here (repo .env format: KEY=value)
-EnvironmentFile=%h/gsv-tracker/.env
+EnvironmentFile=%h/streetscape-tracker/.env
 # Publish straight to the NFS-mounted docroot (no SSH) — see sync_data_to_server.sh
-Environment=GSV_PUBLISH_LOCAL=1
+Environment=STREETSCAPE_PUBLISH_LOCAL=1
 # NB: --config is a global arg and MUST precede the subcommand (argparse).
-ExecStart=%h/gsv-tracker/.venv/bin/python -m gsv_metadata_tracker.scheduler --config %h/gsv-tracker/config/scheduler.makelab1.toml run-due
+ExecStart=%h/streetscape-tracker/.venv/bin/python -m streetscape_metadata_tracker.scheduler --config %h/streetscape-tracker/config/scheduler.makelab1.toml run-due
 # A full day of cities can legitimately take hours
 TimeoutStartSec=12h
 
@@ -29,7 +29,7 @@ TimeoutStartSec=12h
 # makelab2 array). These caps keep nightly collection from starving co-tenants.
 # The workload is I/O-bound async HTTP + pandas, so real peaks are modest;
 # validate after the first live night and tune:
-#   systemctl --user show gsv-tracker.service -p MemoryPeak -p CPUUsageNSec
+#   systemctl --user show streetscape-tracker.service -p MemoryPeak -p CPUUsageNSec
 Nice=10
 MemoryAccounting=true
 MemoryHigh=4G

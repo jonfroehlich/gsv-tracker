@@ -1,4 +1,4 @@
-# GSV Tracker scheduler configuration — makelab1 production deploy.
+# Streetscape Tracker scheduler configuration — makelab1 production deploy.
 #
 # This is the checked-in production config the systemd unit points at
 # (--config .../scheduler.makelab1.toml). See config/scheduler.toml for the
@@ -33,18 +33,18 @@ sleep_between_cities_s = 60
 
 [paths]
 # The checkout + data live on lab storage (makelab2), NFS-mounted on makelab1.
-# ~/gsv-tracker is a convenience symlink to this path (see deploy/README.md).
-data_dir = "/projects/makeabilitylab/gsv-tracker/data"
-db_path  = "/projects/makeabilitylab/gsv-tracker/data/gsv_tracker.db"
-log_dir  = "/projects/makeabilitylab/gsv-tracker/logs"
+# ~/streetscape-tracker is a convenience symlink to this path (see deploy/README.md).
+data_dir = "/projects/makeabilitylab/streetscape-tracker/data"
+db_path  = "/projects/makeabilitylab/streetscape-tracker/data/streetscape_tracker.db"
+log_dir  = "/projects/makeabilitylab/streetscape-tracker/logs"
 
 [publish]
 # After each successful nightly batch, publish *.csv.gz/*.json.gz to the public
-# docroot. GSV_PUBLISH_LOCAL=1 (set in the systemd unit) makes this a LOCAL rsync
+# docroot. STREETSCAPE_PUBLISH_LOCAL=1 (set in the systemd unit) makes this a LOCAL rsync
 # into the NFS-mounted docroot — no SSH hop. The script excludes the DB/logs/bare
 # CSVs, so only sanitized artifacts ever reach the web server.
 enabled = true
-publish_script = "/projects/makeabilitylab/gsv-tracker/sync_data_to_server.sh"
+publish_script = "/projects/makeabilitylab/streetscape-tracker/sync_data_to_server.sh"
 
 [alerts]
 # Email on an unhealthy night (>= failure_threshold failed collections) or crash.
@@ -53,4 +53,4 @@ enabled = true
 recipient = "jonf@cs.uw.edu"
 transport = "mail"
 failure_threshold = 1
-subject_prefix = "[gsv-tracker]"
+subject_prefix = "[streetscape-tracker]"

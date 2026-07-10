@@ -1,6 +1,6 @@
-# Nightly trigger for gsv-tracker.service (user unit).
+# Nightly trigger for streetscape-tracker.service (user unit).
 [Unit]
-Description=Run GSV Tracker collection nightly
+Description=Run Streetscape Tracker collection nightly
 
 [Timer]
 # 2am Pacific with a randomized delay so restarts don't thundering-herd

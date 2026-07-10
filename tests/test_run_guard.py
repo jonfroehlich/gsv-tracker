@@ -12,7 +12,7 @@ from datetime import date
 
 import pandas as pd
 
-from gsv_metadata_tracker.analysis import (
+from streetscape_metadata_tracker.analysis import (
     GOOGLE_COPYRIGHT,
     calculate_run_stats,
     detect_systemic_failure,
@@ -141,35 +141,35 @@ class TestVisualizationProviderFilter:
         return count
 
     def test_mapillary_rows_are_kept_for_mapillary_provider(self):
-        from gsv_metadata_tracker.vis import create_visualization_map
+        from streetscape_metadata_tracker.vis import create_visualization_map
 
         df = _pano_df("© Mapillary contributor 12345")
         m = create_visualization_map(df, "Testville", provider="mapillary")
         assert self._marker_count(m) == 3
 
     def test_non_google_rows_are_dropped_for_gsv_provider(self):
-        from gsv_metadata_tracker.vis import create_visualization_map
+        from streetscape_metadata_tracker.vis import create_visualization_map
 
         df = _pano_df("© Some Third Party")
         m = create_visualization_map(df, "Testville", provider="gsv")
         assert self._marker_count(m) == 0
 
     def test_google_named_photographer_dropped_for_gsv_provider(self):
-        from gsv_metadata_tracker.vis import create_visualization_map
+        from streetscape_metadata_tracker.vis import create_visualization_map
 
         df = _pano_df("© MIB 360 - Google Virtual Tours Agency")
         m = create_visualization_map(df, "Testville", provider="gsv")
         assert self._marker_count(m) == 0
 
     def test_google_rows_are_kept_for_gsv_provider(self):
-        from gsv_metadata_tracker.vis import create_visualization_map
+        from streetscape_metadata_tracker.vis import create_visualization_map
 
         df = _pano_df("© Google")
         m = create_visualization_map(df, "Testville", provider="gsv")
         assert self._marker_count(m) == 3
 
     def test_mapillary_viewer_links_in_popups(self):
-        from gsv_metadata_tracker.vis import create_visualization_map
+        from streetscape_metadata_tracker.vis import create_visualization_map
 
         df = _pano_df("© Mapillary contributor 12345")
         m = create_visualization_map(df, "Testville", provider="mapillary")

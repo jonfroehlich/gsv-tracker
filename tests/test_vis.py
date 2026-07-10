@@ -1,5 +1,5 @@
 """
-Tests for map-visualization edge cases (gsv_metadata_tracker/vis.py).
+Tests for map-visualization edge cases (streetscape_metadata_tracker/vis.py).
 
 Pure-logic / no-network: these build a tiny in-memory metadata DataFrame and
 call create_visualization_map, asserting it produces a folium.Map without
@@ -9,8 +9,8 @@ raising. The focus is the degenerate-geometry guard from issue #69.
 import folium
 import pandas as pd
 
-from gsv_metadata_tracker import vis
-from gsv_metadata_tracker.config import METADATA_DTYPES
+from streetscape_metadata_tracker import vis
+from streetscape_metadata_tracker.config import METADATA_DTYPES
 
 
 def _row(pano_id, lat, lon):

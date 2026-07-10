@@ -8,9 +8,9 @@ import subprocess
 import sys
 from datetime import date
 
-from gsv_metadata_tracker import db
-from gsv_metadata_tracker.fileutils import load_city_csv_file
-from gsv_metadata_tracker.json_summarizer import generate_city_metadata_summary_as_json
+from streetscape_metadata_tracker import db
+from streetscape_metadata_tracker.fileutils import load_city_csv_file
+from streetscape_metadata_tracker.json_summarizer import generate_city_metadata_summary_as_json
 from tests.conftest import make_city_df, write_city_csv_gz
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -105,13 +105,13 @@ def test_migration_end_to_end(data_dir):
     assert result.returncode == 0, result.stderr
     assert "Dry run complete" in result.stdout
     assert "albany--new-york--united-states  <-  albany--ny" in result.stdout
-    assert not os.path.exists(os.path.join(data_dir, "gsv_tracker.db"))
+    assert not os.path.exists(os.path.join(data_dir, "streetscape_tracker.db"))
 
     # Execute
     result = _run_migration(data_dir, "--execute")
     assert result.returncode == 0, result.stderr
 
-    conn = db.connect(os.path.join(data_dir, "gsv_tracker.db"))
+    conn = db.connect(os.path.join(data_dir, "streetscape_tracker.db"))
     cities = db.get_all_cities(conn)
     # 'solo--town' is a legacy slug; canonical id comes from the JSON identity
     assert {c.city_id for c in cities} == {"albany--new-york--united-states", "solo--testland"}

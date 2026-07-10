@@ -1,16 +1,16 @@
-# ADR 0001: Keep GSV Tracker fully static (no real backend)
+# ADR 0001: Keep Streetscape Tracker fully static (no real backend)
 
 - **Status:** Accepted (2026-07-08)
 - **Related issues:** #77 (dense-city rendering), #58 (city.html forced reflow), #69 (single-pano / 0-area viz crash)
 
 ## Context
 
-GSV Tracker is a batch pipeline that produces immutable dated snapshots per
+Streetscape Tracker is a batch pipeline that produces immutable dated snapshots per
 `(city, provider)` — `{city}_..._DATE.csv.gz` + sibling `.json.gz`, plus a single
 `cities.json.gz` aggregate — served as static files from the UW CSE Apache web server
 via `rsync` (`sync_data_to_server.sh`). The frontend (`www/`, vanilla JS + Leaflet +
 Chart.js, no build step) fetches those files directly and decompresses/renders in the
-browser. The SQLite catalog (`data/gsv_tracker.db`) is the local operational source of
+browser. The SQLite catalog (`data/streetscape_tracker.db`) is the local operational source of
 truth and is never published.
 
 The question raised: should we stand up a "real backend" (a persistent API/DB service)?

@@ -3,11 +3,11 @@
 // HTML this file generates, so ESLint can't see those string references.)
 /**
  * city.js
- * Per-city detail-view logic for GSV City Explorer.
+ * Per-city detail-view logic for Streetscape City Explorer.
  *
- * Depends on globals from gsv-utils.js: PROVIDERS, getColor,
+ * Depends on globals from streetscape-utils.js: PROVIDERS, getColor,
  * getProviderFromFilename, fetchGzippedJson, adaptCitiesPayload,
- * GSV_DATA_BASE_URL. The imagery provider (GSV vs Mapillary) is derived
+ * STREETSCAPE_DATA_BASE_URL. The imagery provider (GSV vs Mapillary) is derived
  * from the data filename's provider token.
  *
  * Third-party libraries (loaded via CDN in city.html):
@@ -47,7 +47,7 @@ let providerGlobal = "gsv"; // derived from the data filename
 let oldestDateGlobal = null;
 let newestDateGlobal = null;
 
-// panoDateOrNull() and isGoogleCopyright() are shared helpers from gsv-utils.js
+// panoDateOrNull() and isGoogleCopyright() are shared helpers from streetscape-utils.js
 // (loaded first), reused here for the info-panel dates and the © Google filter.
 let runsGlobal = [];        // this city's run history from the aggregate
 let currentFileGlobal = ""; // csv.gz filename of the run being displayed
@@ -626,7 +626,7 @@ async function loadData() {
     let citiesData = null;
     try {
       progressText.textContent = "Loading city index…";
-      rawCities = await fetchGzippedJson(GSV_DATA_BASE_URL + "cities.json.gz");
+      rawCities = await fetchGzippedJson(STREETSCAPE_DATA_BASE_URL + "cities.json.gz");
       // ?city= queries resolve against the requested provider's view
       // (?provider=mapillary), defaulting to GSV
       const queryProvider = PROVIDERS[urlParams.get("provider")]
@@ -667,7 +667,7 @@ async function loadData() {
 
     // Load city-specific JSON metadata
     progressText.textContent = "Loading city metadata…";
-    const metadataUrl = GSV_DATA_BASE_URL + targetFile.replace(".csv.gz", ".json.gz");
+    const metadataUrl = STREETSCAPE_DATA_BASE_URL + targetFile.replace(".csv.gz", ".json.gz");
     const stats = await fetchGzippedJson(metadataUrl);
     changeGlobal = stats.change_from_previous_run || null;
 
@@ -749,7 +749,7 @@ async function loadData() {
     //   PapaParse's ReadableStream support targets Node.js streams only.
     //   Passing a WHATWG ReadableStream throws a TypeError in _readChunk.
 
-    const response = await fetch(GSV_DATA_BASE_URL + targetFile);
+    const response = await fetch(STREETSCAPE_DATA_BASE_URL + targetFile);
     if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${targetFile}`);
 
     let receivedBytes = 0;

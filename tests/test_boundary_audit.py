@@ -9,7 +9,7 @@ import math
 
 import pytest
 
-from gsv_metadata_tracker.boundary_audit import (
+from streetscape_metadata_tracker.boundary_audit import (
     Thresholds,
     bbox_dims_m,
     bbox_intersection_frac,
@@ -19,7 +19,7 @@ from gsv_metadata_tracker.boundary_audit import (
     polygon_area_m2,
     rect_polygon_coverage,
 )
-from gsv_metadata_tracker.db import CityRow
+from streetscape_metadata_tracker.db import CityRow
 
 
 def make_city(center_lat=47.6, center_lon=-122.33, grid_width_m=10_000, grid_height_m=10_000):

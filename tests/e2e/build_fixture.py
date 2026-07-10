@@ -29,15 +29,15 @@ import sys
 import tempfile
 from datetime import date
 
-# Make the repo root (and therefore ``tests`` and ``gsv_metadata_tracker``)
+# Make the repo root (and therefore ``tests`` and ``streetscape_metadata_tracker``)
 # importable when this script is run directly.
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from gsv_metadata_tracker import db  # noqa: E402
-from gsv_metadata_tracker.fileutils import load_city_csv_file  # noqa: E402
-from gsv_metadata_tracker.json_summarizer import (  # noqa: E402
+from streetscape_metadata_tracker import db  # noqa: E402
+from streetscape_metadata_tracker.fileutils import load_city_csv_file  # noqa: E402
+from streetscape_metadata_tracker.json_summarizer import (  # noqa: E402
     generate_aggregate_v2,
     generate_city_metadata_summary_as_json,
 )
@@ -143,7 +143,7 @@ def build():
 
     # Keep the catalog DB out of the committed fixture (temp dir, discarded).
     db_tmp = tempfile.mkdtemp(prefix="gsv-e2e-db-")
-    conn = db.connect(os.path.join(db_tmp, "gsv_tracker.db"))
+    conn = db.connect(os.path.join(db_tmp, "streetscape_tracker.db"))
     try:
         # 1) Normal multi-run GSV city: two runs, a diff, a spread of years.
         alpha = db.register_city(

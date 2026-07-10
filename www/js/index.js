@@ -1,9 +1,9 @@
 /**
  * index.js
- * Overview-map logic for GSV City Explorer.
+ * Overview-map logic for Streetscape City Explorer.
  *
- * Depends on globals from gsv-utils.js (PROVIDERS, getColor,
- * fetchGzippedJson, adaptCitiesPayload, GSV_DATA_BASE_URL) and the
+ * Depends on globals from streetscape-utils.js (PROVIDERS, getColor,
+ * fetchGzippedJson, adaptCitiesPayload, STREETSCAPE_DATA_BASE_URL) and the
  * Leaflet / Chart.js libraries.
  */
 
@@ -787,7 +787,7 @@ function initProviderToggle() {
 /** Fetch cities.json.gz, then render the active provider's view. */
 async function loadData() {
   try {
-    rawCitiesData = await fetchGzippedJson(GSV_DATA_BASE_URL + "cities.json.gz");
+    rawCitiesData = await fetchGzippedJson(STREETSCAPE_DATA_BASE_URL + "cities.json.gz");
     document.getElementById("loading").style.display = "none";
     initProviderToggle();
     renderProvider(true);

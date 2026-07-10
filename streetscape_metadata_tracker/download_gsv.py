@@ -16,9 +16,12 @@ from filelock import FileLock
 from tqdm import tqdm
 
 from .config import METADATA_DTYPES
+from .download_common import DownloadError, generate_grid_points, standardize_capture_date
 from .fileutils import load_city_csv_file
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["download_gsv_metadata_async", "fetch_gsv_pano_metadata_async"]
 
 
 def create_helpful_permission_error(path: str) -> str:
@@ -34,14 +37,8 @@ def create_helpful_permission_error(path: str) -> str:
         f"- Check folder permissions in File Explorer\n"
         f"- Close any programs that might be accessing the directory\n"
         f"- Try setting the command line param download-dir to a different directory using:\n"
-        f"  python gsv_tracker.py CITY_NAME --download-dir NEW_DIRECTORY\n"
+        f"  python streetscape_tracker.py CITY_NAME --download-dir NEW_DIRECTORY\n"
     )
-
-
-class DownloadError(Exception):
-    """Custom exception for download-related errors."""
-
-    pass
 
 
 @backoff.on_exception(
@@ -83,35 +80,6 @@ async def fetch_gsv_pano_metadata_async(
         raise DownloadError(f"Error fetching data for coordinates {lat},{lon}: {str(e)}") from e
 
 
-def generate_grid_points(
-    origin: geopy.Point, width_steps: int, height_steps: int, step_length: float
-) -> list[tuple[float, float, int, int]]:
-    """
-    Generate all grid points for the search area with progress bar.
-
-    Args:
-        origin: Center point of the grid
-        width_steps: Number of steps in width direction
-        height_steps: Number of steps in height direction
-        step_length: Distance between points in meters
-
-    Returns:
-        List of tuples containing (latitude, longitude, i, j) for each point
-    """
-    points = []
-    total_points = (width_steps + 1) * (height_steps + 1)
-
-    with tqdm(total=total_points, desc="Generating search grid points") as pbar:
-        for i in range(-height_steps // 2, height_steps // 2 + 1):
-            for j in range(-width_steps // 2, width_steps // 2 + 1):
-                north_point = geopy.distance.distance(meters=i * step_length).destination(origin, 0)
-                point = geopy.distance.distance(meters=j * step_length).destination(north_point, 90)
-                points.append((point.latitude, point.longitude, i, j))
-                pbar.update(1)
-
-    return points
-
-
 def get_processed_points(file_path: str) -> set:
     """
     Get set of already processed points from existing download file.
@@ -131,39 +99,6 @@ def get_processed_points(file_path: str) -> set:
     except Exception as e:
         logger.error(f"Error reading existing file: {str(e)}")
         return set()
-
-
-def standardize_capture_date(date_str: str | None) -> str | None:
-    """Standardizes a capture date string to ISO 8601 format (YYYY-MM-DD).
-
-    The Google Street View Static API can return capture dates in various formats.
-    This function attempts to parse the input date string using several common formats
-    and converts it to a standard ISO 8601 date string (YYYY-MM-DD).
-
-    Args:
-        date_str: The capture date string from the API response. Can be None.
-
-    Returns:
-        A string representing the date in ISO 8601 format (YYYY-MM-DD), or None if
-        the input is None or if no matching format is found.
-    """
-    if not date_str:  # Handle None or empty strings
-        return None
-
-    formats_to_try = [
-        "%Y-%m-%d",  # Most precise format (YYYY-MM-DD), try first
-        "%Y-%m",  # Year and month (YYYY-MM)
-        "%Y",  # Year only (YYYY)
-    ]
-
-    for fmt in formats_to_try:
-        try:
-            date_obj = datetime.strptime(date_str, fmt).date()  # Parse the date
-            return date_obj.isoformat()  # Convert to ISO 8601 format (YYYY-MM-DD)
-        except ValueError:
-            continue  # If parsing fails, try the next format
-
-    return None  # Return None if no format matches
 
 
 async def process_batch_async(

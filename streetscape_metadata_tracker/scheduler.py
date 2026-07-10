@@ -1,5 +1,5 @@
 """
-Staggered collection scheduler for GSV Tracker.
+Staggered collection scheduler for Streetscape Tracker.
 
 Designed to run as a daily systemd timer (oneshot): each invocation of
 `run-due` collects the cities that are due today, within a configurable
@@ -9,9 +9,9 @@ catalog, so the process is crash-safe and a missed day self-heals (due
 selection is ordered stalest-first).
 
 Usage (--config accepted on either side of the subcommand):
-    python -m gsv_metadata_tracker.scheduler [--config PATH] status
-    python -m gsv_metadata_tracker.scheduler [--config PATH] assign
-    python -m gsv_metadata_tracker.scheduler [--config PATH] run-due [--dry-run] [--limit N]
+    python -m streetscape_metadata_tracker.scheduler [--config PATH] status
+    python -m streetscape_metadata_tracker.scheduler [--config PATH] assign
+    python -m streetscape_metadata_tracker.scheduler [--config PATH] run-due [--dry-run] [--limit N]
 
 Config: TOML (see config/scheduler.toml). Requires Python 3.11+ (tomllib).
 """
@@ -38,7 +38,7 @@ from .download_mapillary import estimate_tile_count
 from .json_summarizer import generate_aggregate_v2
 from .naming import KNOWN_PROVIDERS
 
-logger = logging.getLogger("gsv_scheduler")
+logger = logging.getLogger("streetscape_scheduler")
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_PATH = _PROJECT_ROOT / "config" / "scheduler.toml"
@@ -146,7 +146,7 @@ def load_scheduler_config(path: str | None = None) -> SchedulerConfig:
             transport=al.get("transport", "mail"),
             command=al.get("command", ""),
             failure_threshold=al.get("failure_threshold", 1),
-            subject_prefix=al.get("subject_prefix", "[gsv-tracker]"),
+            subject_prefix=al.get("subject_prefix", "[streetscape-tracker]"),
         ),
     )
 
@@ -167,7 +167,7 @@ def setup_logging(cfg: SchedulerConfig, verbose: bool = False) -> None:
     os.makedirs(cfg.log_dir, exist_ok=True)
     handlers = [logging.StreamHandler(sys.stdout)]
     file_handler = logging.handlers.TimedRotatingFileHandler(
-        os.path.join(cfg.log_dir, "gsv_scheduler.log"), when="midnight", backupCount=30
+        os.path.join(cfg.log_dir, "streetscape_scheduler.log"), when="midnight", backupCount=30
     )
     handlers.append(file_handler)
     logging.basicConfig(
@@ -179,7 +179,7 @@ def setup_logging(cfg: SchedulerConfig, verbose: bool = False) -> None:
 
 def _recent_log_tail(cfg: SchedulerConfig, n: int = 40) -> str:
     """Last n lines of the scheduler log, for pasting into an alert email."""
-    log_path = os.path.join(cfg.log_dir, "gsv_scheduler.log")
+    log_path = os.path.join(cfg.log_dir, "streetscape_scheduler.log")
     try:
         with open(log_path, encoding="utf-8", errors="replace") as f:
             return "".join(f.readlines()[-n:]) or "(log empty)"
@@ -196,7 +196,7 @@ def cmd_notify_failure(cfg: SchedulerConfig) -> int:
     """
     host = socket.gethostname()
     body = (
-        "gsv-tracker's scheduled run exited nonzero (systemd OnFailure).\n\n"
+        "streetscape-tracker's scheduled run exited nonzero (systemd OnFailure).\n\n"
         "Recent log:\n" + _recent_log_tail(cfg, 60)
     )
     sent = send_alert(cfg.alerts, f"scheduled run FAILED on {host}", body)
@@ -293,10 +293,10 @@ def cmd_assign(cfg: SchedulerConfig) -> int:
 def _run_one_city(
     cfg: SchedulerConfig, city: db.CityRow, today: date, provider: str = "gsv"
 ) -> bool:
-    """Collect one (city, provider) via a gsv_tracker.py subprocess."""
+    """Collect one (city, provider) via a streetscape_tracker.py subprocess."""
     cmd = [
         sys.executable,
-        str(_PROJECT_ROOT / "gsv_tracker.py"),
+        str(_PROJECT_ROOT / "streetscape_tracker.py"),
         city.display_name,
         "--provider",
         provider,
@@ -416,7 +416,7 @@ def cmd_run_due(cfg: SchedulerConfig, dry_run: bool = False, limit: int | None =
                 logger.warning(
                     f"{city.city_id} [{provider}]: ~{est:,} estimated requests "
                     f"exceeds the entire daily budget ({budget:,}). "
-                    f"Skipping — run manually with gsv_tracker.py --force, "
+                    f"Skipping — run manually with streetscape_tracker.py --force, "
                     f"raise daily_request_budget, or set enabled=0."
                 )
                 skipped_budget += 1
@@ -468,7 +468,7 @@ def cmd_run_due(cfg: SchedulerConfig, dry_run: bool = False, limit: int | None =
         generate_aggregate_v2(conn, cfg.data_dir)
 
     # Nightly catalog backup (keep one rolling copy alongside the logs)
-    backup_path = os.path.join(cfg.log_dir, "gsv_tracker.db.backup")
+    backup_path = os.path.join(cfg.log_dir, "streetscape_tracker.db.backup")
     try:
         import sqlite3
 
@@ -524,7 +524,7 @@ def _add_global_flags(p: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m gsv_metadata_tracker.scheduler",
+        prog="python -m streetscape_metadata_tracker.scheduler",
         description="Staggered GSV collection scheduler",
     )
     _add_global_flags(parser)

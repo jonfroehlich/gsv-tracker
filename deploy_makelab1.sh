@@ -10,7 +10,7 @@
 #   1. git pull --ff-only              (fetch the latest code)
 #   2. pip install (only if requirements.txt changed in the pull)
 #   3. rsync www/ -> the public docroot, FLATTENED (so the site serves at
-#      .../public/gsv-tracker/ with no /www/ in the URL), excluding dev tooling
+#      .../public/streetscape-tracker/ with no /www/ in the URL), excluding dev tooling
 #      (node_modules, eslint, tests, package files) and PROTECTING the docroot's
 #      data/, poster/, cities/, data-huge/ from deletion.
 #
@@ -28,13 +28,13 @@
 #   ./deploy_makelab1.sh --skip-pull     # just re-publish the site (no git pull)
 #
 # Environment overrides:
-#   GSV_DOCROOT   public docroot (default: /cse/web/research/makelab/public/gsv-tracker)
+#   STREETSCAPE_DOCROOT   public docroot (default: /cse/web/research/makelab/public/streetscape-tracker)
 
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 WWW_DIR="${REPO_DIR}/www"
-DOCROOT="${GSV_DOCROOT:-/cse/web/research/makelab/public/gsv-tracker}"
+DOCROOT="${STREETSCAPE_DOCROOT:-/cse/web/research/makelab/public/streetscape-tracker}"
 
 DRY_RUN=""
 ASSUME_YES=""
@@ -57,18 +57,18 @@ done
 # Validation
 # ──────────────────────────────────────────────
 if [[ ! -d "$WWW_DIR" ]]; then
-  echo "Error: www/ not found at $WWW_DIR (run from the gsv-tracker checkout)."
+  echo "Error: www/ not found at $WWW_DIR (run from the streetscape-tracker checkout)."
   exit 1
 fi
 if [[ ! -d "$DOCROOT" ]]; then
   echo "Error: docroot not found: $DOCROOT"
-  echo "Set GSV_DOCROOT or create it first."
+  echo "Set STREETSCAPE_DOCROOT or create it first."
   exit 1
 fi
 command -v rsync >/dev/null || { echo "Error: rsync not installed."; exit 1; }
 
 echo "═══════════════════════════════════════════"
-echo " GSV Tracker: code + website deploy"
+echo " Streetscape Tracker: code + website deploy"
 echo "═══════════════════════════════════════════"
 echo "  Repo:    $REPO_DIR"
 echo "  Site:    $WWW_DIR/  ->  $DOCROOT/  (flattened)"
@@ -144,4 +144,4 @@ fi
 rsync "${RSYNC_ARGS[@]}" "$WWW_DIR/" "$DOCROOT/"
 
 echo ""
-echo "Site deployed to: https://makeabilitylab.cs.washington.edu/public/gsv-tracker/"
+echo "Site deployed to: https://makeabilitylab.cs.washington.edu/public/streetscape-tracker/"

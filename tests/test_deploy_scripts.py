@@ -38,7 +38,7 @@ def test_deploy_dryrun_protects_data_sweeps_junk_excludes_devtooling(tmp_path):
     (docroot / "www").mkdir()  # legacy pre-flatten subdir
     (docroot / "www" / "stale.html").write_text("old")
 
-    env = {**os.environ, "GSV_DOCROOT": str(docroot)}
+    env = {**os.environ, "STREETSCAPE_DOCROOT": str(docroot)}
     # --dry-run skips git pull and applies nothing; runs against the repo's real www/.
     r = subprocess.run(
         ["bash", _SCRIPT, "--dry-run"],

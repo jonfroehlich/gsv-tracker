@@ -1,4 +1,4 @@
-# gsv_metadata_tracker/vis.py
+# streetscape_metadata_tracker/vis.py
 
 import json
 import logging
