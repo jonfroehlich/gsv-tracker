@@ -1,0 +1,16 @@
+{
+  "name": "gsv-tracker-frontend",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Lint + offline unit tests for the GSV Tracker static frontend (www/js). No build step; the site itself ships as plain <script> tags.",
+  "type": "commonjs",
+  "scripts": {
+    "lint": "eslint js",
+    "test": "node --test \"js/__tests__/**/*.test.js\""
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.37.0",
+    "eslint": "^9.37.0",
+    "globals": "^15.15.0"
+  }
+}

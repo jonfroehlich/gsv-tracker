@@ -48,3 +48,48 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - name: pytest
         run: pytest
+
+  frontend:
+    name: Frontend (ESLint + unit tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: www
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Node 22 LTS: `node --test` glob patterns need >=21.
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: www/package-lock.json
+      - run: npm ci
+      - name: ESLint
+        run: npm run lint
+      - name: Unit tests (node --test)
+        run: npm test
+
+  e2e:
+    name: Frontend e2e (Playwright)
+    runs-on: ubuntu-latest
+    # Non-blocking (issue #124): a red e2e run must not fail the workflow or
+    # block merges; it drives real Chromium over the committed fixture and is
+    # advisory. The fast pytest/frontend jobs never depend on it.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt pytest-playwright
+      - name: Cache Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+      - name: e2e smoke test
+        run: pytest tests/e2e -m e2e

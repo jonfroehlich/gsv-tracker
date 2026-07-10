@@ -87,11 +87,9 @@ function createTooltip(city) {
   // for other providers every pano is already provider imagery
   let panoLinesHtml = `<li>Total Panoramas: ${panoStats.unique_panos.toLocaleString()}</li>`;
   if (city.provider === "gsv" && panoStats.unique_google_panos != null) {
-    // Guard against a 0-pano run (issue #69): avoid a divide-by-zero
-    // "Infinity%" in the tooltip.
-    const googlePct = panoStats.unique_panos > 0
-      ? ((panoStats.unique_google_panos / panoStats.unique_panos) * 100).toFixed(1)
-      : "0.0";
+    // googleSharePercent guards the 0-pano divide-by-zero "Infinity%" (#69).
+    const googlePct = googleSharePercent(
+      panoStats.unique_google_panos, panoStats.unique_panos);
     panoLinesHtml += `<li>Google Panoramas: ${panoStats.unique_google_panos.toLocaleString()} (${googlePct}%)</li>`;
   }
 
@@ -132,8 +130,8 @@ function createTooltip(city) {
       <li>Median Age: ${ageStats.median_pano_age_years != null ? ageStats.median_pano_age_years.toFixed(1) + " years" : "No data"}</li>
       <li>Average Age: ${ageStats.avg_pano_age_years != null ? ageStats.avg_pano_age_years.toFixed(1) + " years" : "No data"}
         ${ageStats.stdev_pano_age_years != null ? ` (SD=${ageStats.stdev_pano_age_years.toFixed(1)})` : ""}</li>
-      <li>Newest: ${ageStats.newest_pano_date ? new Date(ageStats.newest_pano_date).toLocaleDateString() : "No data"}</li>
-      <li>Oldest: ${ageStats.oldest_pano_date ? new Date(ageStats.oldest_pano_date).toLocaleDateString() : "No data"}</li>
+      <li>Newest: ${panoDateOrNull(ageStats.newest_pano_date)?.toLocaleDateString() ?? "No data"}</li>
+      <li>Oldest: ${panoDateOrNull(ageStats.oldest_pano_date)?.toLocaleDateString() ?? "No data"}</li>
     </ul>
     ${changeHtml}
   `;
@@ -144,20 +142,11 @@ function createTooltip(city) {
 
   const currentYear = new Date().getFullYear();
   // capture_year_histogram may be a {counts: {...}} wrapper, a bare year→count
-  // map, or missing entirely for an empty run — tolerate all three.
+  // map, or missing entirely for an empty run — buildFilledHistogram tolerates
+  // all three (and the Math.min([]) === Infinity empty-run case, #69).
   const rawHistogram =
-    city.capture_year_histogram?.counts || city.capture_year_histogram || {};
-
-  const years = Object.keys(rawHistogram).map(Number);
-  const filledHistogram = {};
-  // Skip the fill when there are no years (Math.min([]) === Infinity would
-  // otherwise blow up the loop).
-  if (years.length > 0) {
-    const startYear = Math.min(...years);
-    for (let y = startYear; y <= currentYear; y++) {
-      filledHistogram[y] = rawHistogram[y] || 0;
-    }
-  }
+    city.capture_year_histogram?.counts || city.capture_year_histogram;
+  const filledHistogram = buildFilledHistogram(rawHistogram, currentYear);
 
   chartContainer.appendChild(createPopupHistogram(filledHistogram, currentYear));
   container.appendChild(chartContainer);
@@ -307,28 +296,6 @@ function highlightCitiesByExactAge(targetAge, zoomToHighlightedCities = false) {
       [maxLat + latPad, maxLon + lonPad],
     ]);
   }
-}
-
-/**
- * Highlight cities whose median age falls in [minAge, maxAge).
- *
- * @param {number} minAge
- * @param {number} maxAge
- */
-function highlightCitiesByAgeRange(minAge, maxAge) {
-  [charts.pano, charts.area].forEach((chart) => {
-    chart.data.datasets[0].pointBackgroundColor = chart.data.datasets[0].data.map((pt) =>
-      pt.y >= minAge && pt.y < maxAge ? pt.backgroundColor : "rgba(200,200,200,0.2)"
-    );
-    chart.update();
-  });
-
-  mapRectangles.forEach((rect) => {
-    const age = rect.city.pano_age_stats.median_pano_age_years;
-    rect.setStyle(age >= minAge && age < maxAge
-      ? { fillOpacity: 0.8, weight: 2 }
-      : { fillOpacity: 0.2, weight: 1 });
-  });
 }
 
 /**

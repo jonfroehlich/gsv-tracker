@@ -41,4 +41,10 @@ indent-style = "space"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# Exclude the browser e2e smoke tests (issue #124) from the default/fast run;
+# the e2e CI job opts back in with `pytest -m e2e`. They need pytest-playwright
+# + a Chromium install and are intentionally kept out of the pure-logic suite.
+addopts = "-q -m 'not e2e'"
+markers = [
+  "e2e: browser end-to-end smoke tests (require pytest-playwright + chromium)",
+]

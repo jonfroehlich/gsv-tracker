@@ -227,3 +227,94 @@ function adaptCitiesPayload(data, provider = "gsv") {
       .filter(Boolean),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Pure display/derivation helpers.
+//
+// These carry the numeric/date edge cases that produced the B1–B4 tooltip
+// bugs (Infinity%/NaN) and the 0-pano epoch-date bug (#122/#69). They are
+// deliberately DOM-free and side-effect-free so index.js/city.js can share
+// them and the Node unit tests (issue #123) can exercise them directly.
+// ---------------------------------------------------------------------------
+
+/**
+ * Exact "official Google" copyright test — the JS mirror of
+ * analysis.is_google_copyright. Matches ONLY the literal `© Google`
+ * string, never a substring, because third-party photographer names can
+ * themselves contain "Google" (e.g. "Google Street View contributor").
+ *
+ * @param {?string} copyright - A run row's copyright_info field.
+ * @returns {boolean} True iff the imagery is official Google.
+ */
+function isGoogleCopyright(copyright) {
+  return copyright === "© Google";
+}
+
+/**
+ * Parse a pano capture date, returning null when the date is absent
+ * (age_stats are all null for a 0-pano run). Guards against
+ * `new Date(null)` silently rendering as the Unix epoch (12/31/1969)
+ * instead of a "—"/"No data" placeholder (issue #122, #69 family).
+ *
+ * @param {?string} v - ISO date string, or null/undefined.
+ * @returns {?Date} A Date, or null when the input is falsy.
+ */
+function panoDateOrNull(v) {
+  return v ? new Date(v) : null;
+}
+
+/**
+ * Official-Google share of all found panoramas, as a fixed-1-decimal
+ * percent string. Guards the divide-by-zero on a 0-pano run that would
+ * otherwise render "Infinity%" in the overview tooltip (B1–B4 audit).
+ *
+ * @param {number} googleCount - Unique official-Google panos.
+ * @param {number} totalCount - Unique panos of all copyrights.
+ * @returns {string} e.g. "37.2"; "0.0" when totalCount <= 0.
+ */
+function googleSharePercent(googleCount, totalCount) {
+  if (!(totalCount > 0)) return "0.0";
+  return ((googleCount / totalCount) * 100).toFixed(1);
+}
+
+/**
+ * Build a gap-filled year→count histogram from a sparse capture-year map,
+ * spanning the earliest present year through currentYear (inclusive), with
+ * missing interior years zero-filled. Returns {} when there are no years,
+ * avoiding the `Math.min(...[]) === Infinity` blow-up on an empty or
+ * missing histogram (issue #69).
+ *
+ * @param {?Object<string|number, number>} rawHistogram - Sparse year→count.
+ * @param {number} currentYear - Upper bound (inclusive) of the fill range.
+ * @returns {Object<number, number>} Dense year→count, or {} when empty.
+ */
+function buildFilledHistogram(rawHistogram, currentYear) {
+  const source = rawHistogram || {};
+  const years = Object.keys(source).map(Number);
+  const filled = {};
+  if (years.length > 0) {
+    const startYear = Math.min(...years);
+    for (let y = startYear; y <= currentYear; y++) {
+      filled[y] = source[y] || 0;
+    }
+  }
+  return filled;
+}
+
+// Node/CommonJS export shim for the unit tests (issue #123). This is a no-op
+// in the browser, where these symbols are plain globals loaded via <script>.
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    GSV_DATA_BASE_URL,
+    PROVIDERS,
+    getColor,
+    getProviderFromFilename,
+    fetchGzippedJson,
+    adaptCityRecord,
+    adaptCitiesPayload,
+    isGoogleCopyright,
+    panoDateOrNull,
+    googleSharePercent,
+    buildFilledHistogram,
+  };
+}
