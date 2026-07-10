@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gsv_metadata_tracker import db  # noqa: E402
+from streetscape_metadata_tracker import db  # noqa: E402
 
 COLUMNS = [
     "query_lat",
@@ -148,7 +148,7 @@ def data_dir(tmp_path):
 
 @pytest.fixture
 def conn(data_dir):
-    connection = db.connect(os.path.join(data_dir, "gsv_tracker.db"))
+    connection = db.connect(os.path.join(data_dir, "streetscape_tracker.db"))
     yield connection
     connection.close()
 

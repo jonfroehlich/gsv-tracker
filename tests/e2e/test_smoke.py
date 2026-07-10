@@ -67,8 +67,8 @@ def base_url():
 def route_fixture_data(page: Page):
     """Fulfill every data fetch from the committed fixture.
 
-    The frontend hardcodes the production data host (GSV_DATA_BASE_URL); rather
-    than change prod code, we intercept ``**/gsv-tracker/data/**`` and serve the
+    The frontend hardcodes the production data host (STREETSCAPE_DATA_BASE_URL); rather
+    than change prod code, we intercept ``**/streetscape-tracker/data/**`` and serve the
     fixture bytes RAW (no Content-Encoding: gzip) so the page's own pako /
     DecompressionStream("gzip") does the decompression, exactly as in prod.
     """
@@ -91,7 +91,7 @@ def route_fixture_data(page: Page):
             },
         )
 
-    page.route("**/gsv-tracker/data/**", handler)
+    page.route("**/streetscape-tracker/data/**", handler)
     yield
 
 

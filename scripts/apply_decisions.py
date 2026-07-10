@@ -36,8 +36,8 @@ from dataclasses import dataclass
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gsv_metadata_tracker import db  # noqa: E402
-from gsv_metadata_tracker.paths import get_default_data_dir  # noqa: E402
+from streetscape_metadata_tracker import db  # noqa: E402
+from streetscape_metadata_tracker.paths import get_default_data_dir  # noqa: E402
 
 logger = logging.getLogger("apply_decisions")
 
@@ -182,7 +182,9 @@ def main() -> int:
         help="exported decisions CSV (default: audit/boundary_decisions.csv)",
     )
     parser.add_argument("--data-dir", default=get_default_data_dir())
-    parser.add_argument("--db-path", default=None, help="default: {data-dir}/gsv_tracker.db")
+    parser.add_argument(
+        "--db-path", default=None, help="default: {data-dir}/streetscape_tracker.db"
+    )
     parser.add_argument(
         "--execute", action="store_true", help="Apply changes (default is a dry run)"
     )

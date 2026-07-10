@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Multi-city runner for GSV Metadata Tracker.
+Multi-city runner for Streetscape Metadata Tracker.
 
-This script provides a wrapper around the GSV Metadata Tracker to process multiple cities.
+This script provides a wrapper around the Streetscape Metadata Tracker to process multiple cities.
 Each line in the input file represents a complete command line style configuration for a city.
 
 Example cities.txt format:
@@ -19,7 +19,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from gsv_metadata_tracker.paths import get_default_data_dir, get_project_root
+from streetscape_metadata_tracker.paths import get_default_data_dir, get_project_root
 
 
 def parse_city_line(line: str) -> list[str] | None:
@@ -89,7 +89,7 @@ def parse_args() -> argparse.Namespace:
         argparse.Namespace: Parsed command line arguments
     """
     parser = argparse.ArgumentParser(
-        description="Run GSV Tracker for multiple cities",
+        description="Run Streetscape Tracker for multiple cities",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   python run_cities.py cities.txt
@@ -162,7 +162,7 @@ def setup_logging(args: argparse.Namespace) -> str:
     log_dir = Path(get_project_root()) / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = log_dir / f"gsv_tracker_{timestamp}.log"
+    log_path = log_dir / f"streetscape_tracker_{timestamp}.log"
 
     # Configure logging
     logging.basicConfig(
@@ -174,10 +174,10 @@ def setup_logging(args: argparse.Namespace) -> str:
     return str(log_path)
 
 
-def run_gsv_tracker(city_args: list[str], global_args: argparse.Namespace) -> bool:
-    """Run the GSV Metadata Tracker for a specific city."""
+def run_streetscape_tracker(city_args: list[str], global_args: argparse.Namespace) -> bool:
+    """Run the Streetscape Metadata Tracker for a specific city."""
     # Use the same interpreter (and venv) that launched this script
-    cmd = [sys.executable, "gsv_tracker.py"]
+    cmd = [sys.executable, "streetscape_tracker.py"]
 
     # Add city name - join all parts until we hit an argument starting with --
     city_name_parts = []
@@ -233,7 +233,7 @@ def run_gsv_tracker(city_args: list[str], global_args: argparse.Namespace) -> bo
 
 def main() -> int:
     """
-    Main entry point for the multi-city GSV Metadata Tracker.
+    Main entry point for the multi-city Streetscape Metadata Tracker.
 
     Returns:
         int: Exit code (0 for success, 1 for errors)
@@ -265,7 +265,7 @@ def main() -> int:
     for i, city_args in enumerate(cities, 1):
         logging.info(f"\nProcessing city {i}/{len(cities)}")
 
-        if run_gsv_tracker(city_args, args):
+        if run_streetscape_tracker(city_args, args):
             successful.append(city_args[0])  # city name is first argument
         else:
             failed.append(city_args[0])

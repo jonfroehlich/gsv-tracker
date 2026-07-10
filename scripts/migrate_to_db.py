@@ -38,19 +38,19 @@ from tqdm import tqdm
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gsv_metadata_tracker import db  # noqa: E402
-from gsv_metadata_tracker.analysis import calculate_run_stats  # noqa: E402
-from gsv_metadata_tracker.fileutils import load_city_csv_file  # noqa: E402
-from gsv_metadata_tracker.geoutils import (  # noqa: E402
+from streetscape_metadata_tracker import db  # noqa: E402
+from streetscape_metadata_tracker.analysis import calculate_run_stats  # noqa: E402
+from streetscape_metadata_tracker.fileutils import load_city_csv_file  # noqa: E402
+from streetscape_metadata_tracker.geoutils import (  # noqa: E402
     get_city_location_data,
     get_country_code,
     get_state_abbreviation,
 )
-from gsv_metadata_tracker.json_summarizer import (  # noqa: E402
+from streetscape_metadata_tracker.json_summarizer import (  # noqa: E402
     generate_city_metadata_summary_as_json,
 )
-from gsv_metadata_tracker.naming import parse_filename, slug_to_query_str  # noqa: E402
-from gsv_metadata_tracker.paths import get_default_data_dir  # noqa: E402
+from streetscape_metadata_tracker.naming import parse_filename, slug_to_query_str  # noqa: E402
+from streetscape_metadata_tracker.paths import get_default_data_dir  # noqa: E402
 
 logger = logging.getLogger("migrate")
 
@@ -208,7 +208,9 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--data-dir", default=get_default_data_dir())
-    parser.add_argument("--db-path", default=None, help="default: {data-dir}/gsv_tracker.db")
+    parser.add_argument(
+        "--db-path", default=None, help="default: {data-dir}/streetscape_tracker.db"
+    )
     parser.add_argument(
         "--execute", action="store_true", help="Apply changes (default is a dry run)"
     )
@@ -229,7 +231,7 @@ def main() -> int:
 
     db_path = args.db_path or db.get_default_db_path(args.data_dir)
     mode = "EXECUTE" if args.execute else "DRY RUN"
-    print(f"=== GSV Tracker migration ({mode}) ===")
+    print(f"=== Streetscape Tracker migration ({mode}) ===")
     print(f"Data dir: {args.data_dir}")
     print(f"Catalog:  {db_path}\n")
 

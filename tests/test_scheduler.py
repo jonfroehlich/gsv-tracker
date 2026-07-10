@@ -3,8 +3,8 @@
 import os
 from datetime import UTC, date
 
-from gsv_metadata_tracker import db
-from gsv_metadata_tracker.scheduler import (
+from streetscape_metadata_tracker import db
+from streetscape_metadata_tracker.scheduler import (
     SchedulerConfig,
     build_parser,
     estimate_requests,
@@ -49,7 +49,7 @@ def test_estimate_requests_mapillary_counts_tiles(conn):
 def test_config_defaults_when_file_missing(tmp_path):
     cfg = load_scheduler_config(str(tmp_path / "nope.toml"))
     assert cfg.cycle_days == 90 and cfg.batch_size == 100
-    assert cfg.db_path.endswith("gsv_tracker.db")
+    assert cfg.db_path.endswith("streetscape_tracker.db")
     # No [providers] config → gsv-only with the legacy budget
     assert cfg.enabled_providers() == ["gsv"]
     assert cfg.providers["gsv"].daily_request_budget == 10_000_000
@@ -135,7 +135,7 @@ def test_makelab1_production_config_is_wired():
     assert cfg.publish_script.endswith("sync_data_to_server.sh")
     assert cfg.alerts.enabled and cfg.alerts.transport == "mail" and cfg.alerts.recipient
     # Data/DB live on lab storage (makelab2), not in the web docroot.
-    assert "/projects/makeabilitylab/gsv-tracker" in cfg.db_path
+    assert "/projects/makeabilitylab/streetscape-tracker" in cfg.db_path
     assert "/cse/web/" not in cfg.db_path and "/cse/web/" not in cfg.data_dir
 
 
@@ -198,7 +198,7 @@ def test_oversized_city_does_not_starve_queue(conn, monkeypatch):
     skipped (not break the loop), so smaller cities behind it still run.
     Regression: 82 real cities have grids too large for any daily budget;
     stalest-first ordering would otherwise block collection forever."""
-    from gsv_metadata_tracker import scheduler as sched
+    from streetscape_metadata_tracker import scheduler as sched
 
     huge = _register(conn, "Huge", width=200_000, height=200_000, step=20)
     small = _register(conn, "Small", width=1000, height=1000, step=20)
@@ -228,8 +228,8 @@ def test_oversized_city_does_not_starve_queue(conn, monkeypatch):
 def test_run_due_pairs_providers_per_city(conn, monkeypatch):
     """A city due for both providers runs both back-to-back with the same
     run date, each within its own budget ledger and failure tracking."""
-    from gsv_metadata_tracker import scheduler as sched
-    from gsv_metadata_tracker.scheduler import ProviderConfig
+    from streetscape_metadata_tracker import scheduler as sched
+    from streetscape_metadata_tracker.scheduler import ProviderConfig
 
     cid = _register(conn, "Bend", width=1000, height=1000, step=20)
 
@@ -276,8 +276,8 @@ def test_run_due_provider_budgets_are_independent(conn, monkeypatch):
     """Exhausting one provider's budget must not block the other."""
     from datetime import datetime
 
-    from gsv_metadata_tracker import scheduler as sched
-    from gsv_metadata_tracker.scheduler import ProviderConfig
+    from streetscape_metadata_tracker import scheduler as sched
+    from streetscape_metadata_tracker.scheduler import ProviderConfig
 
     cid = _register(conn, "Bend", width=1000, height=1000, step=20)
     today = datetime.now(UTC).date()

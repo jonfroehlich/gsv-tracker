@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Known transports. "command" is the escape hatch: an arbitrary shell command
 # that receives the body on stdin and the subject/recipient via the
-# GSV_ALERT_SUBJECT / GSV_ALERT_TO environment variables.
+# STREETSCAPE_ALERT_SUBJECT / STREETSCAPE_ALERT_TO environment variables.
 TRANSPORTS = ("mail", "msmtp", "sendmail", "command")
 
 
@@ -39,14 +39,12 @@ class AlertConfig:
     # collections. 1 = alert on any failure; raise it to cut noise from the
     # occasional flaky single city.
     failure_threshold: int = 1
-    subject_prefix: str = "[gsv-tracker]"
+    subject_prefix: str = "[streetscape-tracker]"
 
 
 def _message_with_headers(recipient: str, subject: str, body: str) -> str:
     """An RFC-822-ish message for SMTP-style transports (msmtp/sendmail)."""
-    return (
-        f"To: {recipient}\nSubject: {subject}\nFrom: gsv-tracker@{socket.gethostname()}\n\n{body}\n"
-    )
+    return f"To: {recipient}\nSubject: {subject}\nFrom: streetscape-tracker@{socket.gethostname()}\n\n{body}\n"
 
 
 def build_send_plan(
@@ -105,7 +103,11 @@ def send_alert(cfg: AlertConfig, subject: str, body: str) -> bool:
     if use_shell:
         import os
 
-        env = {**os.environ, "GSV_ALERT_SUBJECT": full_subject, "GSV_ALERT_TO": cfg.recipient}
+        env = {
+            **os.environ,
+            "STREETSCAPE_ALERT_SUBJECT": full_subject,
+            "STREETSCAPE_ALERT_TO": cfg.recipient,
+        }
     try:
         result = subprocess.run(
             cmd,

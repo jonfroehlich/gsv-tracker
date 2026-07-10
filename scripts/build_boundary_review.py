@@ -42,12 +42,12 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gsv_metadata_tracker import db  # noqa: E402
-from gsv_metadata_tracker.boundary_audit import (  # noqa: E402
+from streetscape_metadata_tracker import db  # noqa: E402
+from streetscape_metadata_tracker.boundary_audit import (  # noqa: E402
     frozen_rect_bounds,
     rect_polygon_coverage,
 )
-from gsv_metadata_tracker.paths import get_default_data_dir  # noqa: E402
+from streetscape_metadata_tracker.paths import get_default_data_dir  # noqa: E402
 
 logger = logging.getLogger("build_boundary_review")
 
@@ -440,7 +440,9 @@ def main() -> int:
         help="directory holding the audit CSVs + cache (default: audit/)",
     )
     parser.add_argument("--data-dir", default=get_default_data_dir())
-    parser.add_argument("--db-path", default=None, help="default: {data-dir}/gsv_tracker.db")
+    parser.add_argument(
+        "--db-path", default=None, help="default: {data-dir}/streetscape_tracker.db"
+    )
     parser.add_argument("--template", default=TEMPLATE_PATH)
     parser.add_argument(
         "--out", default=None, help="output HTML (default: {audit-dir}/boundary_review.html)"

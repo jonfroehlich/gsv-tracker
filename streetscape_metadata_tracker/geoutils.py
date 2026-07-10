@@ -12,7 +12,7 @@ from geopy.geocoders import Nominatim
 logger = logging.getLogger(__name__)
 
 # Nominatim usage policy requires an identifiable user agent and max 1 req/sec
-NOMINATIM_USER_AGENT = "gsv_metadata_tracker (jonf@cs.uw.edu)"
+NOMINATIM_USER_AGENT = "streetscape_metadata_tracker (jonf@cs.uw.edu)"
 
 _geolocator = Nominatim(user_agent=NOMINATIM_USER_AGENT, timeout=10)
 _rate_limited_geocode = RateLimiter(_geolocator.geocode, min_delay_seconds=1.1)

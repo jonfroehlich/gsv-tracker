@@ -1,4 +1,4 @@
-# GSV Tracker scheduler configuration.
+# Streetscape Tracker scheduler configuration.
 #
 # This example is checked into git; the production copy on makelab1 can
 # diverge (pass --config to point at it, or edit this file in place there).
@@ -57,15 +57,15 @@ sleep_between_cities_s = 60
 
 [paths]
 # Absolute paths recommended for the systemd deployment. Defaults (when
-# omitted) are relative to the repo: ./data, ./data/gsv_tracker.db, ./logs
-#data_dir = "/homes/gws/jonf/gsv-tracker/data"
-#db_path  = "/homes/gws/jonf/gsv-tracker/data/gsv_tracker.db"
-#log_dir  = "/homes/gws/jonf/gsv-tracker/logs"
+# omitted) are relative to the repo: ./data, ./data/streetscape_tracker.db, ./logs
+#data_dir = "/homes/gws/jonf/streetscape-tracker/data"
+#db_path  = "/homes/gws/jonf/streetscape-tracker/data/streetscape_tracker.db"
+#log_dir  = "/homes/gws/jonf/streetscape-tracker/logs"
 
 [publish]
 # When true, run the publish script after each successful daily batch.
 enabled = false
-#publish_script = "/homes/gws/jonf/gsv-tracker/sync_data_to_server.sh"
+#publish_script = "/homes/gws/jonf/streetscape-tracker/sync_data_to_server.sh"
 
 [alerts]
 # Email the operator when a nightly run finishes unhealthy (>= failure_threshold
@@ -76,11 +76,11 @@ enabled = false
 #recipient = "jonf@cs.uw.edu"
 # Transport: "mail" (uses a local relay), "msmtp"/"sendmail" (SMTP), or
 # "command" (an arbitrary shell command; body on stdin, subject/recipient in
-# $GSV_ALERT_SUBJECT/$GSV_ALERT_TO — e.g. a Slack webhook curl). Confirm which
+# $STREETSCAPE_ALERT_SUBJECT/$STREETSCAPE_ALERT_TO — e.g. a Slack webhook curl). Confirm which
 # works on the box first:  echo test | mail -s test jonf@cs.uw.edu
 transport = "mail"
 #command = ""
 # Alert when at least this many (city, provider) collections failed. Raise it
 # to avoid paging on the occasional flaky single city.
 failure_threshold = 1
-#subject_prefix = "[gsv-tracker]"
+#subject_prefix = "[streetscape-tracker]"

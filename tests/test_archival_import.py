@@ -10,8 +10,8 @@ import sys
 import pandas as pd
 import pytest
 
-from gsv_metadata_tracker import db
-from gsv_metadata_tracker.fileutils import load_city_csv_file
+from streetscape_metadata_tracker import db
+from streetscape_metadata_tracker.fileutils import load_city_csv_file
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(PROJECT_ROOT, "scripts", "import_archival_scrapes.py")
@@ -54,7 +54,7 @@ def _write_manifest(path, entries):
 
 
 def _register_city(data_dir, city_name, state_name, country_name):
-    conn = db.connect(os.path.join(data_dir, "gsv_tracker.db"))
+    conn = db.connect(os.path.join(data_dir, "streetscape_tracker.db"))
     city_id = db.register_city(
         conn,
         city_name=city_name,
@@ -125,7 +125,7 @@ def test_v1_import_end_to_end(source_root, data_dir, tmp_path):
     assert "Would import: 1" in result.stdout
     assert "Dry run complete" in result.stdout
     assert not [f for f in os.listdir(data_dir) if f.endswith(".csv.gz")]
-    conn = db.connect(os.path.join(data_dir, "gsv_tracker.db"))
+    conn = db.connect(os.path.join(data_dir, "streetscape_tracker.db"))
     assert db.get_runs_for_city(conn, city_id) == []
     conn.close()
 
@@ -134,7 +134,7 @@ def test_v1_import_end_to_end(source_root, data_dir, tmp_path):
     assert result.returncode == 0, result.stderr
     assert "1 baseline runs registered" in result.stdout
 
-    conn = db.connect(os.path.join(data_dir, "gsv_tracker.db"))
+    conn = db.connect(os.path.join(data_dir, "streetscape_tracker.db"))
     run = db.get_latest_run(conn, city_id)
     assert run.is_baseline
     assert run.run_date == "2023-11-05"
@@ -209,7 +209,7 @@ def test_v2_headered_and_headerless_translate_identically(source_root, data_dir,
     result = _run_import(source_root, data_dir, manifest, "--execute")
     assert result.returncode == 0, result.stderr
 
-    conn = db.connect(os.path.join(data_dir, "gsv_tracker.db"))
+    conn = db.connect(os.path.join(data_dir, "streetscape_tracker.db"))
     dfs = {}
     for city_id in (h_id, n_id):
         run = db.get_latest_run(conn, city_id)
@@ -270,7 +270,7 @@ def test_two_runs_one_city_different_geometry(source_root, data_dir, tmp_path):
     result = _run_import(source_root, data_dir, manifest, "--execute")
     assert result.returncode == 0, result.stderr
 
-    conn = db.connect(os.path.join(data_dir, "gsv_tracker.db"))
+    conn = db.connect(os.path.join(data_dir, "streetscape_tracker.db"))
     runs = db.get_runs_for_city(conn, city_id)
     assert [r.run_date for r in runs] == ["2023-11-03", "2024-04-11"]
     assert all(r.is_baseline for r in runs)
@@ -364,7 +364,7 @@ def test_manifest_identity_registers_without_geocoding(source_root, data_dir, tm
     assert result.returncode == 0, result.stderr
     assert "1 baseline runs registered" in result.stdout
 
-    conn = db.connect(os.path.join(data_dir, "gsv_tracker.db"))
+    conn = db.connect(os.path.join(data_dir, "streetscape_tracker.db"))
     city = db.resolve_city(conn, "quarter--testland")
     assert city is not None
     assert city.step_m == 20  # frozen at the default step, not the archival 30

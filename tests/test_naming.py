@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from gsv_metadata_tracker.naming import (
+from streetscape_metadata_tracker.naming import (
     generate_base_filename,
     generate_run_filename,
     parse_filename,

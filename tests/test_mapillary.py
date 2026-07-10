@@ -16,9 +16,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gsv_metadata_tracker import download_mapillary as dm
-from gsv_metadata_tracker.config import METADATA_DTYPES
-from gsv_metadata_tracker.download_async import generate_grid_points
+from streetscape_metadata_tracker import download_mapillary as dm
+from streetscape_metadata_tracker.config import METADATA_DTYPES
+from streetscape_metadata_tracker.download_common import generate_grid_points
 
 SEATTLE = (47.6062, -122.3321)
 
@@ -384,7 +384,7 @@ def test_run_stats_for_mapillary_have_no_google_count():
     # Google-copyright breakdown must be NULL, not zero-by-accident
     from datetime import date
 
-    from gsv_metadata_tracker.analysis import calculate_run_stats
+    from streetscape_metadata_tracker.analysis import calculate_run_stats
     from tests.conftest import make_city_df, make_mapillary_city_df
 
     m_df = make_mapillary_city_df(

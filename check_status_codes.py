@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 from tabulate import tabulate
 
-from gsv_metadata_tracker.analysis import analyze_gsv_status
+from streetscape_metadata_tracker.analysis import analyze_gsv_status
 
 
 def format_status_table(df: pd.DataFrame) -> str:

@@ -1,11 +1,12 @@
 """Catalog tests: registration, aliases, runs, diffs, budget, scheduling."""
 
+import os
 import sqlite3
 from datetime import date
 
 import pytest
 
-from gsv_metadata_tracker import db
+from streetscape_metadata_tracker import db
 
 
 @pytest.fixture
@@ -387,4 +388,41 @@ def test_migrate_v1_to_v2(tmp_path):
     conn.close()
     conn2 = db.connect(db_path)
     assert db.get_latest_run(conn2, "bend--or").run_id == 7
+    conn2.close()
+
+
+def test_connect_migrates_legacy_gsv_tracker_db(tmp_path):
+    """A pre-rename catalog named gsv_tracker.db is transparently renamed to the
+    new streetscape_tracker.db on first connect (GSV Tracker -> Streetscape
+    Tracker back-compat), preserving its contents."""
+    data_dir = str(tmp_path)
+    legacy_path = os.path.join(data_dir, "gsv_tracker.db")
+
+    # Create and populate a legacy-named catalog, then fully close it.
+    conn = db.connect(legacy_path)
+    db.register_city(
+        conn,
+        city_name="Bend",
+        state_name="Oregon",
+        state_code="OR",
+        country_name="United States",
+        country_code="US",
+        center_lat=44.05,
+        center_lon=-121.31,
+        grid_width_m=5000,
+        grid_height_m=5000,
+        step_m=20,
+    )
+    conn.close()
+
+    # Opening the NEW default path in the same dir migrates the legacy file.
+    new_path = db.get_default_db_path(data_dir)
+    assert new_path.endswith("streetscape_tracker.db")
+    conn2 = db.connect(new_path)
+    assert not os.path.exists(legacy_path)
+    assert os.path.exists(new_path)
+    assert (
+        db.resolve_city(conn2, "Bend, Oregon, United States").city_id
+        == "bend--oregon--united-states"
+    )
     conn2.close()

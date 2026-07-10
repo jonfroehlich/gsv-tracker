@@ -1,18 +1,18 @@
 /**
- * gsv-utils.js
- * Shared utilities for the GSV City Explorer.
+ * streetscape-utils.js
+ * Shared utilities for the Streetscape City Explorer.
  *
  * Provides the data-host base URL, the provider registry (GSV/Mapillary),
  * the YlOrRd color scale, filename→provider detection, gzip JSON fetching,
  * and the aggregate-record adapter — used by both the overview map
  * (index.js) and the per-city detail view (city.js).
  *
- * @module gsv-utils
+ * @module streetscape-utils
  */
 
-/** Base URL for all GSV tracker data files. */
-const GSV_DATA_BASE_URL =
-  "https://makeabilitylab.cs.washington.edu/public/gsv-tracker/data/";
+/** Base URL for all Streetscape Tracker data files. */
+const STREETSCAPE_DATA_BASE_URL =
+  "https://makeabilitylab.cs.washington.edu/public/streetscape-tracker/data/";
 
 /**
  * Imagery provider registry. Each provider's color scale is anchored to
@@ -119,7 +119,7 @@ function getProviderFromFilename(filename) {
  * @throws {Error} On HTTP error or decompression/parse failure.
  *
  * @example
- *   const cities = await fetchGzippedJson(GSV_DATA_BASE_URL + "cities.json.gz");
+ *   const cities = await fetchGzippedJson(STREETSCAPE_DATA_BASE_URL + "cities.json.gz");
  */
 async function fetchGzippedJson(url) {
   const response = await fetch(url);
@@ -305,7 +305,7 @@ function buildFilledHistogram(rawHistogram, currentYear) {
 // in the browser, where these symbols are plain globals loaded via <script>.
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    GSV_DATA_BASE_URL,
+    STREETSCAPE_DATA_BASE_URL,
     PROVIDERS,
     getColor,
     getProviderFromFilename,

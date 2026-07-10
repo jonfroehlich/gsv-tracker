@@ -16,9 +16,9 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gsv_metadata_tracker import db  # noqa: E402
-from gsv_metadata_tracker import download_gsv_history as dgh  # noqa: E402
-from gsv_metadata_tracker.naming import (  # noqa: E402
+from streetscape_metadata_tracker import db  # noqa: E402
+from streetscape_metadata_tracker import download_gsv_history as dgh  # noqa: E402
+from streetscape_metadata_tracker.naming import (  # noqa: E402
     ParsedHistoryFilename,
     generate_history_filename,
     parse_filename,

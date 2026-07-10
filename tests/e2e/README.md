@@ -11,7 +11,7 @@ frontend's data fetches intercepted so no live data host is needed.
 | --- | --- |
 | `build_fixture.py` | Regenerates the committed fixture using the project's own summarizer + aggregate code. |
 | `fixture/` | Committed synthetic data: `cities.json.gz` (aggregate v3) + per-run `csv.gz`/`json.gz`. |
-| `test_smoke.py` | Serves `www/`, intercepts `**/gsv-tracker/data/**` with the fixture, drives Chromium. |
+| `test_smoke.py` | Serves `www/`, intercepts `**/streetscape-tracker/data/**` with the fixture, drives Chromium. |
 
 The fixture has three cities, one per render path the test asserts on:
 
@@ -48,8 +48,8 @@ the live schema instead of drifting as hand-authored JSON would.
 
 ## How data is served
 
-The frontend hardcodes the production data host (`GSV_DATA_BASE_URL`). Rather
-than change prod code, the test intercepts requests to `**/gsv-tracker/data/**`
+The frontend hardcodes the production data host (`STREETSCAPE_DATA_BASE_URL`). Rather
+than change prod code, the test intercepts requests to `**/streetscape-tracker/data/**`
 and fulfills them with the fixture bytes **raw** (no `Content-Encoding: gzip`),
 so the page's own `pako` / `DecompressionStream("gzip")` decompresses exactly as
 in production.

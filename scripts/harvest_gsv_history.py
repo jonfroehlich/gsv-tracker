@@ -34,13 +34,13 @@ from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gsv_metadata_tracker import db  # noqa: E402
-from gsv_metadata_tracker.download_gsv_history import (  # noqa: E402
+from streetscape_metadata_tracker import db  # noqa: E402
+from streetscape_metadata_tracker.download_gsv_history import (  # noqa: E402
     HarvestBlockedError,
     harvest_gsv_history_async,
 )
-from gsv_metadata_tracker.naming import generate_history_filename  # noqa: E402
-from gsv_metadata_tracker.paths import get_default_data_dir  # noqa: E402
+from streetscape_metadata_tracker.naming import generate_history_filename  # noqa: E402
+from streetscape_metadata_tracker.paths import get_default_data_dir  # noqa: E402
 
 
 def parse_args():
@@ -55,7 +55,9 @@ def parse_args():
         help="Directory for the output csv.gz (default: ./data)",
     )
     p.add_argument(
-        "--db-path", default=None, help="Catalog DB path (default: <data-dir>/gsv_tracker.db)"
+        "--db-path",
+        default=None,
+        help="Catalog DB path (default: <data-dir>/streetscape_tracker.db)",
     )
     p.add_argument(
         "--harvest-date", default=None, help="ISO date recorded for this harvest (default: today)"
@@ -87,7 +89,7 @@ async def _run(args) -> int:
     if city is None:
         print(
             f"City {args.city!r} is not registered in the catalog. Run a "
-            f'normal collection first (python gsv_tracker.py "{args.city}") '
+            f'normal collection first (python streetscape_tracker.py "{args.city}") '
             f"so its grid geometry is frozen, then harvest history.",
             file=sys.stderr,
         )

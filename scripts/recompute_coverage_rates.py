@@ -38,11 +38,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gsv_metadata_tracker import db  # noqa: E402
-from gsv_metadata_tracker.analysis import calculate_coverage_stats  # noqa: E402
-from gsv_metadata_tracker.fileutils import load_city_csv_file  # noqa: E402
-from gsv_metadata_tracker.json_summarizer import generate_aggregate_v2  # noqa: E402
-from gsv_metadata_tracker.paths import get_default_data_dir  # noqa: E402
+from streetscape_metadata_tracker import db  # noqa: E402
+from streetscape_metadata_tracker.analysis import calculate_coverage_stats  # noqa: E402
+from streetscape_metadata_tracker.fileutils import load_city_csv_file  # noqa: E402
+from streetscape_metadata_tracker.json_summarizer import generate_aggregate_v2  # noqa: E402
+from streetscape_metadata_tracker.paths import get_default_data_dir  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)

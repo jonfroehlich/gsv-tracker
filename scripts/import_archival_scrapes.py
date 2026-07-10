@@ -51,21 +51,21 @@ from geopy.distance import geodesic
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gsv_metadata_tracker import db  # noqa: E402
-from gsv_metadata_tracker.analysis import calculate_run_stats  # noqa: E402
-from gsv_metadata_tracker.config import METADATA_DTYPES  # noqa: E402
-from gsv_metadata_tracker.fileutils import load_city_csv_file  # noqa: E402
-from gsv_metadata_tracker.geoutils import (  # noqa: E402
+from streetscape_metadata_tracker import db  # noqa: E402
+from streetscape_metadata_tracker.analysis import calculate_run_stats  # noqa: E402
+from streetscape_metadata_tracker.config import METADATA_DTYPES  # noqa: E402
+from streetscape_metadata_tracker.fileutils import load_city_csv_file  # noqa: E402
+from streetscape_metadata_tracker.geoutils import (  # noqa: E402
     get_city_location_data,
     get_country_code,
     get_state_abbreviation,
 )
-from gsv_metadata_tracker.json_summarizer import (  # noqa: E402
+from streetscape_metadata_tracker.json_summarizer import (  # noqa: E402
     generate_aggregate_v2,
     generate_city_metadata_summary_as_json,
 )
-from gsv_metadata_tracker.naming import generate_run_filename  # noqa: E402
-from gsv_metadata_tracker.paths import get_default_data_dir  # noqa: E402
+from streetscape_metadata_tracker.naming import generate_run_filename  # noqa: E402
+from streetscape_metadata_tracker.paths import get_default_data_dir  # noqa: E402
 
 logger = logging.getLogger("archival_import")
 
@@ -446,7 +446,9 @@ def main() -> int:
         "--source-root", default=DEFAULT_SOURCE_ROOT, help="gsv-bias-scraper data directory"
     )
     parser.add_argument("--data-dir", default=get_default_data_dir())
-    parser.add_argument("--db-path", default=None, help="default: {data-dir}/gsv_tracker.db")
+    parser.add_argument(
+        "--db-path", default=None, help="default: {data-dir}/streetscape_tracker.db"
+    )
     parser.add_argument(
         "--manifest", default=None, help="JSON manifest overriding the embedded one (tests)"
     )

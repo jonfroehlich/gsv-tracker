@@ -5,8 +5,8 @@
 # Syncs the local data/ directory to the UW CSE makeabilitylab web server
 # using rsync over SSH for efficient incremental transfers.
 #
-# Remote path:  /cse/web/research/makelab/public/gsv-tracker/data
-# Public URL:   https://makeabilitylab.cs.washington.edu/public/gsv-tracker/data/
+# Remote path:  /cse/web/research/makelab/public/streetscape-tracker/data
+# Public URL:   https://makeabilitylab.cs.washington.edu/public/streetscape-tracker/data/
 #
 # Usage:
 #   ./sync_data_to_server.sh                  # sync all data (rsync over SSH)
@@ -19,7 +19,7 @@
 # Local vs. SSH publishing:
 #   From a laptop, the docroot is remote -> rsync over SSH (the default).
 #   On a host that NFS-mounts the docroot directly (e.g. makelab1, which sees
-#   /cse/web/research/... locally), pass --local (or set GSV_PUBLISH_LOCAL=1) to
+#   /cse/web/research/... locally), pass --local (or set STREETSCAPE_PUBLISH_LOCAL=1) to
 #   copy straight to the filesystem with no SSH hop. This is what the scheduler
 #   uses when [publish] runs on the server.
 #
@@ -37,14 +37,14 @@ set -euo pipefail
 # ──────────────────────────────────────────────
 # Configuration (override via environment)
 # ──────────────────────────────────────────────
-REMOTE_USER="${GSV_REMOTE_USER:-jonf}"
-REMOTE_HOST="${GSV_REMOTE_HOST:-recycle.cs.washington.edu}"
-REMOTE_DATA_DIR="${GSV_REMOTE_DATA_DIR:-/cse/web/research/makelab/public/gsv-tracker/data}"
+REMOTE_USER="${STREETSCAPE_REMOTE_USER:-jonf}"
+REMOTE_HOST="${STREETSCAPE_REMOTE_HOST:-recycle.cs.washington.edu}"
+REMOTE_DATA_DIR="${STREETSCAPE_REMOTE_DATA_DIR:-/cse/web/research/makelab/public/streetscape-tracker/data}"
 
 # Local publish mode: copy to REMOTE_DATA_DIR on the local filesystem instead of
-# rsync-over-SSH. Enabled with --local or GSV_PUBLISH_LOCAL=1. Used on hosts that
+# rsync-over-SSH. Enabled with --local or STREETSCAPE_PUBLISH_LOCAL=1. Used on hosts that
 # NFS-mount the web docroot directly (makelab1), so publishing skips SSH entirely.
-PUBLISH_LOCAL="${GSV_PUBLISH_LOCAL:-}"
+PUBLISH_LOCAL="${STREETSCAPE_PUBLISH_LOCAL:-}"
 
 # Resolve local data/ relative to this script's location
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -117,9 +117,9 @@ while [[ $# -gt 0 ]]; do
       echo "  --help, -h       Show this help message"
       echo ""
       echo "Environment overrides:"
-      echo "  GSV_REMOTE_USER  SSH username (default: jonf)"
-      echo "  GSV_REMOTE_HOST  SSH host (default: recycle.cs.washington.edu)"
-      echo "  GSV_REMOTE_DATA_DIR  Remote path (default: /cse/web/research/makelab/public/gsv-tracker/data)"
+      echo "  STREETSCAPE_REMOTE_USER  SSH username (default: jonf)"
+      echo "  STREETSCAPE_REMOTE_HOST  SSH host (default: recycle.cs.washington.edu)"
+      echo "  STREETSCAPE_REMOTE_DATA_DIR  Remote path (default: /cse/web/research/makelab/public/streetscape-tracker/data)"
       exit 0
       ;;
     *)
@@ -135,7 +135,7 @@ done
 # ──────────────────────────────────────────────
 if [[ ! -d "$LOCAL_DATA_DIR" ]]; then
   echo "Error: Local data directory not found: $LOCAL_DATA_DIR"
-  echo "Make sure you run this script from the gsv-tracker repo root."
+  echo "Make sure you run this script from the streetscape-tracker repo root."
   exit 1
 fi
 
@@ -169,7 +169,7 @@ else
 fi
 
 echo "═══════════════════════════════════════════"
-echo " GSV Tracker Data Sync"
+echo " Streetscape Tracker Data Sync"
 echo "═══════════════════════════════════════════"
 [[ -n "$PUBLISH_LOCAL" ]] && echo "  Mode:   LOCAL (no SSH)"
 
@@ -223,5 +223,5 @@ if [[ -n "$DRY_RUN" ]]; then
   echo "Dry run complete. No files were transferred."
 else
   echo "Sync complete."
-  echo "Data accessible at: https://makeabilitylab.cs.washington.edu/public/gsv-tracker/data/"
+  echo "Data accessible at: https://makeabilitylab.cs.washington.edu/public/streetscape-tracker/data/"
 fi

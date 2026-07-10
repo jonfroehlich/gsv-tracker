@@ -47,12 +47,12 @@ from dataclasses import asdict, dataclass
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gsv_metadata_tracker import db  # noqa: E402
-from gsv_metadata_tracker.boundary_audit import (  # noqa: E402
+from streetscape_metadata_tracker import db  # noqa: E402
+from streetscape_metadata_tracker.boundary_audit import (  # noqa: E402
     bbox_intersection_frac,
     frozen_rect_bounds,
 )
-from gsv_metadata_tracker.paths import get_default_data_dir  # noqa: E402
+from streetscape_metadata_tracker.paths import get_default_data_dir  # noqa: E402
 
 logger = logging.getLogger("reregister")
 
@@ -374,7 +374,9 @@ def main() -> int:
         help="boundary audit report CSV (default: audit/boundary_audit_report.csv)",
     )
     parser.add_argument("--data-dir", default=get_default_data_dir())
-    parser.add_argument("--db-path", default=None, help="default: {data-dir}/gsv_tracker.db")
+    parser.add_argument(
+        "--db-path", default=None, help="default: {data-dir}/streetscape_tracker.db"
+    )
     parser.add_argument(
         "--out-dir",
         default=None,

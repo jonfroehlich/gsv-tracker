@@ -16,7 +16,7 @@ _spec = importlib.util.spec_from_file_location(
 bbr = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bbr)
 
-from gsv_metadata_tracker.boundary_audit import frozen_rect_bounds  # noqa: E402
+from streetscape_metadata_tracker.boundary_audit import frozen_rect_bounds  # noqa: E402
 
 CURRENT = {"center_lat": 42.35, "center_lon": -71.06, "grid_width_m": 20000, "grid_height_m": 20000}
 

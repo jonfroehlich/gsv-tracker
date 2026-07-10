@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-GSV run comparison tool.
+Streetscape run comparison tool.
 
-Compares two GSV metadata files for the same city and reports what changed:
+Compares two run metadata files for the same city and reports what changed:
 panoramas added/removed, capture-date changes, and (when both files sampled
-the same grid) coverage transitions. This is a thin CLI over
-gsv_metadata_tracker.diff.compute_run_diff — the same engine the tracker
+the same grid) coverage transitions. Provider-agnostic — works on any
+provider's run files. This is a thin CLI over
+streetscape_metadata_tracker.diff.compute_run_diff — the same engine the tracker
 uses to diff consecutive scheduled runs.
 
 Usage:
-    python gsv_compare_data.py old.csv.gz new.csv.gz [--verbose] [--out diff.csv.gz]
+    python streetscape_compare_data.py old.csv.gz new.csv.gz [--verbose] [--out diff.csv.gz]
 
 Exit codes:
     0: No pano-level changes between the files
@@ -21,14 +22,14 @@ import argparse
 import logging
 import sys
 
-from gsv_metadata_tracker.diff import compute_run_diff, write_diff_detail
-from gsv_metadata_tracker.fileutils import load_city_csv_file
+from streetscape_metadata_tracker.diff import compute_run_diff, write_diff_detail
+from streetscape_metadata_tracker.fileutils import load_city_csv_file
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Compare two GSV metadata files")
-    parser.add_argument("file_old", help="Path to the earlier GSV metadata file (.csv.gz)")
-    parser.add_argument("file_new", help="Path to the later GSV metadata file (.csv.gz)")
+    parser = argparse.ArgumentParser(description="Compare two run metadata files")
+    parser.add_argument("file_old", help="Path to the earlier run metadata file (.csv.gz)")
+    parser.add_argument("file_new", help="Path to the later run metadata file (.csv.gz)")
     parser.add_argument(
         "--verbose",
         "-v",

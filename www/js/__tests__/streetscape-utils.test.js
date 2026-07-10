@@ -1,4 +1,4 @@
-// Offline unit tests for the pure helpers in gsv-utils.js (issue #123).
+// Offline unit tests for the pure helpers in streetscape-utils.js (issue #123).
 // Run with `npm test` (Node's built-in test runner) — no network, no jsdom,
 // no browser. These cover the numeric/date edge cases behind the B1–B4
 // tooltip bugs (Infinity%/NaN) and the 0-pano epoch-date bug (#122/#69).
@@ -12,7 +12,7 @@ const {
   panoDateOrNull,
   googleSharePercent,
   buildFilledHistogram,
-} = require("../gsv-utils.js");
+} = require("../streetscape-utils.js");
 
 // --- adaptCityRecord: v1/v2/v3 aggregate flattening ------------------------
 

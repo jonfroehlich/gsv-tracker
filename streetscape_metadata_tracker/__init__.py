@@ -1,6 +1,6 @@
 # Import everything we want to expose at package level
 from .config import load_config
-from .download_async import download_gsv_metadata_async
+from .download_gsv import download_gsv_metadata_async
 from .download_mapillary import download_mapillary_metadata_async
 from .fileutils import load_city_csv_file, open_in_browser
 from .geoutils import get_city_location_data, get_search_dimensions
@@ -15,7 +15,7 @@ from .naming import (
 from .paths import get_default_data_dir, get_default_vis_dir
 from .vis import create_visualization_map, display_search_area
 
-# Define what's available when someone does "from gsv_metadata_tracker import *"
+# Define what's available when someone does "from streetscape_metadata_tracker import *"
 __all__ = [
     "ParsedFilename",
     "create_visualization_map",

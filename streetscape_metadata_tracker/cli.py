@@ -190,7 +190,7 @@ def parse_args():
         "--db-path",
         type=str,
         default=None,
-        help="Path to the run catalog database (default: {download-dir}/gsv_tracker.db)",
+        help="Path to the run catalog database (default: {download-dir}/streetscape_tracker.db)",
     )
     run_group.add_argument(
         "--no-publish-json",
