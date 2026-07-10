@@ -7,6 +7,7 @@ from math import cos, pi
 
 import branca.colormap as cm
 import folium
+import folium.plugins  # noqa: F401 — register folium.plugins.* (not auto-imported since folium 0.16)
 import matplotlib.colors
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
