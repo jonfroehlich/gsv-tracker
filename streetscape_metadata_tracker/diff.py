@@ -154,10 +154,12 @@ def compute_run_diff(df_old: pd.DataFrame, df_new: pd.DataFrame) -> RunDiff:
     )
 
     # Grid-point coverage transitions, only when both runs sampled the
-    # exact same grid points
+    # exact same grid points. Compare unique point sets, never row counts:
+    # Mapillary runs hold one row per pano, so row counts differ between
+    # runs of the identical frozen grid.
     old_keys = _grid_keys(df_old)
     new_keys = _grid_keys(df_new)
-    grid_aligned = len(old_keys) == len(new_keys) and set(old_keys) == set(new_keys)
+    grid_aligned = set(old_keys) == set(new_keys)
 
     points_gained = points_lost = coverage_delta = None
     if grid_aligned:

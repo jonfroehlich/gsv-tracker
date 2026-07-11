@@ -31,6 +31,8 @@ const sharedGlobals = {
   STREETSCAPE_DATA_BASE_URL: "readonly",
   PROVIDERS: "readonly",
   getColor: "readonly",
+  escapeHtml: "readonly",
+  isValidRunFilename: "readonly",
   getProviderFromFilename: "readonly",
   fetchGzippedJson: "readonly",
   adaptCityRecord: "readonly",

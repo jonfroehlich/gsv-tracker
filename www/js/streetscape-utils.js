@@ -106,6 +106,46 @@ function getProviderFromFilename(filename) {
 }
 
 /**
+ * HTML-escape a string for safe interpolation into an HTML template.
+ *
+ * Every data-derived string that enters innerHTML / bindPopup /
+ * bindTooltip markup MUST pass through this: copyright/photographer
+ * fields are arbitrary third-party content (Mapillary contributor names,
+ * archival GSV photographer credits), and city/state/country names come
+ * from publicly editable OSM/Nominatim data.
+ *
+ * @param {*} value - Any value; non-strings are stringified ("" for null/undefined).
+ * @returns {string} The escaped string.
+ */
+function escapeHtml(value) {
+  if (value == null) return "";
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+/**
+ * Validate a run-data filename from an untrusted source (the ?file= URL
+ * parameter) against the filename contract (the JS mirror of naming.py).
+ *
+ * Accepts every run-filename generation — legacy undated, buggy float
+ * step, dated, provider-tagged — and rejects anything else, in particular
+ * path separators / traversal, so a crafted ?file= can never fetch
+ * resources outside the published data directory or non-run artifacts.
+ *
+ * @param {?string} filename - Candidate filename (no directories).
+ * @returns {boolean} True iff it looks like a published run csv.gz.
+ */
+function isValidRunFilename(filename) {
+  if (typeof filename !== "string") return false;
+  return /^[^/\\?#]+_width_\d+_height_\d+_step_\d+(?:\.\d+)?(?:_[a-z]+)?(?:_\d{4}-\d{2}-\d{2})?\.csv\.gz$/
+    .test(filename);
+}
+
+/**
  * Fetch a `.json.gz` file, decompress it with pako, and return the
  * parsed object.
  *
@@ -153,8 +193,26 @@ async function fetchGzippedJson(url) {
  */
 function adaptCityRecord(rec, provider = "gsv") {
   if (!rec.latest && !rec.providers) {
-    // schema v1: already flat, gsv-only
-    return provider === "gsv" ? rec : null;
+    // schema v1: flat, gsv-only. A raw v1 record has the historical flat
+    // fields but NOT the normalized keys (provider/pano_count/
+    // pano_age_stats/capture_year_histogram), so derive them here rather
+    // than passing the record through untouched — consumers read
+    // pano_age_stats.median_pano_age_years unconditionally.
+    if (provider !== "gsv") return null;
+    const v1Counts = rec.panorama_counts || {};
+    const v1Histograms = rec.histogram_of_capture_dates_by_year || {};
+    return {
+      ...rec,
+      provider: "gsv",
+      city_id: rec.city_id ?? null,
+      runs: rec.runs || [],
+      change: rec.change || null,
+      latest_run_date: rec.latest_run_date ?? null,
+      copyright_info_available: rec.copyright_info_available ?? true,
+      pano_count: v1Counts.unique_google_panos ?? v1Counts.unique_panos,
+      pano_age_stats: rec.google_panos_age_stats ?? rec.all_panos_age_stats,
+      capture_year_histogram: v1Histograms.google_panos ?? v1Histograms.all_panos,
+    };
   }
 
   // v3 groups by provider; v2 is equivalent to a gsv-only providers map
@@ -308,6 +366,8 @@ if (typeof module !== "undefined" && module.exports) {
     STREETSCAPE_DATA_BASE_URL,
     PROVIDERS,
     getColor,
+    escapeHtml,
+    isValidRunFilename,
     getProviderFromFilename,
     fetchGzippedJson,
     adaptCityRecord,

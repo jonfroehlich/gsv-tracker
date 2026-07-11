@@ -35,6 +35,7 @@ from tabulate import tabulate
 
 from . import db
 from .alerting import AlertConfig, send_alert, should_alert
+from .download_common import redact_credentials
 from .download_mapillary import estimate_tile_count
 from .json_summarizer import generate_aggregate_v2
 from .naming import KNOWN_PROVIDERS
@@ -179,11 +180,17 @@ def setup_logging(cfg: SchedulerConfig, verbose: bool = False) -> None:
 
 
 def _recent_log_tail(cfg: SchedulerConfig, n: int = 40) -> str:
-    """Last n lines of the scheduler log, for pasting into an alert email."""
+    """
+    Last n lines of the scheduler log, for pasting into an alert email.
+
+    Scrubbed with redact_credentials as the last line of defense: anything
+    that slipped an API key/token into a log line must not travel further
+    in a cleartext email.
+    """
     log_path = os.path.join(cfg.log_dir, "streetscape_scheduler.log")
     try:
         with open(log_path, encoding="utf-8", errors="replace") as f:
-            return "".join(f.readlines()[-n:]) or "(log empty)"
+            return redact_credentials("".join(f.readlines()[-n:])) or "(log empty)"
     except OSError as e:
         return f"(could not read {log_path}: {e})"
 

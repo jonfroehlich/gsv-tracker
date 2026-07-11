@@ -97,7 +97,7 @@ function createTooltip(city) {
   let snapshotsHtml = "";
   if (city.runs && city.runs.length > 0) {
     const n = city.runs.length;
-    snapshotsHtml = `<li>Snapshots: ${n} (since ${city.runs[0].run_date})</li>`;
+    snapshotsHtml = `<li>Snapshots: ${n} (since ${escapeHtml(city.runs[0].run_date)})</li>`;
   }
 
   // Change-since-last-run line (schema v2), colored by direction
@@ -107,7 +107,7 @@ function createTooltip(city) {
     const added = ch.panos_added ?? 0;
     const removed = ch.panos_removed ?? 0;
     changeHtml = `
-      <div style="margin-top:12px"><strong>Since ${ch.from}:</strong></div>
+      <div style="margin-top:12px"><strong>Since ${escapeHtml(ch.from)}:</strong></div>
       <ul class="popup-stats-list">
         <li><span style="color:#2e7d32">+${added.toLocaleString()} new</span> /
             <span style="color:#c62828">−${removed.toLocaleString()} removed</span> panoramas</li>
@@ -116,11 +116,13 @@ function createTooltip(city) {
       </ul>`;
   }
 
+  // City/state/country names come from OSM/Nominatim (publicly editable
+  // third-party data) — escape everything data-derived entering innerHTML.
   container.innerHTML = `
-    <h3>${cityName}, ${city.state.name}, ${city.country.name}</h3>
+    <h3>${escapeHtml(cityName)}, ${escapeHtml(city.state.name)}, ${escapeHtml(city.country.name)}</h3>
     <strong>Coverage Statistics:</strong>
     <ul class="popup-stats-list">
-      <li>Data Collected: ${city.latest_run_date || (city.collection_info?.end_time ? new Date(city.collection_info.end_time).toLocaleDateString() : "Unknown")}</li>
+      <li>Data Collected: ${escapeHtml(city.latest_run_date) || (city.collection_info?.end_time ? new Date(city.collection_info.end_time).toLocaleDateString() : "Unknown")}</li>
       ${snapshotsHtml}
       <li>Area: ${city.search_area_km2.toFixed(1)} km²</li>
       ${panoLinesHtml}
