@@ -48,6 +48,9 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
  */
 function createPopupHistogram(histogramData, currentYear) {
   const canvas = document.createElement("canvas");
+  canvas.setAttribute("role", "img");
+  canvas.setAttribute("aria-label",
+    `Bar chart of ${PROVIDERS[currentProvider].panoNoun} by capture year`);
   const years = Object.keys(histogramData).map(Number).sort((a, b) => a - b);
   const counts = years.map((y) => histogramData[y]);
   const ages = years.map((y) => currentYear - y);
@@ -214,45 +217,43 @@ function createLegend(maxAge, cities) {
     const n = ageCounts[age];
     const label = n > 0 ? `(${n} ${n === 1 ? "city" : "cities"})` : "(no cities)";
 
+    // Real <button>s: native Enter/Space activation and focus handling,
+    // with aria-pressed carrying the toggle state.
     html += `
-      <div class="legend-item" role="listitem" tabindex="0"
-           data-age="${age}" aria-label="${age} years, ${label}">
-        <div class="legend-color" style="background:${color}" aria-hidden="true"></div>
+      <button type="button" class="legend-item" data-age="${age}"
+              aria-pressed="false"
+              aria-label="Highlight cities with median age ${age} year${age !== 1 ? "s" : ""} ${label}">
+        <span class="legend-color" style="background:${color}" aria-hidden="true"></span>
         ${age} year${age !== 1 ? "s" : ""} ${label}
-      </div>`;
+      </button>`;
   }
   if (noDataCount > 0) {
     html += `
-      <div class="legend-item" role="listitem"
-           aria-label="No age data, ${noDataCount} ${noDataCount === 1 ? "city" : "cities"}">
-        <div class="legend-color" style="background:${NO_DATA_COLOR}" aria-hidden="true"></div>
+      <div class="legend-item">
+        <span class="legend-color" style="background:${NO_DATA_COLOR}" aria-hidden="true"></span>
         No age data (${noDataCount})
       </div>`;
   }
   legend.innerHTML = html;
 
-  // Click & keyboard handlers (the "No age data" row has no data-age
-  // and stays non-interactive)
-  legend.querySelectorAll(".legend-item[data-age]").forEach((item) => {
-    const handler = () => {
+  // Click handlers (the "No age data" row is a plain div and stays
+  // non-interactive; buttons handle keyboard activation natively)
+  legend.querySelectorAll("button.legend-item").forEach((item) => {
+    item.addEventListener("click", () => {
       const isAlreadySelected = item.classList.contains("selected");
-      
+
       // Clear selection from all items
-      legend.querySelectorAll(".legend-item").forEach(i => i.classList.remove("selected"));
+      legend.querySelectorAll("button.legend-item").forEach((i) => {
+        i.classList.remove("selected");
+        i.setAttribute("aria-pressed", "false");
+      });
 
       if (isAlreadySelected) {
         resetHighlights();
       } else {
         item.classList.add("selected");
+        item.setAttribute("aria-pressed", "true");
         highlightCitiesByExactAge(parseInt(item.dataset.age, 10));
-      }
-    };
-
-    item.addEventListener("click", handler);
-    item.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        handler();
       }
     });
   });

@@ -199,18 +199,30 @@ function updateLegend(years) {
       const isActive = activeYears.has(year);
       const count = markersByYear[year]?.length || 0;
 
+      // Real <button>s (native Enter/Space + focus) with aria-pressed
+      // toggle state; the color swatch is decorative.
       html += `
-        <div class="year-item ${isActive ? "active-item" : ""}">
+        <button type="button" class="year-item ${isActive ? "active-item" : ""}"
+                data-year="${year}" aria-pressed="${isActive}"
+                aria-label="Filter to year ${year}, ${count.toLocaleString()} panoramas"
+                onclick="toggleYear(${year})">
           <i style="background:${color}" class="${isActive ? "active" : ""}"
-             role="button" tabindex="0" aria-label="Toggle year ${year}"
-             onclick="toggleYear(${year})"
-             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleYear(${year})}"></i>
+             aria-hidden="true"></i>
           ${year} <span class="year-count">(${count.toLocaleString()})</span>
-        </div>`;
+        </button>`;
     });
   }
 
+  // Replacing innerHTML destroys the focused element; if focus was on a
+  // year button, put it back on the same year so keyboard users don't get
+  // dropped to <body> on every toggle.
+  const focusedYear = div.contains(document.activeElement)
+    ? document.activeElement.dataset?.year
+    : null;
   div.innerHTML = html;
+  if (focusedYear != null) {
+    div.querySelector(`.year-item[data-year="${focusedYear}"]`)?.focus();
+  }
 }
 
 /**
@@ -452,19 +464,21 @@ function createTemporalPlot(temporalData, canvas) {
       responsive: true,
       maintainAspectRatio: false,
       scales: {
+        // Tick/title color: #ccc on the rgba(80,80,80,.9) panel ≈ 6:1
+        // contrast (#999 was ~2.9:1, below WCAG AA).
         x: {
           type: "time",
           time: { unit: "year", displayFormats: { year: "YYYY" } },
           grid: { display: false, color: "#888" },
           border: { color: "#888" },
-          ticks: { color: "#999" },
-          title: { color: "#999", display: true, text: "Capture Date" },
+          ticks: { color: "#ccc" },
+          title: { color: "#ccc", display: true, text: "Capture Date" },
         },
         y: {
           grid: { display: false, color: "#888" },
-          ticks: { color: "#999" },
+          ticks: { color: "#ccc" },
           border: { color: "#888" },
-          title: { color: "#999", display: true, text: "Num of Panoramas" },
+          title: { color: "#ccc", display: true, text: "Num of Panoramas" },
           beginAtZero: true,
         },
       },
@@ -484,28 +498,77 @@ function createTemporalPlot(temporalData, canvas) {
     plugins: [verticalLinePlugin],
   });
 
-  // Date-selection click handler
-  canvas.addEventListener("click", (evt) => {
-    const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
-
-    if (points.length) {
-      const data = chart.data.datasets[points[0].datasetIndex].data[points[0].index];
-      const clickedDate = new Date(data.x);
-
-      if (selectedDate && selectedDate.getTime() === clickedDate.getTime()) {
-        selectedDate = null;
-        resetMarkerStyles();
-        resetChartColors(chart);
-      } else {
-        selectedDate = clickedDate;
-        highlightMarkersForDate(selectedDate);
-        updateChartColorsForDate(chart, selectedDate);
-      }
+  /** Apply (or toggle off) the date filter for one capture date. */
+  function selectFilterDate(date) {
+    if (selectedDate && date && selectedDate.getTime() === date.getTime()) {
+      date = null; // re-selecting the active date clears the filter
+    }
+    selectedDate = date;
+    if (date) {
+      highlightMarkersForDate(date);
+      updateChartColorsForDate(chart, date);
     } else {
-      selectedDate = null;
       resetMarkerStyles();
       resetChartColors(chart);
     }
+  }
+
+  // Date-selection click handler
+  canvas.addEventListener("click", (evt) => {
+    const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+    if (points.length) {
+      const data = chart.data.datasets[points[0].datasetIndex].data[points[0].index];
+      selectFilterDate(new Date(data.x));
+    } else {
+      selectFilterDate(null);
+    }
+  });
+
+  // Keyboard path to the same filter — canvas points can't be tabbed to.
+  // Left/Right step through capture dates, Home/End jump, Escape clears.
+  // Selections are announced through a visually-hidden live region.
+  canvas.setAttribute("tabindex", "0");
+  canvas.setAttribute("role", "application");
+  canvas.setAttribute("aria-label",
+    "Panoramas by capture date. Use Left and Right arrow keys to filter the map by date, Escape to clear the filter.");
+
+  const liveRegion = document.createElement("div");
+  liveRegion.className = "visually-hidden";
+  liveRegion.setAttribute("aria-live", "polite");
+  canvas.parentElement.appendChild(liveRegion);
+
+  let keyboardIdx = -1;
+
+  canvas.addEventListener("keydown", (e) => {
+    if (temporalData.length === 0) return;
+
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      const delta = e.key === "ArrowRight" ? 1 : -1;
+      keyboardIdx = keyboardIdx === -1
+        ? (delta === 1 ? 0 : temporalData.length - 1)
+        : Math.min(Math.max(keyboardIdx + delta, 0), temporalData.length - 1);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      keyboardIdx = 0;
+    } else if (e.key === "End") {
+      e.preventDefault();
+      keyboardIdx = temporalData.length - 1;
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      keyboardIdx = -1;
+      selectFilterDate(null);
+      liveRegion.textContent = "Date filter cleared";
+      return;
+    } else {
+      return;
+    }
+
+    const d = temporalData[keyboardIdx];
+    selectedDate = null; // force re-apply even if the same date is revisited
+    selectFilterDate(d.date);
+    liveRegion.textContent =
+      `${d.date.toLocaleDateString()}: ${d.count.toLocaleString()} panoramas highlighted`;
   });
 }
 

@@ -80,13 +80,26 @@ body {
   font-size: 0.9em;
   display: flex;
   align-items: center;
+}
+
+/* Interactive rows are real <button>s (native keyboard activation) */
+button.legend-item {
+  width: 100%;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 
-.legend-item:hover,
-.legend-item:focus-visible {
+button.legend-item:hover {
   background-color: rgba(0, 0, 0, 0.05);
-  outline: none;
+}
+
+button.legend-item:focus-visible {
+  background-color: rgba(0, 0, 0, 0.05);
+  outline: 2px solid #1a73e8;
+  outline-offset: -2px;
 }
 
 .legend-color {
@@ -262,11 +275,4 @@ a.view-details-btn:focus-visible {
   outline-offset: 1px;
 }
 
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
+/* .visually-hidden lives in streetscape-shared.css (used by both pages) */

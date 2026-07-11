@@ -59,14 +59,16 @@
 
   <div class="chart-container" aria-label="Scatter-plot charts">
     <div class="scatter-plot-container">
-      <canvas id="panoScatter"></canvas>
+      <canvas id="panoScatter" role="img"
+              aria-label="Scatter plot of total panorama count versus median age for each city"></canvas>
     </div>
     <div class="scatter-plot-container">
-      <canvas id="areaScatter"></canvas>
+      <canvas id="areaScatter" role="img"
+              aria-label="Scatter plot of city area versus median age for each city"></canvas>
     </div>
   </div>
 
-  <div id="legend" class="legend" role="list" aria-label="Median age legend"></div>
+  <div id="legend" class="legend" role="group" aria-label="Median age legend"></div>
 
   <!-- Scripts (order matters: libs → shared utils → page logic) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
