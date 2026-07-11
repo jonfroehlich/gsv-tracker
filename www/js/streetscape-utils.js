@@ -93,6 +93,20 @@ function getColor(age, provider = "gsv") {
 }
 
 /**
+ * True iff `key` is a real provider key ("gsv"/"mapillary").
+ *
+ * Uses Object.hasOwn rather than a truthy `PROVIDERS[key]` lookup so
+ * attacker-controlled strings that name Object.prototype members
+ * (?provider=constructor) can never pass as a provider.
+ *
+ * @param {*} key - Candidate provider key (e.g. from a URL parameter).
+ * @returns {boolean}
+ */
+function isKnownProvider(key) {
+  return typeof key === "string" && Object.hasOwn(PROVIDERS, key);
+}
+
+/**
  * Derive the imagery provider from a run data filename (the JS mirror of
  * naming.py: an optional alphabetic token between the step size and the
  * run date; no token means GSV).
@@ -102,7 +116,7 @@ function getColor(age, provider = "gsv") {
  */
 function getProviderFromFilename(filename) {
   const m = /_step_\d+(?:\.\d+)?_([a-z]+)_\d{4}-\d{2}-\d{2}/.exec(filename || "");
-  return m && PROVIDERS[m[1]] ? m[1] : "gsv";
+  return m && isKnownProvider(m[1]) ? m[1] : "gsv";
 }
 
 /**
@@ -376,6 +390,7 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     STREETSCAPE_DATA_BASE_URL,
     PROVIDERS,
+    isKnownProvider,
     getColor,
     escapeHtml,
     isValidRunFilename,

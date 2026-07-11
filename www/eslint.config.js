@@ -30,6 +30,7 @@ const vendorGlobals = {
 const sharedGlobals = {
   STREETSCAPE_DATA_BASE_URL: "readonly",
   PROVIDERS: "readonly",
+  isKnownProvider: "readonly",
   getColor: "readonly",
   escapeHtml: "readonly",
   isValidRunFilename: "readonly",

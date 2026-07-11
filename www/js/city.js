@@ -73,7 +73,15 @@ map.on("click", (e) => {
 
 // ── Legend (Leaflet control) ───────────────────────────────────
 const legendControl = L.control({ position: "topright" });
-legendControl.onAdd = () => L.DomUtil.create("div", "legend");
+legendControl.onAdd = () => {
+  const div = L.DomUtil.create("div", "legend");
+  // Keep legend interaction local: without these, clicking a year toggle
+  // also fires the map's click handler and scrolling the legend zooms
+  // the map underneath it.
+  L.DomEvent.disableClickPropagation(div);
+  L.DomEvent.disableScrollPropagation(div);
+  return div;
+};
 legendControl.addTo(map);
 
 /**
@@ -109,7 +117,7 @@ function updateLegend(years) {
             <td>${collectionDateGlobal || "Unknown"}</td>
           </tr>
           <tr>
-            <td>Panoramas</td>
+            <td>Dated panoramas</td>
             <td>${totalPanosGlobal.toLocaleString()}</td>
           </tr>
           <tr>
@@ -143,7 +151,7 @@ function updateLegend(years) {
         </tbody>
       </table>`;
   } else {
-    html += `<p class="legend-meta">Total panos: ${totalPanosGlobal.toLocaleString()}</p>`;
+    html += `<p class="legend-meta">Dated panos: ${totalPanosGlobal.toLocaleString()}</p>`;
   }
 
   // ── Section 2: Snapshot history (v2 temporal data) ────────
@@ -644,7 +652,7 @@ async function loadData() {
       rawCities = await fetchGzippedJson(STREETSCAPE_DATA_BASE_URL + "cities.json.gz");
       // ?city= queries resolve against the requested provider's view
       // (?provider=mapillary), defaulting to GSV
-      const queryProvider = PROVIDERS[urlParams.get("provider")]
+      const queryProvider = isKnownProvider(urlParams.get("provider"))
         ? urlParams.get("provider") : "gsv";
       citiesData = adaptCitiesPayload(rawCities, queryProvider);
     } catch (e) {
@@ -809,8 +817,9 @@ async function loadData() {
             !isGoogleCopyright(row.copyright_info)) ||
           !row.capture_date ||
           !row.pano_id ||
-          !row.pano_lat ||
-          !row.pano_lon ||
+          // == null, not falsy: 0.0 is a valid coordinate (equator/meridian)
+          row.pano_lat == null ||
+          row.pano_lon == null ||
           processedPanos.has(row.pano_id)
         ) continue;
 
@@ -919,11 +928,10 @@ async function loadData() {
           processRows(result.data);
         }
       } else {
-        const result = Papa.parse(`${headerLine}\n${completeText}`, {
-          header: true,
-          dynamicTyping: true,
-          skipEmptyLines: true,
-        });
+        // Same options as the first chunk — a blanket dynamicTyping here
+        // would coerce pano_id to a float on every later chunk (Mapillary
+        // IDs exceed 2^53 and silently round).
+        const result = Papa.parse(`${headerLine}\n${completeText}`, csvParseOptions);
         processRows(result.data);
       }
     }

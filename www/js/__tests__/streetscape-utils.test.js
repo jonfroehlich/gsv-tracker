@@ -16,6 +16,8 @@ const {
   adaptCityRecord,
   escapeHtml,
   getColor,
+  getProviderFromFilename,
+  isKnownProvider,
   isValidRunFilename,
   isGoogleCopyright,
   panoDateOrNull,
@@ -202,6 +204,36 @@ test("isValidRunFilename: rejects traversal and non-run artifacts", () => {
   assert.equal(isValidRunFilename("cities.json.gz"), false);
   assert.equal(isValidRunFilename(""), false);
   assert.equal(isValidRunFilename(null), false);
+});
+
+// --- isKnownProvider / getProviderFromFilename: prototype-safe lookups ------
+
+test("isKnownProvider: real keys yes, prototype members no", () => {
+  assert.equal(isKnownProvider("gsv"), true);
+  assert.equal(isKnownProvider("mapillary"), true);
+  assert.equal(isKnownProvider("kartaview"), false);
+  // Object.prototype members are truthy via PROVIDERS[key] but are NOT
+  // providers — ?provider=constructor used to break the whole UI.
+  assert.equal(isKnownProvider("constructor"), false);
+  assert.equal(isKnownProvider("hasOwnProperty"), false);
+  assert.equal(isKnownProvider(null), false);
+  assert.equal(isKnownProvider(undefined), false);
+});
+
+test("getProviderFromFilename: token detection is prototype-safe", () => {
+  assert.equal(
+    getProviderFromFilename("bend--or_width_5000_height_5000_step_20_2026-07-05.csv.gz"),
+    "gsv");
+  assert.equal(
+    getProviderFromFilename("bend--or_width_5000_height_5000_step_20_mapillary_2026-07-05.csv.gz"),
+    "mapillary");
+  // Unknown and prototype-member tokens both fall back to gsv.
+  assert.equal(
+    getProviderFromFilename("bend--or_width_5000_height_5000_step_20_kartaview_2026-07-05.csv.gz"),
+    "gsv");
+  assert.equal(
+    getProviderFromFilename("bend--or_width_5000_height_5000_step_20_constructor_2026-07-05.csv.gz"),
+    "gsv");
 });
 
 // --- isGoogleCopyright: exact © Google match -------------------------------

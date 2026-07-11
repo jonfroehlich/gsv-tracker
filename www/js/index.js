@@ -25,7 +25,12 @@ map.on("popupclose", () => {
 
 // Active provider, persisted in the URL (?provider=mapillary)
 const providerParam = new URLSearchParams(window.location.search).get("provider");
-let currentProvider = PROVIDERS[providerParam] ? providerParam : "gsv";
+let currentProvider = isKnownProvider(providerParam) ? providerParam : "gsv";
+
+// Fill color for cities with no age data (0 dated panos → null median).
+// Previously they fell through getColor(null) → 0 years → newest-yellow,
+// indistinguishable from genuinely fresh coverage.
+const NO_DATA_COLOR = "#666666";
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
   attribution: "© OpenStreetMap contributors © CARTO",
@@ -85,7 +90,6 @@ function createPopupHistogram(histogramData, currentYear) {
  * @returns {HTMLElement}
  */
 function createTooltip(city) {
-  const cityName = city.city || city.state;
   const container = document.createElement("div");
   container.style.minWidth = "250px";
 
@@ -128,7 +132,7 @@ function createTooltip(city) {
   // City/state/country names come from OSM/Nominatim (publicly editable
   // third-party data) — escape everything data-derived entering innerHTML.
   container.innerHTML = `
-    <h3>${escapeHtml(cityName)}, ${escapeHtml(city.state.name)}, ${escapeHtml(city.country.name)}</h3>
+    <h3>${escapeHtml(getCityLabel(city))}</h3>
     <strong>Coverage Statistics:</strong>
     <ul class="popup-stats-list">
       <li>Data Collected: ${escapeHtml(city.latest_run_date) || (city.collection_info?.end_time ? new Date(city.collection_info.end_time).toLocaleDateString() : "Unknown")}</li>
@@ -182,21 +186,25 @@ function createTooltip(city) {
 // ── Legend ─────────────────────────────────────────────────────
 
 /**
- * Populate the legend panel with one row per integer-age bucket.
+ * Populate the legend panel with one row per integer-age bucket, plus a
+ * non-interactive "No age data" row when any city lacks a median age.
  *
  * @param {number} maxAge - Maximum median age across all cities.
  * @param {Object[]} cities - Array of city records.
- */
-/**
- * Populate the legend panel with one row per integer-age bucket.
  */
 function createLegend(maxAge, cities) {
   const legend = document.getElementById("legend");
   const maxYears = Math.ceil(maxAge);
 
   const ageCounts = new Array(maxYears + 1).fill(0);
+  let noDataCount = 0;
   cities.forEach((city) => {
-    const age = Math.floor(city.pano_age_stats.median_pano_age_years);
+    const median = city.pano_age_stats.median_pano_age_years;
+    if (median == null) {
+      noDataCount++;
+      return;
+    }
+    const age = Math.floor(median);
     if (age <= maxYears) ageCounts[age]++;
   });
 
@@ -213,10 +221,19 @@ function createLegend(maxAge, cities) {
         ${age} year${age !== 1 ? "s" : ""} ${label}
       </div>`;
   }
+  if (noDataCount > 0) {
+    html += `
+      <div class="legend-item" role="listitem"
+           aria-label="No age data, ${noDataCount} ${noDataCount === 1 ? "city" : "cities"}">
+        <div class="legend-color" style="background:${NO_DATA_COLOR}" aria-hidden="true"></div>
+        No age data (${noDataCount})
+      </div>`;
+  }
   legend.innerHTML = html;
 
-  // Click & keyboard handlers
-  legend.querySelectorAll(".legend-item").forEach((item) => {
+  // Click & keyboard handlers (the "No age data" row has no data-age
+  // and stays non-interactive)
+  legend.querySelectorAll(".legend-item[data-age]").forEach((item) => {
     const handler = () => {
       const isAlreadySelected = item.classList.contains("selected");
       
@@ -276,7 +293,9 @@ function highlightCitiesByExactAge(targetAge, zoomToHighlightedCities = false) {
 
   const highlightedCities = [];
   mapRectangles.forEach((rect) => {
-    const age = Math.floor(rect.city.pano_age_stats.median_pano_age_years);
+    const median = rect.city.pano_age_stats.median_pano_age_years;
+    // Null median (no age data) never matches an age bucket
+    const age = median != null ? Math.floor(median) : NaN;
     if (Math.abs(age - targetAge) <= tolerance) {
       // Selected state
       rect.setStyle({ 
@@ -361,7 +380,7 @@ function resetHighlights() {
  * @returns {string}  e.g. "Seattle, Washington, United States"
  */
 function getCityLabel(city) {
-  const name = city.city || city.state?.name || city.country.name;
+  const name = city.city || city.state?.name || city.country?.name || "Unknown";
   const parts = [name];
   if (city.state?.name && city.state.name !== name) parts.push(city.state.name);
   if (city.country?.name) parts.push(city.country.name);
@@ -569,14 +588,19 @@ function initCitySearch(cities) {
  * @param {Object[]} cities - Array of city records.
  */
 function createScatterPlots(cities) {
-  const panoData = cities.map((city) => ({
+  // Cities without a median age have no y value to plot — they stay on
+  // the map (greyed) but are omitted from the scatters.
+  const datedCities = cities.filter(
+    (c) => c.pano_age_stats.median_pano_age_years != null);
+
+  const panoData = datedCities.map((city) => ({
     x: city.pano_count,
     y: city.pano_age_stats.median_pano_age_years,
     city,
     backgroundColor: getColor(city.pano_age_stats.median_pano_age_years, currentProvider),
   }));
 
-  const areaData = cities.map((city) => ({
+  const areaData = datedCities.map((city) => ({
     x: city.search_area_km2,
     y: city.pano_age_stats.median_pano_age_years,
     city,
@@ -589,14 +613,10 @@ function createScatterPlots(cities) {
     plugins: {
       tooltip: {
         callbacks: {
-          label: (ctx) => {
-            const c = ctx.raw.city;
-            const name = c.city || c.state?.name || c.country.name;
-            const loc = c.state?.name
-              ? `${name}, ${c.state.name}`
-              : `${name}, ${c.country.name}`;
-            return [loc, `Age: ${ctx.raw.y.toFixed(1)} years`];
-          },
+          label: (ctx) => [
+            getCityLabel(ctx.raw.city),
+            `Age: ${ctx.raw.y.toFixed(1)} years`,
+          ],
         },
       },
     },
@@ -741,8 +761,9 @@ function renderProvider(fitMap = false) {
       [city.bounds.max_lat, city.bounds.max_lon],
     ];
 
+    const median = city.pano_age_stats.median_pano_age_years;
     const rect = L.rectangle(bounds, {
-      color: getColor(city.pano_age_stats.median_pano_age_years, currentProvider),
+      color: median != null ? getColor(median, currentProvider) : NO_DATA_COLOR,
       weight: 1,
       fillOpacity: 0.6,
     }).addTo(map);
@@ -775,7 +796,7 @@ function renderProvider(fitMap = false) {
  * @param {string} provider - Provider key (see PROVIDERS).
  */
 function setProvider(provider) {
-  if (!PROVIDERS[provider] || provider === currentProvider || !rawCitiesData) return;
+  if (!isKnownProvider(provider) || provider === currentProvider) return;
   currentProvider = provider;
 
   const url = new URL(window.location);
@@ -783,7 +804,10 @@ function setProvider(provider) {
   else url.searchParams.set("provider", provider);
   history.replaceState(null, "", url);
 
-  renderProvider();
+  // Before the payload arrives, just record the choice — the initial
+  // renderProvider(true) in loadData() picks it up. (Previously a click
+  // during the fetch was silently reverted.)
+  if (rawCitiesData) renderProvider();
 }
 
 /** Wire up the provider radio group and reflect the initial state. */
@@ -800,10 +824,12 @@ function initProviderToggle() {
 
 /** Fetch cities.json.gz, then render the active provider's view. */
 async function loadData() {
+  // Wire the toggle BEFORE the fetch so a click during loading is
+  // recorded (setProvider defers the render until data arrives).
+  initProviderToggle();
   try {
     rawCitiesData = await fetchGzippedJson(STREETSCAPE_DATA_BASE_URL + "cities.json.gz");
     document.getElementById("loading").style.display = "none";
-    initProviderToggle();
     renderProvider(true);
   } catch (error) {
     console.error("Error loading data:", error);
