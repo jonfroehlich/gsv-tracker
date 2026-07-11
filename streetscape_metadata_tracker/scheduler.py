@@ -344,7 +344,6 @@ def _run_one_city(
     cmd = [
         sys.executable,
         str(_PROJECT_ROOT / "streetscape_tracker.py"),
-        city.display_name,
         "--provider",
         provider,
         "--run-date",
@@ -359,10 +358,20 @@ def _run_one_city(
         str(cfg.connection_limit),
         "--timeout",
         str(cfg.request_timeout_s),
+        # The scheduler already decided this city is due (cycle − grace),
+        # so disable the CLI's own skip window. Otherwise any config with
+        # cycle_days − grace_days ≤ the CLI default (80) makes every run
+        # "succeed" as a skip — stamping last_success_at while never
+        # collecting anything, forever, with green logs.
+        "--min-days-since-last-run",
+        "0",
         "--no-visual",
         "--no-publish-json",
         "--log-level",
         "INFO",
+        # '--' so a display name can never be parsed as a flag
+        "--",
+        city.display_name,
     ]
     logger.info(
         f"Collecting {city.city_id} [{provider}] "

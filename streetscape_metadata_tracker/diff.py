@@ -49,11 +49,16 @@ class RunDiff:
         return (self.panos_added + self.panos_removed + self.capture_date_changed) > 0
 
 
-def _unique_ok_panos(df: pd.DataFrame) -> pd.DataFrame:
-    """OK rows deduplicated on pano_id, keeping the newest capture_date."""
-    ok = df[df["status"] == "OK"].copy()
-    ok = ok.sort_values("capture_date", na_position="first")
-    return ok.drop_duplicates(subset=["pano_id"], keep="last")
+def _unique_present_panos(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Present rows (OK or NO_DATE) deduplicated on pano_id, keeping the newest
+    capture_date. NO_DATE panos exist — they just lack a usable date (common
+    for Mapillary's bogus contributor timestamps) — so an OK<->NO_DATE flip
+    must read as a capture-date change, not as a pano removed + added.
+    """
+    present = df[df["status"].isin(PRESENT_STATUSES)].copy()
+    present = present.sort_values("capture_date", na_position="first")
+    return present.drop_duplicates(subset=["pano_id"], keep="last")
 
 
 def _capture_date_str(value) -> str | None:
@@ -87,8 +92,8 @@ def compute_run_diff(df_old: pd.DataFrame, df_new: pd.DataFrame) -> RunDiff:
         (None when the grids don't align), and a detail DataFrame with one
         row per changed pano.
     """
-    old_panos = _unique_ok_panos(df_old).set_index("pano_id")
-    new_panos = _unique_ok_panos(df_new).set_index("pano_id")
+    old_panos = _unique_present_panos(df_old).set_index("pano_id")
+    new_panos = _unique_present_panos(df_new).set_index("pano_id")
 
     old_ids = set(old_panos.index)
     new_ids = set(new_panos.index)

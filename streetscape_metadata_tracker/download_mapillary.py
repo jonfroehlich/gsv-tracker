@@ -56,10 +56,26 @@ TILE_ZOOM = 14  # the only zoom level whose tiles carry per-image metadata
 TILE_URL_TEMPLATE = "https://tiles.mapillary.com/maps/vtp/mly1_computed_public/2/{z}/{x}/{y}"
 IMAGE_LAYER = "image"
 
-# Meters per degree of latitude (WGS84 mean). Used only for nearest-grid-
-# point assignment, where the <0.1% equirectangular error over a city-sized
-# area is orders of magnitude below half a grid step.
+# Meters per degree of latitude (WGS84 mean). Kept for rough offset math in
+# tests/estimates; the actual grid assignment uses the latitude-local series
+# below (the mean constant mis-assigned edge panos by whole grid rows —
+# ~0.7% error at the equator is +1 row at 2.5 km from center).
 _M_PER_DEG_LAT = 111320.0
+
+
+def _meters_per_degree(lat_deg):
+    """
+    (m_per_deg_lat, m_per_deg_lon) at a latitude, via the standard WGS84
+    series expansion. Accepts scalars or numpy arrays. Matches the geodesic
+    math that builds the grid to well under a meter over a city-sized area,
+    so nearest-grid-point assignment can't drift by rows near the edges.
+    """
+    phi = np.radians(lat_deg)
+    m_lat = (
+        111132.92 - 559.82 * np.cos(2 * phi) + 1.175 * np.cos(4 * phi) - 0.0023 * np.cos(6 * phi)
+    )
+    m_lon = 111412.84 * np.cos(phi) - 93.5 * np.cos(3 * phi) + 0.118 * np.cos(5 * phi)
+    return m_lat, m_lon
 
 
 # ── Slippy-map tile math (stdlib only) ─────────────────────────────────────
@@ -220,8 +236,15 @@ def assign_to_grid(
     than half a step beyond the outermost grid points, which the caller
     drops.
     """
-    dy_m = (image_lats - center_lat) * _M_PER_DEG_LAT
-    dx_m = (image_lons - center_lon) * _M_PER_DEG_LAT * math.cos(math.radians(center_lat))
+    # Latitude-local scales: the grid is built geodesically, so a global
+    # mean m/° mis-assigns by whole rows near the grid edges. dy uses the
+    # series at the center↔image midpoint latitude; dx uses each image's
+    # own latitude (grid rows are constant-latitude, and their east-west
+    # spacing shrinks with cos φ at THAT row, not at the center).
+    m_lat_mid, _ = _meters_per_degree((image_lats + center_lat) / 2)
+    _, m_lon_local = _meters_per_degree(image_lats)
+    dy_m = (image_lats - center_lat) * m_lat_mid
+    dx_m = (image_lons - center_lon) * m_lon_local
     i = np.rint(dy_m / step_length).astype(int)
     j = np.rint(dx_m / step_length).astype(int)
 
@@ -320,8 +343,15 @@ async def download_mapillary_metadata_async(
             headers={"Authorization": f"OAuth {access_token}"}
         ) as session:
             results = await asyncio.gather(*(fetch_one(x, y) for x, y in tiles))
+    except DownloadError as e:
+        # e.g. the rejected-token error from _fetch_tile; attach the spent
+        # request count so the caller can still record it in the ledger.
+        e.api_requests = api_requests
+        raise
     except (TimeoutError, aiohttp.ClientError) as e:
-        raise DownloadError(f"Mapillary tile download failed: {redact_credentials(e)}") from e
+        error = DownloadError(f"Mapillary tile download failed: {redact_credentials(e)}")
+        error.api_requests = api_requests
+        raise error from e
     finally:
         progress_bar.close()
 

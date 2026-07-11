@@ -111,6 +111,17 @@ class HarvestBlockedError(DownloadError):
     """
 
 
+class HarvestIncompleteError(HarvestBlockedError):
+    """
+    Raised when isolated point failures survive all retry passes (without
+    tripping the breaker). The sweep must NOT finalize: writing the final
+    csv.gz and deleting the checkpoint would silently publish a harvest
+    with holes — and lose the record that anything was skipped — for an
+    endpoint that may disappear before a re-sweep. Subclasses
+    HarvestBlockedError so existing resume/alert handling applies.
+    """
+
+
 def build_search_url(lat: float, lon: float) -> str:
     """URL of the unpublished single-image-search endpoint for a coordinate."""
     return _SEARCH_URL.format(lat=lat, lon=lon)
@@ -275,6 +286,7 @@ async def harvest_gsv_history_async(
     jitter_seconds: tuple[float, float] = (0.2, 0.6),
     chunk_size: int = 25,
     circuit_breaker_limit: int = 8,
+    retry_passes: int = 2,
 ) -> dict[str, Any]:
     """
     Sweep a city's frozen grid and harvest every official Google panorama's
@@ -334,32 +346,43 @@ async def harvest_gsv_history_async(
     headers = {"User-Agent": _USER_AGENT}
     blocked = False
     async with aiohttp.ClientSession(headers=headers) as session:
-        for start in range(0, len(remaining), chunk_size):
-            chunk = remaining[start : start + chunk_size]
-            results = await asyncio.gather(
-                *(query_point(session, lat, lon, i, j) for (lat, lon, i, j) in chunk)
-            )
-            for i, j, lat, lon, found, err in results:
-                progress.update(1)
-                if err is not None:
-                    continue  # failed point; leave it out of `done` to retry
-                done.add((i, j))
-                for p in found:
-                    # First grid point to surface a pano wins its query coords;
-                    # keep the earliest capture_date if the same id recurs.
-                    existing = panos.get(p.pano_id)
-                    if existing is None or p.capture_date < existing["capture_date"]:
-                        panos[p.pano_id] = {
-                            "capture_date": p.capture_date,
-                            "pano_lat": p.lat,
-                            "pano_lon": p.lon,
-                            "nearest_query_lat": lat,
-                            "nearest_query_lon": lon,
-                        }
-            _save_checkpoint(checkpoint, done, panos, api_requests)
-            if breaker.tripped:
-                blocked = True
+        # Initial sweep plus up to `retry_passes` re-sweeps of the points
+        # that failed (isolated failures never re-queried used to be
+        # silently finalized as holes in the harvest).
+        for sweep in range(1 + retry_passes):
+            pending = [(lat, lon, i, j) for (lat, lon, i, j) in remaining if (i, j) not in done]
+            if not pending or blocked:
                 break
+            if sweep > 0:
+                logger.info(
+                    f"Retry pass {sweep}/{retry_passes}: re-querying {len(pending)} failed points"
+                )
+            for start in range(0, len(pending), chunk_size):
+                chunk = pending[start : start + chunk_size]
+                results = await asyncio.gather(
+                    *(query_point(session, lat, lon, i, j) for (lat, lon, i, j) in chunk)
+                )
+                for i, j, lat, lon, found, err in results:
+                    if err is not None:
+                        continue  # failed point; stays out of `done` for the next pass
+                    progress.update(1)
+                    done.add((i, j))
+                    for p in found:
+                        # First grid point to surface a pano wins its query coords;
+                        # keep the earliest capture_date if the same id recurs.
+                        existing = panos.get(p.pano_id)
+                        if existing is None or p.capture_date < existing["capture_date"]:
+                            panos[p.pano_id] = {
+                                "capture_date": p.capture_date,
+                                "pano_lat": p.lat,
+                                "pano_lon": p.lon,
+                                "nearest_query_lat": lat,
+                                "nearest_query_lon": lon,
+                            }
+                _save_checkpoint(checkpoint, done, panos, api_requests)
+                if breaker.tripped:
+                    blocked = True
+                    break
     progress.close()
 
     if blocked:
@@ -367,6 +390,15 @@ async def harvest_gsv_history_async(
             f"Harvest aborted for {city_name}: {breaker.consecutive} consecutive "
             f"failed searches suggest the endpoint is throttling us. Progress "
             f"saved to {checkpoint}; rerun to resume."
+        )
+
+    unfinished = len(grid_points) - len(done)
+    if unfinished > 0:
+        raise HarvestIncompleteError(
+            f"Harvest incomplete for {city_name}: {unfinished} grid points "
+            f"still failed after {retry_passes} retry passes. Refusing to "
+            f"finalize a harvest with holes; progress saved to {checkpoint}; "
+            f"rerun to resume."
         )
 
     harvested_at = datetime.now(UTC).isoformat()

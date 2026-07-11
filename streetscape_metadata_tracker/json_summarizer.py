@@ -540,12 +540,27 @@ def generate_aggregate_v2(conn, data_dir: str) -> dict[str, Any]:
             runs = runs_by_provider[provider]
             latest = runs[-1]
             latest_json = None
-            if latest.json_filename:
-                latest_json = _load_city_json(os.path.join(data_dir, latest.json_filename))
+            json_filename = latest.json_filename
+            if not json_filename:
+                # A crash between register_run and update_run_json_filename
+                # leaves json_filename NULL even though the sibling file may
+                # exist (or be regenerated later by
+                # generate_missing_city_json_files). Fall back to the
+                # derived name so one bad night doesn't drop the provider
+                # from the aggregate forever.
+                derived = latest.csv_filename.rsplit(".csv.gz", 1)[0] + ".json.gz"
+                if os.path.exists(os.path.join(data_dir, derived)):
+                    logger.warning(
+                        f"{city.city_id} [{provider}]: run has no cataloged "
+                        f"json_filename; using derived sibling {derived}"
+                    )
+                    json_filename = derived
+            if json_filename:
+                latest_json = _load_city_json(os.path.join(data_dir, json_filename))
             if latest_json is None:
                 logger.warning(
                     f"Skipping {city.city_id} [{provider}]: missing/unreadable "
-                    f"per-run JSON ({latest.json_filename})"
+                    f"per-run JSON ({json_filename or latest.json_filename})"
                 )
                 continue
             providers_out[provider] = _build_provider_summary(runs, latest_json, data_dir, conn)

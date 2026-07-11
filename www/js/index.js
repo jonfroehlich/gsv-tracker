@@ -14,6 +14,15 @@ const mapRectangles = [];
 let allCityBounds = null;
 let rawCitiesData = null; // the fetched cities.json.gz payload (all providers)
 
+// The one live popup histogram. Popups are content-functions (built on
+// open), so at most one Chart exists at a time — destroyed on close,
+// otherwise each open leaks a Chart instance + ResizeObserver.
+let activePopupChart = null;
+map.on("popupclose", () => {
+  activePopupChart?.destroy();
+  activePopupChart = null;
+});
+
 // Active provider, persisted in the URL (?provider=mapillary)
 const providerParam = new URLSearchParams(window.location.search).get("provider");
 let currentProvider = PROVIDERS[providerParam] ? providerParam : "gsv";
@@ -38,7 +47,7 @@ function createPopupHistogram(histogramData, currentYear) {
   const counts = years.map((y) => histogramData[y]);
   const ages = years.map((y) => currentYear - y);
 
-  new Chart(canvas, {
+  activePopupChart = new Chart(canvas, {
     type: "bar",
     data: {
       labels: years,
@@ -739,7 +748,10 @@ function renderProvider(fitMap = false) {
     }).addTo(map);
 
     rect.city = city;
-    rect.bindPopup(createTooltip(city));
+    // Content function: the popup DOM (including its Chart.js histogram)
+    // is built on OPEN, not eagerly for all ~1,100 cities at render time —
+    // and rebuilt each open, so a provider toggle can't leak stale charts.
+    rect.bindPopup(() => createTooltip(city));
     mapRectangles.push(rect);
 
     rect.on("mouseover", () => highlightCity(city));

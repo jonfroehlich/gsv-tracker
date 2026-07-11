@@ -510,3 +510,85 @@ def test_aggregate_v3_two_providers(conn, data_dir):
     assert hists["mapillary"]["google_panos_yearly"] == {}
 
     strict_load(os.path.join(data_dir, "cities.json.gz"))
+
+
+def test_aggregate_falls_back_to_derived_json_when_not_cataloged(conn, data_dir):
+    """
+    A crash between register_run and update_run_json_filename leaves
+    runs.json_filename NULL while the sibling json.gz exists (or is later
+    regenerated). The aggregate must fall back to the derived sibling name
+    instead of silently dropping the provider from cities.json.gz forever
+    (audit 2026-07-11).
+    """
+    city_id = db.register_city(
+        conn,
+        city_name="Crashy",
+        state_name=None,
+        state_code=None,
+        country_name="Testland",
+        country_code=None,
+        center_lat=44.0,
+        center_lon=-121.0,
+        grid_width_m=100,
+        grid_height_m=100,
+        step_m=20,
+    )
+    name = f"{city_id}_width_100_height_100_step_20_2026-01-15.csv.gz"
+    csv_path = _write_run(data_dir, [("g1", "2020-01-15")], date(2026, 1, 15), name)
+    df = load_city_csv_file(csv_path)
+    # The per-run JSON exists on disk at the derived name…
+    generate_city_metadata_summary_as_json(
+        csv_path,
+        df,
+        "Crashy",
+        None,
+        "Testland",
+        100,
+        100,
+        20,
+        force_recreate_file=True,
+        run_date=date(2026, 1, 15),
+    )
+    # …but the crash meant it was never linked in the catalog.
+    db.register_run(
+        conn,
+        city_id=city_id,
+        run_date=date(2026, 1, 15),
+        csv_filename=name,
+        json_filename=None,
+        unique_panos=1,
+        unique_google_panos=1,
+    )
+
+    summary = generate_aggregate_v2(conn, data_dir)
+    rec = next(c for c in summary["cities"] if c["city_id"] == city_id)
+    assert "gsv" in rec["providers"], "provider must not be dropped from the aggregate"
+    assert rec["providers"]["gsv"]["latest"]["panorama_counts"]["unique_panos"] == 1
+
+
+def test_aggregate_still_skips_provider_when_json_truly_missing(conn, data_dir):
+    """No cataloged json_filename AND no sibling file → provider skipped (not a crash)."""
+    city_id = db.register_city(
+        conn,
+        city_name="Gone",
+        state_name=None,
+        state_code=None,
+        country_name="Testland",
+        country_code=None,
+        center_lat=44.0,
+        center_lon=-121.0,
+        grid_width_m=100,
+        grid_height_m=100,
+        step_m=20,
+    )
+    db.register_run(
+        conn,
+        city_id=city_id,
+        run_date=date(2026, 1, 15),
+        csv_filename=f"{city_id}_width_100_height_100_step_20_2026-01-15.csv.gz",
+        json_filename=None,
+        unique_panos=1,
+        unique_google_panos=1,
+    )
+    summary = generate_aggregate_v2(conn, data_dir)
+    assert all(c["city_id"] != city_id for c in summary["cities"])

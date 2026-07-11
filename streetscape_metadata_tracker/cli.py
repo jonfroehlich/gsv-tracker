@@ -46,6 +46,7 @@ from . import (
 )
 from .analysis import calculate_run_stats, detect_systemic_failure, print_df_summary
 from .diff import compute_run_diff, generate_diff_filename, write_diff_detail
+from .download_common import DownloadError
 from .fileutils import load_city_csv_file
 from .json_summarizer import generate_aggregate_v2, generate_city_metadata_summary_as_json
 from .naming import generate_run_filename, same_grid_geometry, sanitize_city_query_str
@@ -512,37 +513,59 @@ async def _collect_one_run(conn, args, city_row, run_date, provider, config, vis
     )
     output_csv_gz_path = os.path.join(args.download_dir, f"{run_base}.csv.gz")
 
+    # Immutable-snapshot guard: an existing file with this run's name is
+    # either a concurrent collection in flight or an orphan from a run that
+    # crashed between file-write and cataloging. Overwriting is never safe
+    # (the published file could diverge from the cataloged stats/diffs), so
+    # refuse and let the operator delete a confirmed orphan.
+    if os.path.exists(output_csv_gz_path):
+        raise RuntimeError(
+            f"{output_csv_gz_path} already exists but no {provider} run is "
+            f"cataloged for {run_date}. Refusing to overwrite an existing "
+            f"snapshot (concurrent run in progress, or orphan from a crashed "
+            f"run — if confirmed orphan, delete it and re-run)."
+        )
+
     logging.info(f"Collecting {provider} run {run_date} for {city_row.city_id}")
 
-    if provider == "mapillary":
-        dict_results = await download_mapillary_metadata_async(
-            city_name=city_row.display_name,
-            center_lat=city_row.center_lat,
-            center_lon=city_row.center_lon,
-            grid_width=city_row.grid_width_m,
-            grid_height=city_row.grid_height_m,
-            step_length=city_row.step_m,
-            access_token=config["access_token"],
-            output_csv_gz_path=output_csv_gz_path,
-            request_timeout=args.timeout,
-        )
-    else:
-        logging.info(
-            f"Using batch_size={args.batch_size}, connection_limit={args.connection_limit}"
-        )
-        dict_results = await download_gsv_metadata_async(
-            city_name=city_row.display_name,
-            center_lat=city_row.center_lat,
-            center_lon=city_row.center_lon,
-            grid_width=city_row.grid_width_m,
-            grid_height=city_row.grid_height_m,
-            step_length=city_row.step_m,
-            api_key=config["api_key"],
-            output_csv_gz_path=output_csv_gz_path,
-            batch_size=args.batch_size,
-            connection_limit=args.connection_limit,
-            request_timeout=args.timeout,
-        )
+    try:
+        if provider == "mapillary":
+            dict_results = await download_mapillary_metadata_async(
+                city_name=city_row.display_name,
+                center_lat=city_row.center_lat,
+                center_lon=city_row.center_lon,
+                grid_width=city_row.grid_width_m,
+                grid_height=city_row.grid_height_m,
+                step_length=city_row.step_m,
+                access_token=config["access_token"],
+                output_csv_gz_path=output_csv_gz_path,
+                request_timeout=args.timeout,
+            )
+        else:
+            logging.info(
+                f"Using batch_size={args.batch_size}, connection_limit={args.connection_limit}"
+            )
+            dict_results = await download_gsv_metadata_async(
+                city_name=city_row.display_name,
+                center_lat=city_row.center_lat,
+                center_lon=city_row.center_lon,
+                grid_width=city_row.grid_width_m,
+                grid_height=city_row.grid_height_m,
+                step_length=city_row.step_m,
+                api_key=config["api_key"],
+                output_csv_gz_path=output_csv_gz_path,
+                batch_size=args.batch_size,
+                connection_limit=args.connection_limit,
+                request_timeout=args.timeout,
+            )
+    except DownloadError as e:
+        # Failed downloads still spent real (budgeted, possibly billable)
+        # requests; record them so tomorrow's budget check doesn't overspend.
+        spent = getattr(e, "api_requests", 0)
+        if spent:
+            db.add_api_usage(conn, run_date, spent, provider=provider)
+            logger.warning(f"Recorded {spent} {provider} API requests spent by the failed download")
+        raise
     df = dict_results["df"]
 
     # Record API usage in the daily per-provider budget ledger (the
