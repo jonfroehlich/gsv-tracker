@@ -314,11 +314,22 @@ function isGoogleCopyright(copyright) {
  * `new Date(null)` silently rendering as the Unix epoch (12/31/1969)
  * instead of a "—"/"No data" placeholder (issue #122, #69 family).
  *
+ * Date-ONLY strings ("YYYY-MM-DD") are parsed as LOCAL midnight, not UTC:
+ * `new Date("2023-01-01")` is UTC midnight, and reading it back with local
+ * getters (toLocaleDateString, getFullYear) west of UTC shifts every date
+ * back a day — and every January/year-precision capture date back a whole
+ * YEAR (standardize_capture_date pins month/year precision to the 1st), so
+ * US visitors saw those panos in the previous year's filter bucket and
+ * color. Full timestamps (with a time component) still parse natively.
+ *
  * @param {?string} v - ISO date string, or null/undefined.
- * @returns {?Date} A Date, or null when the input is falsy.
+ * @returns {?Date} A Date (local midnight for date-only), or null when falsy.
  */
 function panoDateOrNull(v) {
-  return v ? new Date(v) : null;
+  if (!v) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v));
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return new Date(v);
 }
 
 /**

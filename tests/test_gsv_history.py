@@ -7,6 +7,7 @@ mocked), so there is no network access.
 import asyncio
 import json
 import os
+import re
 import sys
 from datetime import date
 
@@ -469,3 +470,80 @@ def test_harvest_blocks_and_leaves_checkpoint_then_resumes(monkeypatch, tmp_path
     assert result["unique_panos"] == 1
     assert os.path.exists(out)
     assert not os.path.exists(out + ".harvesting")
+
+
+# ── Isolated-failure retry / refuse-to-finalize (audit 2026-07-11) ─────────
+
+
+def _point_from_url(url):
+    """Extract the (lat, lon) a search URL queries."""
+    m = re.search(r"!3d([-\d.]+)!4d([-\d.]+)!", url)
+    return float(m.group(1)), float(m.group(2))
+
+
+def test_isolated_failure_is_retried_within_the_run(monkeypatch, tmp_path):
+    """One transient failure (far below the breaker limit) must be re-queried
+    by the in-run retry pass, not silently finalized as a hole."""
+    response = make_response(undated=[], dated=[("g1", 44.05, -121.31, (2020, 1))])
+    state = {"calls": 0, "failed_once": False}
+
+    def responder(url):
+        state["calls"] += 1
+        if not state["failed_once"]:
+            state["failed_once"] = True
+            raise aiohttp.ClientError("transient blip")
+        return response
+
+    _patch_fetch(monkeypatch, responder)
+    out = str(tmp_path / "bend_gsv_history_2026-07-08.csv.gz")
+    result = asyncio.run(
+        dgh.harvest_gsv_history_async(
+            city_name="Bend",
+            center_lat=44.05,
+            center_lon=-121.31,
+            grid_width=40,
+            grid_height=40,
+            step_length=20,
+            output_csv_gz_path=out,
+            jitter_seconds=(0.0, 0.0),
+        )
+    )
+    assert result["unique_panos"] == 1
+    assert state["calls"] == 10  # 9 points + 1 retry of the failed one
+    assert os.path.exists(out)
+    assert not os.path.exists(out + ".harvesting")  # complete → checkpoint gone
+
+
+def test_refuses_to_finalize_harvest_with_holes(monkeypatch, tmp_path):
+    """A point that fails every retry pass (without tripping the breaker)
+    must abort finalization: no final csv.gz, checkpoint kept for resume —
+    previously the sweep 'completed', published the holey harvest, and
+    deleted the checkpoint, permanently losing the failed points."""
+    response = make_response(undated=[], dated=[("g1", 44.05, -121.31, (2020, 1))])
+
+    def responder(url):
+        lat, lon = _point_from_url(url)
+        if abs(lat - 44.05) < 1e-9 and abs(lon - (-121.31)) < 1e-9:
+            raise aiohttp.ClientError("this one point always fails")
+        return response
+
+    _patch_fetch(monkeypatch, responder)
+    out = str(tmp_path / "bend_gsv_history_2026-07-08.csv.gz")
+    with pytest.raises(dgh.HarvestIncompleteError, match="1 grid points"):
+        asyncio.run(
+            dgh.harvest_gsv_history_async(
+                city_name="Bend",
+                center_lat=44.05,
+                center_lon=-121.31,
+                grid_width=40,
+                grid_height=40,
+                step_length=20,
+                output_csv_gz_path=out,
+                jitter_seconds=(0.0, 0.0),
+            )
+        )
+    assert not os.path.exists(out), "must not publish a harvest with holes"
+    assert os.path.exists(out + ".harvesting"), "checkpoint kept for resume"
+    # HarvestIncompleteError extends HarvestBlockedError so existing
+    # operator handling (resume messaging) applies unchanged.
+    assert issubclass(dgh.HarvestIncompleteError, dgh.HarvestBlockedError)

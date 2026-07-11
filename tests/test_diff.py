@@ -134,6 +134,28 @@ def test_misaligned_grid_skips_point_stats():
     assert d.panos_persisted == 1
 
 
+def test_ok_to_no_date_flip_is_a_date_change_not_churn():
+    # A pano whose date disappears (OK -> NO_DATE, common for Mapillary's
+    # bogus contributor timestamps) is still present in both runs: it must
+    # count as persisted + capture_date_changed, never as removed + added.
+    old = _two_point_df("OK", "b", "2021-03-01")
+    new = _two_point_df("NO_DATE", "b", None)
+    d = compute_run_diff(old, new)
+    assert (d.panos_added, d.panos_removed, d.panos_persisted) == (0, 0, 2)
+    assert d.capture_date_changed == 1
+    row = d.detail[d.detail["change_type"] == "capture_date_changed"].iloc[0]
+    assert row["old_capture_date"] == "2021-03-01"
+    assert row["new_capture_date"] is None
+
+
+def test_no_date_to_ok_flip_is_a_date_change_not_churn():
+    old = _two_point_df("NO_DATE", "b", None)
+    new = _two_point_df("OK", "b", "2026-05-01")
+    d = compute_run_diff(old, new)
+    assert (d.panos_added, d.panos_removed) == (0, 0)
+    assert d.capture_date_changed == 1
+
+
 def test_duplicate_pano_ids_deduped_keeping_newest_date():
     old = make_city_df([("p1", "2020-05-01"), ("p1", "2022-03-01")])
     new = make_city_df([("p1", "2022-03-01")])

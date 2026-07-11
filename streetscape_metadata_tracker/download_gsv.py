@@ -12,7 +12,7 @@ import aiohttp
 import backoff
 import geopy.distance
 import pandas as pd
-from filelock import FileLock
+from filelock import FileLock, Timeout
 from tqdm import tqdm
 
 from .config import METADATA_DTYPES
@@ -194,7 +194,17 @@ async def process_batch_async(
                 batch_results.append(result)
                 await progress_queue.put(1)
 
-        # Append batch results to the in-progress CSV under a file lock
+        # Every point in this batch failed (all are queued for the retry
+        # pass); an empty DataFrame would KeyError on astype and abort the
+        # whole run for what is usually a transient network blip.
+        if not batch_results:
+            return results
+
+        # Append batch results to the in-progress CSV under a file lock.
+        # The lock FILE is never deleted: removing a path another process
+        # may be locking on lets a third acquirer create a fresh lock and
+        # interleave CSV writes — the exact corruption the lock prevents.
+        # Stale lock files are harmless (excluded from publish).
         df_batch = pd.DataFrame(batch_results)  # First create the DataFrame
         df_batch = df_batch.astype(METADATA_DTYPES)  # Then apply the dtypes
 
@@ -209,21 +219,10 @@ async def process_batch_async(
             raise PermissionError(
                 "FileLock failure: " + create_helpful_permission_error(base_file_path)
             ) from e
-        finally:
-            try:
-                if os.path.exists(lock_file):
-                    os.remove(lock_file)
-            except FileNotFoundError:
-                pass
 
         results.extend(batch_results)
 
     except Exception as e:
-        try:
-            if os.path.exists(lock_file):
-                os.remove(lock_file)
-        except Exception as cleanup_error:
-            logger.error(f"Error cleaning up {lock_file}: {cleanup_error}")
         raise DownloadError(f"Error processing batch: {str(e)}") from e
 
     return results
@@ -293,6 +292,29 @@ async def download_gsv_metadata_async(
     failed_points_file = output_csv_gz_path[: -len(".csv.gz")] + "_failed_points.csv"
 
     Path(os.path.dirname(os.path.abspath(output_csv_gz_path))).mkdir(parents=True, exist_ok=True)
+
+    # Immutable-snapshot guard: a completed run file is never overwritten.
+    # A concurrent second run (e.g. scheduler + manual invocation of the
+    # same city/date) would otherwise share the same .downloading file and
+    # eventually clobber the registered snapshot with partial data.
+    if os.path.exists(file_name_compressed_with_path):
+        raise DownloadError(
+            f"Output file already exists: {file_name_compressed_with_path}. "
+            f"Runs are immutable snapshots; refusing to overwrite. "
+            f"(Same city/provider/run-date already collected?)"
+        )
+
+    # Run-level mutual exclusion, held for the WHOLE run (the per-batch
+    # lock only serializes individual appends). timeout=0: a second
+    # process fails fast instead of queueing behind a multi-hour run.
+    run_lock = FileLock(f"{file_name_downloading_with_path}.runlock", timeout=0)
+    try:
+        run_lock.acquire()
+    except Timeout:
+        raise DownloadError(
+            f"Another process is already collecting {output_csv_gz_path} "
+            f"(run lock held); refusing to run concurrently."
+        ) from None
 
     try:
         # Calculate grid dimensions
@@ -437,4 +459,11 @@ async def download_gsv_metadata_async(
         }
 
     except Exception as e:
-        raise DownloadError(f"Download failed: {str(e)}") from e
+        # Attach the request count so the caller can still record spent
+        # budget in the api_usage ledger — a failed multi-hour run can have
+        # issued 100k+ real (billable) requests.
+        error = DownloadError(f"Download failed: {redact_credentials(e)}")
+        error.api_requests = api_requests
+        raise error from e
+    finally:
+        run_lock.release()

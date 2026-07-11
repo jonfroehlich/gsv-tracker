@@ -413,3 +413,45 @@ def test_download_pano_outside_grid_is_dropped(monkeypatch, tmp_path):
     tiles = {(x, y): encode_tile([make_image(201, far_lon, lat)], x, y)}
     result, _ = _run_download(monkeypatch, tmp_path, tiles, lat, lon)
     assert (result["df"]["status"] == "ZERO_RESULTS").all()
+
+
+# ── Latitude-local grid assignment accuracy (audit 2026-07-11, M2) ──────────
+
+
+def test_assign_to_grid_matches_geodesic_grid_far_from_center_at_equator():
+    """A pano EXACTLY at grid point (i=120, j=0) — placed with the same
+    geodesic math that builds the grid — must assign to i=120. The old
+    global-mean 111,320 m/° overstated equatorial dy by ~0.67% (true
+    ≈110,574 m/°), i.e. +0.8 rows at 2.4 km from center → i=121."""
+    origin = geopy.Point(0.0, 30.0)
+    north = geopy.distance.distance(meters=120 * 20).destination(origin, 0)
+    i, j, in_grid = dm.assign_to_grid(
+        np.array([north.latitude]),
+        np.array([north.longitude]),
+        0.0,
+        30.0,
+        width_steps=250,
+        height_steps=250,
+        step_length=20,
+    )
+    assert (int(i[0]), int(j[0])) == (120, 0)
+    assert bool(in_grid[0])
+
+
+def test_assign_to_grid_matches_geodesic_grid_far_corner_mid_latitude():
+    """Same check at Seattle's latitude on a far corner point (i=120, j=120),
+    exercising both the dy series and the per-row cos-latitude dx scale."""
+    lat0, lon0 = 47.6, -122.3
+    north = geopy.distance.distance(meters=120 * 20).destination(geopy.Point(lat0, lon0), 0)
+    corner = geopy.distance.distance(meters=120 * 20).destination(north, 90)
+    i, j, in_grid = dm.assign_to_grid(
+        np.array([corner.latitude]),
+        np.array([corner.longitude]),
+        lat0,
+        lon0,
+        width_steps=250,
+        height_steps=250,
+        step_length=20,
+    )
+    assert (int(i[0]), int(j[0])) == (120, 120)
+    assert bool(in_grid[0])

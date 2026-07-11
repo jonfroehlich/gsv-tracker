@@ -24,7 +24,10 @@
  */
 
 // ── Map setup ──────────────────────────────────────────────────
-const map = L.map("map", { zoomControl: false }).setView([0, 0], 13);
+// preferCanvas: pano markers render on a shared <canvas> instead of one
+// SVG DOM node each — the difference between usable and frozen for large
+// cities (10⁵+ markers).
+const map = L.map("map", { zoomControl: false, preferCanvas: true }).setView([0, 0], 13);
 L.control.zoom({ position: "bottomleft" }).addTo(map);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
@@ -813,8 +816,12 @@ async function loadData() {
 
         processedPanos.add(row.pano_id);
 
-        const captureDate = new Date(row.capture_date);
-        if (isNaN(captureDate.getTime())) continue; // skip unparseable dates
+        // panoDateOrNull parses date-only strings as LOCAL midnight so the
+        // year bucket/color matches the calendar date in the CSV (a UTC
+        // parse shifted Jan/year-precision dates into the previous year
+        // for visitors west of UTC).
+        const captureDate = panoDateOrNull(row.capture_date);
+        if (!captureDate || isNaN(captureDate.getTime())) continue; // skip unparseable dates
 
         const year = captureDate.getFullYear();
         const age = currentYear - year;
@@ -823,8 +830,10 @@ async function loadData() {
           ? `${Math.round(ageInYears * 12)} months`
           : `${ageInYears.toFixed(1)} years`;
 
-        // Incremental temporal aggregation
-        const dateStr = captureDate.toISOString().split("T")[0];
+        // Incremental temporal aggregation, keyed by the CSV's own
+        // YYYY-MM-DD string (toISOString would shift local dates back to
+        // the previous day east of UTC)
+        const dateStr = String(row.capture_date);
         temporalMap.set(dateStr, (temporalMap.get(dateStr) || 0) + 1);
 
         // Map marker
@@ -861,6 +870,16 @@ async function loadData() {
     // quotes, or newlines) correctly on each batch because it sees a
     // well-formed CSV fragment with headers on every call.
 
+    // Per-column typing: only coordinates are numeric. Blanket
+    // dynamicTyping would coerce pano_id to a float — Mapillary IDs are
+    // numeric strings that can exceed 2^53 and would silently round,
+    // corrupting the dedup set and viewer deep-links.
+    const csvParseOptions = {
+      header: true,
+      dynamicTyping: { query_lat: true, query_lon: true, pano_lat: true, pano_lon: true },
+      skipEmptyLines: true,
+    };
+
     let buffer = "";
     let headerLine = null; // first line of the CSV (column names)
 
@@ -870,11 +889,7 @@ async function loadData() {
       if (done) {
         // Flush any remaining content after the last newline
         if (buffer.trim() && headerLine !== null) {
-          const result = Papa.parse(`${headerLine}\n${buffer}`, {
-            header: true,
-            dynamicTyping: true,
-            skipEmptyLines: true,
-          });
+          const result = Papa.parse(`${headerLine}\n${buffer}`, csvParseOptions);
           processRows(result.data);
         }
         break;
@@ -900,11 +915,7 @@ async function loadData() {
         headerLine = completeText.slice(0, firstNewline);
         const dataText = completeText.slice(firstNewline + 1);
         if (dataText.trim()) {
-          const result = Papa.parse(`${headerLine}\n${dataText}`, {
-            header: true,
-            dynamicTyping: true,
-            skipEmptyLines: true,
-          });
+          const result = Papa.parse(`${headerLine}\n${dataText}`, csvParseOptions);
           processRows(result.data);
         }
       } else {
@@ -926,7 +937,7 @@ async function loadData() {
     updateLegend(Object.keys(markersByYear).map(Number));
 
     const temporalData = Array.from(temporalMap.entries())
-      .map(([d, c]) => ({ date: new Date(d), count: c }))
+      .map(([d, c]) => ({ date: panoDateOrNull(d), count: c }))
       .sort((a, b) => a.date - b.date);
 
     createTemporalPlot(temporalData, document.getElementById("temporal-plot"));

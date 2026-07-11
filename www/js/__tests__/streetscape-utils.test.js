@@ -3,12 +3,19 @@
 // no browser. These cover the numeric/date edge cases behind the B1–B4
 // tooltip bugs (Infinity%/NaN) and the 0-pano epoch-date bug (#122/#69).
 
+// Pin a west-of-UTC zone so the date-only-parse tests actually exercise the
+// timezone-shift regression (CI runs in UTC, where UTC-parse bugs are
+// invisible). Node honors TZ changes for subsequently created Dates.
+process.env.TZ = "America/Los_Angeles";
+
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  PROVIDERS,
   adaptCityRecord,
   escapeHtml,
+  getColor,
   isValidRunFilename,
   isGoogleCopyright,
   panoDateOrNull,
@@ -251,4 +258,64 @@ test("panoDateOrNull: valid ISO date parses to a Date", () => {
   assert.ok(d instanceof Date);
   assert.ok(!Number.isNaN(d.getTime()));
   assert.equal(d.getUTCFullYear(), 2020);
+});
+
+// --- getColor: YlOrRd age color scale boundaries ----------------------------
+//
+// The scale's documented stops: age 0 → rgb(255, 255, 178) (light yellow),
+// age max/2 → rgb(253, 141, 60) (orange), age >= provider max →
+// rgb(189, 0, 38) (dark red). The provider max is wall-clock-derived
+// (years since the provider's launch), so tests pin the stops with ages
+// that are max-independent: 0, an age far beyond any max, and max/2
+// recomputed from the exported PROVIDERS launch dates.
+
+test("getColor: age 0 is the light-yellow newest stop for every provider", () => {
+  assert.equal(getColor(0), "rgb(255, 255, 178)");
+  assert.equal(getColor(0, "gsv"), "rgb(255, 255, 178)");
+  assert.equal(getColor(0, "mapillary"), "rgb(255, 255, 178)");
+});
+
+test("getColor: ages at/beyond the provider max clamp to dark red", () => {
+  // 1e6 years dwarfs any provider's launch-anchored max, so the ratio must
+  // clamp to 1 instead of extrapolating past the dark-red stop.
+  assert.equal(getColor(1e6, "gsv"), "rgb(189, 0, 38)");
+  assert.equal(getColor(1e6, "mapillary"), "rgb(189, 0, 38)");
+});
+
+test("getColor: half the provider max is the orange middle stop", () => {
+  // Recompute the provider max exactly as the module does (years since
+  // launch, 365.25-day years). Both interpolation branches meet at the
+  // 0.5 boundary with the same color, so the sub-millisecond clock drift
+  // between module load and this call cannot flip the rounded result.
+  const msPerYear = 1000 * 60 * 60 * 24 * 365.25;
+  const gsvMax = (Date.now() - PROVIDERS.gsv.launchDate.getTime()) / msPerYear;
+  assert.equal(getColor(gsvMax / 2, "gsv"), "rgb(253, 141, 60)");
+});
+
+test("getColor: unknown provider falls back to the gsv scale", () => {
+  assert.equal(getColor(7, "kartaview"), getColor(7, "gsv"));
+});
+
+test("getColor: null age (0-pano run) coerces to the newest stop, not NaN", () => {
+  // index.js passes pano_age_stats.median_pano_age_years straight through,
+  // and that field is null for a 0-pano run. null/maxAge coerces to 0, so
+  // the color must be the valid age-0 stop — never "rgb(NaN, NaN, NaN)".
+  assert.equal(getColor(null), "rgb(255, 255, 178)");
+  assert.equal(getColor(null, "mapillary"), "rgb(255, 255, 178)");
+});
+
+test("panoDateOrNull: date-only strings are local calendar dates (no TZ shift)", () => {
+  // Regression: `new Date("2023-01-01")` is UTC midnight, so local getters
+  // west of UTC (TZ pinned to America/Los_Angeles above) read it back as
+  // Dec 31, 2022 — putting every Jan/year-precision capture date in the
+  // previous year's filter bucket and color.
+  const d = panoDateOrNull("2023-01-01");
+  assert.equal(d.getFullYear(), 2023);
+  assert.equal(d.getMonth(), 0);
+  assert.equal(d.getDate(), 1);
+  assert.equal(d.toLocaleDateString("en-US"), "1/1/2023");
+  // Full timestamps (with a time component) keep native parsing.
+  const ts = panoDateOrNull("2026-07-05T12:34:56+00:00");
+  assert.ok(ts instanceof Date && !Number.isNaN(ts.getTime()));
+  assert.equal(ts.getUTCHours(), 12);
 });

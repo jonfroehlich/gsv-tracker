@@ -30,6 +30,40 @@ def _register(conn, name, width=5000, height=5000, step=20):
     )
 
 
+def test_run_one_city_command_defers_skip_policy_to_scheduler(conn, monkeypatch):
+    """
+    The scheduler already decided this city is due (cycle − grace), so the
+    subprocess must run with --min-days-since-last-run 0: otherwise any
+    config with cycle_days − grace_days ≤ the CLI default (80) makes every
+    run "succeed" as a skip — stamping last_success_at while never
+    collecting anything. The city name must also follow '--' so a display
+    name starting with '-' can't be parsed as a flag.
+    """
+    from streetscape_metadata_tracker import scheduler as sched
+
+    cid = _register(conn, "Bend")
+    city = db.resolve_city(conn, cid)
+
+    captured = {}
+
+    def fake_run(cmd, timeout=None, cwd=None):
+        captured["cmd"] = cmd
+
+        class R:
+            returncode = 0
+
+        return R()
+
+    monkeypatch.setattr(sched.subprocess, "run", fake_run)
+    assert sched._run_one_city(SchedulerConfig(), city, date(2026, 7, 1), "gsv")
+
+    cmd = captured["cmd"]
+    i = cmd.index("--min-days-since-last-run")
+    assert cmd[i + 1] == "0"
+    assert cmd[cmd.index("--") + 1] == city.display_name
+    assert cmd[-1] == city.display_name
+
+
 def test_estimate_requests_matches_grid_math(conn):
     cid = _register(conn, "Bend", width=1000, height=1000, step=20)
     city = db.resolve_city(conn, cid)
