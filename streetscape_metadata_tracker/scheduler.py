@@ -12,6 +12,7 @@ Usage (--config accepted on either side of the subcommand):
     python -m streetscape_metadata_tracker.scheduler [--config PATH] status
     python -m streetscape_metadata_tracker.scheduler [--config PATH] assign
     python -m streetscape_metadata_tracker.scheduler [--config PATH] run-due [--dry-run] [--limit N]
+    python -m streetscape_metadata_tracker.scheduler [--config PATH] regenerate-aggregate [--publish]
 
 Config: TOML (see config/scheduler.toml). Requires Python 3.11+ (tomllib).
 """
@@ -187,6 +188,24 @@ def _recent_log_tail(cfg: SchedulerConfig, n: int = 40) -> str:
         return f"(could not read {log_path}: {e})"
 
 
+def _publish(cfg: SchedulerConfig, context: str) -> int:
+    """
+    Run the publish script (rsync data/ to the web server), returning its exit
+    code and emailing the operator on failure. ``context`` (e.g. the run-due
+    summary) is prepended to the alert body so the email is self-explanatory.
+    """
+    logger.info(f"Publishing via {cfg.publish_script}")
+    result = subprocess.run(["bash", cfg.publish_script], cwd=str(_PROJECT_ROOT))
+    if result.returncode != 0:
+        logger.error("Publish script failed")
+        send_alert(
+            cfg.alerts,
+            f"publish script FAILED on {socket.gethostname()}",
+            f"{context}\n\nPublish step exited nonzero.\n\nRecent log:\n{_recent_log_tail(cfg)}",
+        )
+    return result.returncode
+
+
 def cmd_notify_failure(cfg: SchedulerConfig) -> int:
     """
     Email that the scheduled run failed. Intended for a systemd
@@ -287,6 +306,27 @@ def cmd_assign(cfg: SchedulerConfig) -> int:
         f"{len(providers)} provider(s) over a {cfg.cycle_days}-day cycle "
         f"(~{n / max(cfg.cycle_days, 1):.1f} cities/day)."
     )
+    return 0
+
+
+def cmd_regenerate(cfg: SchedulerConfig, publish: bool = False) -> int:
+    """
+    Rebuild the aggregate ``cities.json.gz`` from the catalog without collecting
+    anything, then optionally publish. Useful after a code change to the
+    aggregate schema, a manual/back-filled run, or to refresh stale published
+    data — a clean one-liner instead of an inline Python snippet.
+    """
+    conn = db.connect(cfg.db_path)
+    logger.info("Regenerating aggregate cities.json.gz")
+    agg = generate_aggregate_v2(conn, cfg.data_dir)
+    print(f"Regenerated {cfg.data_dir}/cities.json.gz ({agg['cities_count']} cities).")
+
+    if publish:
+        # An explicit --publish overrides [publish].enabled: the operator is
+        # asking for it directly on the command line.
+        if _publish(cfg, "regenerate-aggregate (manual)") != 0:
+            return 1
+        print("Published to the web server.")
     return 0
 
 
@@ -479,16 +519,7 @@ def cmd_run_due(cfg: SchedulerConfig, dry_run: bool = False, limit: int | None =
         logger.error(f"Catalog backup failed: {e}")
 
     if cfg.publish_enabled and succeeded > 0:
-        logger.info(f"Publishing via {cfg.publish_script}")
-        result = subprocess.run(["bash", cfg.publish_script], cwd=str(_PROJECT_ROOT))
-        if result.returncode != 0:
-            logger.error("Publish script failed")
-            send_alert(
-                cfg.alerts,
-                f"publish script FAILED on {socket.gethostname()}",
-                f"{summary}\n\nPublish step exited nonzero.\n\n"
-                f"Recent log:\n{_recent_log_tail(cfg)}",
-            )
+        if _publish(cfg, summary) != 0:
             return 1
 
     # Operator email when the batch finished unhealthy (threshold-controlled so
@@ -532,6 +563,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_global_flags(sub.add_parser("status", help="Show per-city schedule and budget status"))
     _add_global_flags(sub.add_parser("assign", help="(Re)compute stagger assignments"))
+    p_regen = sub.add_parser(
+        "regenerate-aggregate",
+        help="Rebuild cities.json.gz from the catalog (no collection)",
+    )
+    _add_global_flags(p_regen)
+    p_regen.add_argument(
+        "--publish", action="store_true", help="Also rsync data/ to the web server afterward"
+    )
     p_run = sub.add_parser("run-due", help="Collect today's due cities")
     _add_global_flags(p_run)
     p_run.add_argument("--dry-run", action="store_true", help="Print what would run; no downloads")
@@ -554,6 +593,8 @@ def main() -> int:
         return cmd_status(cfg)
     if args.command == "assign":
         return cmd_assign(cfg)
+    if args.command == "regenerate-aggregate":
+        return cmd_regenerate(cfg, publish=args.publish)
     if args.command == "notify-failure":
         return cmd_notify_failure(cfg)
     if args.command == "run-due":
