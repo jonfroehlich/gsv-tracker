@@ -24,6 +24,7 @@ python streetscape_tracker.py "Seattle, WA" --check-boundary   # preview search 
 python run_cities.py cities.txt --continue-on-error
 python -m streetscape_metadata_tracker.scheduler status
 python -m streetscape_metadata_tracker.scheduler run-due --dry-run
+python -m streetscape_metadata_tracker.scheduler regenerate-aggregate --publish   # rebuild cities.json.gz from the catalog (no collection) and rsync
 
 # One-time migration of legacy (undated) data files into the catalog
 python scripts/migrate_to_db.py            # dry run; --execute to apply

@@ -127,6 +127,49 @@ def test_config_flag_accepted_on_either_side_of_subcommand():
     assert getattr(parser.parse_args(["status"]), "config", None) is None
 
 
+def test_regenerate_aggregate_parses_publish_flag():
+    parser = build_parser()
+    a = parser.parse_args(["regenerate-aggregate"])
+    assert a.command == "regenerate-aggregate" and a.publish is False
+    b = parser.parse_args(["--config", "/x.toml", "regenerate-aggregate", "--publish"])
+    assert b.command == "regenerate-aggregate" and b.publish and b.config == "/x.toml"
+
+
+def test_regenerate_aggregate_rebuilds_without_publish(conn, monkeypatch):
+    """regenerate-aggregate rebuilds the aggregate and, without --publish,
+    never touches the publish script."""
+    from streetscape_metadata_tracker import scheduler as sched
+
+    calls = {"agg": 0, "publish": 0}
+    monkeypatch.setattr(sched.db, "connect", lambda path: conn)
+    monkeypatch.setattr(
+        sched,
+        "generate_aggregate_v2",
+        lambda c, d: calls.__setitem__("agg", calls["agg"] + 1) or {"cities_count": 3},
+    )
+    monkeypatch.setattr(sched, "_publish", lambda cfg, ctx: calls.__setitem__("publish", 1) or 0)
+
+    rc = sched.cmd_regenerate(SchedulerConfig(publish_enabled=False))
+    assert rc == 0 and calls == {"agg": 1, "publish": 0}
+
+
+def test_regenerate_aggregate_publishes_on_flag(conn, monkeypatch):
+    """--publish runs the publish step even when [publish].enabled is false,
+    and a publish failure surfaces as a nonzero exit."""
+    from streetscape_metadata_tracker import scheduler as sched
+
+    monkeypatch.setattr(sched.db, "connect", lambda path: conn)
+    monkeypatch.setattr(sched, "generate_aggregate_v2", lambda c, d: {"cities_count": 0})
+
+    published = []
+    monkeypatch.setattr(sched, "_publish", lambda cfg, ctx: published.append(ctx) or 0)
+    assert sched.cmd_regenerate(SchedulerConfig(publish_enabled=False), publish=True) == 0
+    assert published  # publish ran despite publish_enabled=False
+
+    monkeypatch.setattr(sched, "_publish", lambda cfg, ctx: 1)  # simulate rsync failure
+    assert sched.cmd_regenerate(SchedulerConfig(publish_enabled=False), publish=True) == 1
+
+
 def test_makelab1_production_config_is_wired():
     # Guard the checked-in production config the systemd unit points at.
     cfg = load_scheduler_config(os.path.join(_PROJECT_ROOT, "config", "scheduler.makelab1.toml"))
