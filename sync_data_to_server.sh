@@ -37,8 +37,8 @@ set -euo pipefail
 # ──────────────────────────────────────────────
 # Configuration (override via environment)
 # ──────────────────────────────────────────────
-REMOTE_USER="${STREETSCAPE_REMOTE_USER:-jonf}"
-REMOTE_HOST="${STREETSCAPE_REMOTE_HOST:-recycle.cs.washington.edu}"
+REMOTE_USER="${STREETSCAPE_REMOTE_USER:-$USER}"
+REMOTE_HOST="${STREETSCAPE_REMOTE_HOST:-your-webhost.example.edu}"
 REMOTE_DATA_DIR="${STREETSCAPE_REMOTE_DATA_DIR:-/cse/web/research/makelab/public/streetscape-tracker/data}"
 
 # Local publish mode: copy to REMOTE_DATA_DIR on the local filesystem instead of
@@ -117,8 +117,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --help, -h       Show this help message"
       echo ""
       echo "Environment overrides:"
-      echo "  STREETSCAPE_REMOTE_USER  SSH username (default: jonf)"
-      echo "  STREETSCAPE_REMOTE_HOST  SSH host (default: recycle.cs.washington.edu)"
+      echo "  STREETSCAPE_REMOTE_USER  SSH username (default: \$USER)"
+      echo "  STREETSCAPE_REMOTE_HOST  SSH host (required for remote mode; set this)"
       echo "  STREETSCAPE_REMOTE_DATA_DIR  Remote path (default: /cse/web/research/makelab/public/streetscape-tracker/data)"
       exit 0
       ;;

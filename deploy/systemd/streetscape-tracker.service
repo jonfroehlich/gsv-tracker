@@ -25,8 +25,8 @@ ExecStart=%h/streetscape-tracker/.venv/bin/python -m streetscape_metadata_tracke
 TimeoutStartSec=12h
 
 # ── Resource guardrails ────────────────────────────────────────────────
-# makelab1 is shared with Project Sidewalk (and its data lives on the same
-# makelab2 array). These caps keep nightly collection from starving co-tenants.
+# This host is shared with other lab services (and storage is on a shared NFS
+# array). These caps keep nightly collection from starving co-tenants.
 # The workload is I/O-bound async HTTP + pandas, so real peaks are modest;
 # validate after the first live night and tune:
 #   systemctl --user show streetscape-tracker.service -p MemoryPeak -p CPUUsageNSec
@@ -36,5 +36,5 @@ MemoryHigh=4G
 MemoryMax=8G
 CPUAccounting=true
 CPUQuota=400%
-# Note: data lives on NFS (makelab2), so IO is network, not block-device —
+# Note: data lives on NFS, so IO is network, not block-device —
 # IOWeight would not govern it; CPU/Memory caps + Nice are the real levers.

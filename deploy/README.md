@@ -1,7 +1,7 @@
 # Deploying the Streetscape Tracker scheduler on makelab1
 
 The scheduler runs as a **user-level systemd timer** on
-`makelab1.cs.washington.edu` (Rocky Linux 9): a oneshot service fires
+`makelab1.cs.washington.edu` (a RHEL 9-family host): a oneshot service fires
 nightly, collects the cities due that day (staggered quarterly cycle,
 bounded by a daily API-request budget), diffs each against its previous
 run, regenerates the aggregate JSON, and publishes `data/` to the public
@@ -15,12 +15,12 @@ this is deliberately split:
 
 | What | Path | Notes |
 |------|------|-------|
-| Code + data + DB + logs + `.env` | `/projects/makeabilitylab/streetscape-tracker/` | On the lab fileserver **makelab2** (42 TB, backed up, group `makelab`). **Not web-served.** Colocated with Project Sidewalk. |
+| Code + data + DB + logs + `.env` | `/projects/makeabilitylab/streetscape-tracker/` | On the lab fileserver (backed up, group `makelab`). **Not web-served.** Shared with other lab services. |
 | Convenience symlink | `~/streetscape-tracker` → the path above | Lets the generic `%h/streetscape-tracker` systemd units and `.env` resolve. |
-| Public web docroot | `/cse/web/research/makelab/public/streetscape-tracker/` | On a *different* server (`new-rumble`); served at `makeabilitylab.cs.washington.edu/public/streetscape-tracker/`. Holds only the flattened website + published `*.csv.gz`/`*.json.gz`. |
+| Public web docroot | `/cse/web/research/makelab/public/streetscape-tracker/` | On a *different* host (the web-file server); served at `makeabilitylab.cs.washington.edu/public/streetscape-tracker/`. Holds only the flattened website + published `*.csv.gz`/`*.json.gz`. |
 
 Because makelab1 mounts the docroot directly, **publishing is a local
-rsync — no SSH to recycle** (`STREETSCAPE_PUBLISH_LOCAL=1`, set in the systemd unit).
+rsync — no SSH to the docroot host** (`STREETSCAPE_PUBLISH_LOCAL=1`, set in the systemd unit).
 
 ## 1. One-time setup
 
@@ -63,7 +63,7 @@ already points at the paths above, enables local publish, and enables email
 alerts. Confirm mail delivers, then preview a run:
 
 ```bash
-echo "streetscape-tracker mail test $(date)" | mail -s "streetscape test" jonf@cs.uw.edu
+echo "streetscape-tracker mail test $(date)" | mail -s "streetscape test" you@example.edu
 # NB: --config is global and must come BEFORE the subcommand.
 .venv/bin/python -m streetscape_metadata_tracker.scheduler --config config/scheduler.makelab1.toml status
 .venv/bin/python -m streetscape_metadata_tracker.scheduler --config config/scheduler.makelab1.toml run-due --dry-run
@@ -115,8 +115,8 @@ loginctl enable-linger $USER       # user services must survive logout
 ```
 
 The service ships with resource caps (`MemoryMax=8G`, `CPUQuota=400%`,
-`Nice=10`) so nightly collection can't starve Project Sidewalk, which shares
-the box and the makelab2 array. If `enable-linger` is disallowed by policy,
+`Nice=10`) so nightly collection can't starve the other lab services that
+share the box and the storage array. If `enable-linger` is disallowed by policy,
 ask CSE IT to enable lingering for your account.
 
 ## 6. Operate
@@ -131,10 +131,10 @@ systemctl --user start streetscape-tracker.service           # trigger a run now
 Rotating file logs also go to `logs/streetscape_scheduler.log`, and a rolling
 catalog backup to `logs/streetscape_tracker.db.backup`.
 
-### Watching resource use (alongside Project Sidewalk)
+### Watching resource use (alongside other co-tenants)
 
 ```bash
-systemd-cgtop                                        # live CPU/mem per cgroup — streetscape vs sidewalk
+systemd-cgtop                                        # live CPU/mem per cgroup — streetscape vs co-tenants
 systemctl --user show streetscape-tracker.service -p MemoryPeak -p CPUUsageNSec
 ```
 
