@@ -272,9 +272,12 @@ def _run_download(
     served = []
 
     async def fake_fetch(session, url, timeout):
-        m = re.search(r"/2/14/(\d+)/(\d+)\?access_token=(.+)$", url)
+        # The token must travel as an Authorization header, never in the
+        # URL (URL-borne credentials leak via exception text into logs).
+        m = re.search(r"/2/14/(\d+)/(\d+)$", url)
         assert m, f"unexpected tile URL: {url}"
-        assert m.group(3) == "MLY|test|token"
+        assert "access_token" not in url
+        assert session.headers.get("Authorization") == "OAuth MLY|test|token"
         xy = (int(m.group(1)), int(m.group(2)))
         served.append(xy)
         return tiles_by_xy.get(xy, mapbox_vector_tile.encode([]))

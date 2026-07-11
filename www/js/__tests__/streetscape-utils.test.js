@@ -8,6 +8,8 @@ const assert = require("node:assert/strict");
 
 const {
   adaptCityRecord,
+  escapeHtml,
+  isValidRunFilename,
   isGoogleCopyright,
   panoDateOrNull,
   googleSharePercent,
@@ -16,10 +18,52 @@ const {
 
 // --- adaptCityRecord: v1/v2/v3 aggregate flattening ------------------------
 
-test("adaptCityRecord: v1 flat record is gsv-only, passed through", () => {
-  const v1 = { city_id: "y--tx", city: "Y", pano_count: 42 };
-  assert.equal(adaptCityRecord(v1, "gsv"), v1);
-  assert.equal(adaptCityRecord(v1, "mapillary"), null);
+// A REAL v1 record, mirroring generate_aggregate_summary_as_json's output:
+// flat fields, `city` is a bare string, data_file is an object, and NONE of
+// the normalized keys (provider/pano_count/pano_age_stats/
+// capture_year_histogram) exist. Regression: the adapter used to pass v1
+// records through raw, so index.js crashed on
+// pano_age_stats.median_pano_age_years with a live pre-v2 cities.json.gz.
+const V1_RECORD = {
+  city: "Bellingham",
+  state: { name: "Washington", code: "WA" },
+  country: { name: "United States", code: "us" },
+  center: { latitude: 48.75, longitude: -122.48 },
+  bounds: { northeast: {}, southwest: {} },
+  data_file: {
+    filename: "bellingham--wa_width_5000_height_5000_step_20.csv.gz",
+    size_bytes: 12345,
+  },
+  search_area_km2: 25,
+  coverage_rate_percent: 51.2,
+  panorama_counts: { unique_panos: 100, unique_google_panos: 60 },
+  all_panos_age_stats: { median_pano_age_years: 4.2 },
+  google_panos_age_stats: { median_pano_age_years: 3.1 },
+  collection_info: { start_time: "t0", end_time: "t1", duration_seconds: 60 },
+  histogram_of_capture_dates_by_year: {
+    all_panos: { 2019: 40, 2020: 60 },
+    google_panos: { 2019: 25, 2020: 35 },
+  },
+};
+
+test("adaptCityRecord: real v1 record gains the normalized keys", () => {
+  const gsv = adaptCityRecord(V1_RECORD, "gsv");
+  assert.equal(gsv.provider, "gsv");
+  // Normalized keys derived from the flat v1 fields, preferring the
+  // official-Google subset (same rule as v2/v3).
+  assert.equal(gsv.pano_count, 60);
+  assert.equal(gsv.pano_age_stats.median_pano_age_years, 3.1);
+  assert.deepEqual(gsv.capture_year_histogram, { 2019: 25, 2020: 35 });
+  // Fields the UI iterates/branches on must exist even though v1 lacks them.
+  assert.deepEqual(gsv.runs, []);
+  assert.equal(gsv.change, null);
+  assert.equal(gsv.copyright_info_available, true);
+  // Historical flat fields survive untouched (index.js reads
+  // data_file.filename and the bare-string city name).
+  assert.equal(gsv.city, "Bellingham");
+  assert.equal(gsv.data_file.filename, V1_RECORD.data_file.filename);
+  // v1 is gsv-only.
+  assert.equal(adaptCityRecord(V1_RECORD, "mapillary"), null);
 });
 
 test("adaptCityRecord: v2 gsv-only providers-less record", () => {
@@ -79,6 +123,78 @@ test("adaptCityRecord: v3 per-provider block, null when provider missing", () =>
   assert.deepEqual(gsv.capture_year_histogram, { counts: { 2020: 5 } });
   // No mapillary block on this city → adapted record is null (omitted upstream).
   assert.equal(adaptCityRecord(v3, "mapillary"), null);
+});
+
+// --- escapeHtml: XSS guard for data-derived strings -------------------------
+
+test("escapeHtml: neutralizes markup in third-party strings", () => {
+  // A hostile Mapillary contributor name must not survive as markup.
+  assert.equal(
+    escapeHtml('<img src=x onerror=alert(1)>'),
+    "&lt;img src=x onerror=alert(1)&gt;"
+  );
+  assert.equal(
+    escapeHtml(`"quoted" & 'single' <tag>`),
+    "&quot;quoted&quot; &amp; &#39;single&#39; &lt;tag&gt;"
+  );
+  // Benign strings pass through unchanged.
+  assert.equal(escapeHtml("© Mapillary contributor 42"), "© Mapillary contributor 42");
+});
+
+test("escapeHtml: non-string inputs are safe", () => {
+  assert.equal(escapeHtml(null), "");
+  assert.equal(escapeHtml(undefined), "");
+  assert.equal(escapeHtml(12345), "12345");
+});
+
+// --- isValidRunFilename: ?file= URL-parameter validation --------------------
+
+test("isValidRunFilename: accepts every run-filename generation", () => {
+  // Legacy undated
+  assert.ok(isValidRunFilename("bend--or_width_5000_height_5000_step_20.csv.gz"));
+  // Buggy float step
+  assert.ok(isValidRunFilename("bend--or_width_5000_height_5000_step_20.0.csv.gz"));
+  // Dated, tokenless (gsv)
+  assert.ok(isValidRunFilename("bend--or_width_5000_height_5000_step_20_2026-07-05.csv.gz"));
+  // Dated, provider-tagged
+  assert.ok(
+    isValidRunFilename("bend--or_width_5000_height_5000_step_20_mapillary_2026-07-05.csv.gz")
+  );
+  // Slug with interior period (st.-louis rule)
+  assert.ok(
+    isValidRunFilename("st.-louis--mo_width_5000_height_5000_step_20_2026-07-05.csv.gz")
+  );
+});
+
+test("isValidRunFilename: rejects traversal and non-run artifacts", () => {
+  // Path traversal / separators — the attack the validator exists for.
+  assert.equal(isValidRunFilename("../../../etc/passwd"), false);
+  assert.equal(
+    isValidRunFilename("../other/x_width_1_height_1_step_1_2026-01-01.csv.gz"),
+    false
+  );
+  assert.equal(
+    isValidRunFilename("a\\b_width_1_height_1_step_1_2026-01-01.csv.gz"),
+    false
+  );
+  // URL metacharacters that could smuggle a query/fragment.
+  assert.equal(
+    isValidRunFilename("a?b_width_1_height_1_step_1_2026-01-01.csv.gz"),
+    false
+  );
+  // Non-run artifacts: diff files, history files, working files.
+  assert.equal(isValidRunFilename("bend--or_diff_2026-04-01_to_2026-07-01.csv.gz"), false);
+  assert.equal(
+    isValidRunFilename("bend--or_width_5000_height_5000_step_20_gsv_history_2026-07-05.csv.gz"),
+    false
+  );
+  assert.equal(
+    isValidRunFilename("bend--or_width_5000_height_5000_step_20_2026-07-05.csv.gz.rejected"),
+    false
+  );
+  assert.equal(isValidRunFilename("cities.json.gz"), false);
+  assert.equal(isValidRunFilename(""), false);
+  assert.equal(isValidRunFilename(null), false);
 });
 
 // --- isGoogleCopyright: exact © Google match -------------------------------

@@ -16,7 +16,12 @@ from filelock import FileLock
 from tqdm import tqdm
 
 from .config import METADATA_DTYPES
-from .download_common import DownloadError, generate_grid_points, standardize_capture_date
+from .download_common import (
+    DownloadError,
+    generate_grid_points,
+    redact_credentials,
+    standardize_capture_date,
+)
 from .fileutils import load_city_csv_file
 
 logger = logging.getLogger(__name__)
@@ -67,17 +72,26 @@ async def fetch_gsv_pano_metadata_async(
     Raises:
         DownloadError: If the request fails or returns invalid data after all retries
     """
+    # Google requires the key as a query parameter, so exception/response
+    # text touching this URL must be scrubbed with redact_credentials()
+    # before it is logged or re-raised.
     url = f"https://maps.googleapis.com/maps/api/streetview/metadata?location={lat},{lon}&key={api_key}"
     try:
         async with session.get(url, timeout=timeout) as response:
             if response.status != 200:
-                raise DownloadError(f"HTTP {response.status}: {await response.text()}")
+                raise DownloadError(
+                    f"HTTP {response.status}: {redact_credentials(await response.text())}"
+                )
             return await response.json()
     except (TimeoutError, aiohttp.ClientError) as e:
-        logger.warning(f"Attempt failed for coordinates {lat},{lon}: {str(e)}, retrying...")
+        logger.warning(
+            f"Attempt failed for coordinates {lat},{lon}: {redact_credentials(e)}, retrying..."
+        )
         raise  # Let backoff handle the retry
     except Exception as e:
-        raise DownloadError(f"Error fetching data for coordinates {lat},{lon}: {str(e)}") from e
+        raise DownloadError(
+            f"Error fetching data for coordinates {lat},{lon}: {redact_credentials(e)}"
+        ) from e
 
 
 def get_processed_points(file_path: str) -> set:
@@ -132,7 +146,9 @@ async def process_batch_async(
             batch_results = []
             for (lat, lon, i, j), response in zip(points, responses, strict=False):
                 if isinstance(response, Exception):
-                    logger.error(f"Error processing point ({lat}, {lon}): {str(response)}")
+                    logger.error(
+                        f"Error processing point ({lat}, {lon}): {redact_credentials(response)}"
+                    )
                     await failed_points_queue.put((lat, lon, i, j))
                     continue
 

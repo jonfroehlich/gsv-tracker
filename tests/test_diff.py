@@ -3,7 +3,7 @@
 import pandas as pd
 
 from streetscape_metadata_tracker.diff import compute_run_diff, generate_diff_filename
-from tests.conftest import COLUMNS, make_city_df
+from tests.conftest import COLUMNS, make_city_df, make_mapillary_city_df
 
 
 def _two_point_df(point_b_status, point_b_pano, point_b_date):
@@ -85,6 +85,42 @@ def test_no_date_point_lost_coverage():
     d = compute_run_diff(old, new)
     assert d.points_gained_coverage == 0 and d.points_lost_coverage == 1
     assert abs(d.coverage_delta_pct + 50.0) < 1e-9
+
+
+def test_mapillary_grid_aligned_despite_differing_row_counts():
+    # Mapillary is a census: one row per pano, so two runs of the identical
+    # frozen grid rarely have equal row counts. Alignment must compare unique
+    # grid points, not rows (regression: row-count check nulled all Mapillary
+    # coverage transitions).
+    # Old: 2 panos on point 0, point 1 empty (3 rows, 2 grid points).
+    old = make_mapillary_city_df(
+        [("m1", "2023-01-01"), ("m2", "2023-02-01")], panos_per_point=2, n_empty=1
+    )
+    # New: 2 panos on each of points 0 and 1 (4 rows, same 2 grid points).
+    new = make_mapillary_city_df(
+        [("m1", "2023-01-01"), ("m2", "2023-02-01"), ("m3", "2024-01-01"), ("m4", "2024-02-01")],
+        panos_per_point=2,
+        n_empty=0,
+    )
+    d = compute_run_diff(old, new)
+    assert d.grid_aligned
+    assert d.points_gained_coverage == 1 and d.points_lost_coverage == 0
+    assert abs(d.coverage_delta_pct - 50.0) < 1e-9
+    assert (d.panos_added, d.panos_removed, d.panos_persisted) == (2, 0, 2)
+
+
+def test_mapillary_census_growth_on_same_point_keeps_alignment():
+    # A point gaining extra pano rows changes row counts but not the grid or
+    # its coverage: aligned, zero coverage delta.
+    old = make_mapillary_city_df([("m1", "2023-01-01")], panos_per_point=1, n_empty=1)
+    new = make_mapillary_city_df(
+        [("m1", "2023-01-01"), ("m2", "2024-01-01")], panos_per_point=2, n_empty=1
+    )
+    d = compute_run_diff(old, new)
+    assert d.grid_aligned
+    assert d.points_gained_coverage == 0 and d.points_lost_coverage == 0
+    assert d.coverage_delta_pct == 0.0
+    assert d.panos_added == 1
 
 
 def test_misaligned_grid_skips_point_stats():

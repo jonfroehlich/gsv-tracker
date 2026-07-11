@@ -85,7 +85,9 @@ function updateLegend(years) {
   const sortedYears = Array.from(years).sort((a, b) => b - a);
 
   // ── Section 1: Data overview ───────────────────────────────
-  let html = `<h4>${cityNameGlobal}${stateNameGlobal ? `, ${stateNameGlobal}` : ""}</h4>`;
+  // City/state names originate in OSM/Nominatim (publicly editable) via
+  // the run's JSON metadata — escape before injecting.
+  let html = `<h4>${escapeHtml(cityNameGlobal)}${stateNameGlobal ? `, ${escapeHtml(stateNameGlobal)}` : ""}</h4>`;
 
   if (statsGlobal) {
     const s = statsGlobal;
@@ -148,7 +150,7 @@ function updateLegend(years) {
       .reverse() // newest first
       .map((r) => {
         const selected = r.data_file === currentFileGlobal ? " selected" : "";
-        return `<option value="${r.data_file}"${selected}>${r.run_date}${r.is_baseline ? " (baseline)" : ""}</option>`;
+        return `<option value="${escapeHtml(r.data_file)}"${selected}>${escapeHtml(r.run_date)}${r.is_baseline ? " (baseline)" : ""}</option>`;
       })
       .join("");
     html += `
@@ -165,7 +167,7 @@ function updateLegend(years) {
     const ch = changeGlobal;
     html += `
       <div class="legend-divider"></div>
-      <div class="legend-year-header">Since ${ch.from_run_date}</div>
+      <div class="legend-year-header">Since ${escapeHtml(ch.from_run_date)}</div>
       <p class="legend-meta" style="margin:4px 0 0">
         <span style="color:#7bd88f">+${(ch.panos_added ?? 0).toLocaleString()} new</span> /
         <span style="color:#ff8a80">−${(ch.panos_removed ?? 0).toLocaleString()} removed</span>
@@ -235,7 +237,14 @@ function toggleYear(year) {
 
 // ── URL parameters ─────────────────────────────────────────────
 const urlParams = new URLSearchParams(window.location.search);
-const csvFile = urlParams.get("file");
+// ?file= is untrusted input concatenated onto the data base URL, so it is
+// validated against the filename contract (isValidRunFilename): anything
+// else — path traversal, non-run artifacts — is treated as absent.
+const rawCsvFileParam = urlParams.get("file");
+const csvFile = isValidRunFilename(rawCsvFileParam) ? rawCsvFileParam : null;
+if (rawCsvFileParam && !csvFile) {
+  console.warn("Ignoring invalid ?file= parameter:", rawCsvFileParam);
+}
 const cityQuery = urlParams.get("city");
 const decodedCityQuery = cityQuery
   ? decodeURIComponent(cityQuery).replace(/^"(.*)"$/, "$1")
@@ -570,12 +579,15 @@ function updateChartColorsForDate(chart, date) {
  */
 function buildPopupHtml(captureDate, ageFormatted, panoId, photographer) {
   const provider = PROVIDERS[providerGlobal];
+  // photographer is third-party content (Mapillary contributor names,
+  // archival GSV credits) and pano_id comes straight from the CSV — both
+  // must be escaped before entering popup HTML.
   return `
     <div style="font-family:sans-serif">
       <strong>Capture Date:</strong> ${captureDate.toLocaleDateString()}<br>
       <strong>Age:</strong> ${ageFormatted}<br>
-      <strong>Photographer:</strong> ${photographer}<br>
-      <strong>Pano ID:</strong> ${panoId}<br><br>
+      <strong>Photographer:</strong> ${escapeHtml(photographer)}<br>
+      <strong>Pano ID:</strong> ${escapeHtml(panoId)}<br><br>
       <a href="${provider.viewerUrl(panoId)}"
          target="_blank" rel="noopener"
          style="color:#2196F3;text-decoration:none">
@@ -713,7 +725,7 @@ async function loadData() {
     const fmtYears = (v) => (v != null ? `${v.toFixed(1)} years` : "—");
     const tooltipHtml = `
       <div style="font-family:sans-serif">
-        <strong>${cityLabel}</strong><br>
+        <strong>${escapeHtml(cityLabel)}</strong><br>
         <em>${PROVIDERS[providerGlobal].label}</em><br><br>
         Total panoramas: ${stats.all_panos.duplicate_stats.total_unique_panos.toLocaleString()}<br>
         ${googleLine}${copyrightNote}<br>

@@ -7,6 +7,7 @@ live here so provider-specific downloaders (`download_gsv.py`,
 provider importing from another's module.
 """
 
+import re
 from datetime import datetime
 
 import geopy.distance
@@ -17,6 +18,28 @@ class DownloadError(Exception):
     """Custom exception for download-related errors."""
 
     pass
+
+
+# Credential-bearing query parameters (GSV's key=, Mapillary's
+# access_token=) as they appear inside request URLs.
+_CREDENTIAL_PATTERN = re.compile(r"(?i)\b(key|access_token|token)=[^&\s'\"]+")
+
+
+def redact_credentials(text: str) -> str:
+    """
+    Strip API credentials from text destined for logs, exceptions, or
+    alert emails.
+
+    Provider APIs carry credentials in URL query parameters, and HTTP
+    client exceptions (e.g. aiohttp.ClientResponseError) stringify with the
+    full request URL — so any raw ``str(e)`` that gets logged can leak the
+    key, and the scheduler pastes log tails into operator alert emails.
+    Every log/raise of provider-HTTP error text must pass through here.
+
+    >>> redact_credentials("HTTP 403 for https://x/tile?access_token=MLY123")
+    'HTTP 403 for https://x/tile?access_token=REDACTED'
+    """
+    return _CREDENTIAL_PATTERN.sub(r"\1=REDACTED", str(text))
 
 
 def generate_grid_points(

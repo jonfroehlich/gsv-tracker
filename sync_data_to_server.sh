@@ -48,29 +48,21 @@ PUBLISH_LOCAL="${STREETSCAPE_PUBLISH_LOCAL:-}"
 
 # Resolve local data/ relative to this script's location
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LOCAL_DATA_DIR="${SCRIPT_DIR}/data"
+LOCAL_DATA_DIR="${STREETSCAPE_LOCAL_DATA_DIR:-${SCRIPT_DIR}/data}"
 
-# Publish only the compressed data artifacts. Order matters for rsync
-# filters: the *.gz includes are added first so the bare *.csv / *.json
-# excludes below don't swallow them. Logs, the SQLite catalog, and
-# temp/intermediate files never leave this machine.
-INCLUDE_PATTERNS=(
-  "*.csv.gz"
-  "*.json.gz"
-)
-EXCLUDE_PATTERNS=(
-  "*.lock"
-  "*.downloading"
-  "*.backup"
-  "*.html"
-  "*.log"
-  "*.tmp"
-  "*.batch_*"
-  "*.db"
-  "*.db-wal"
-  "*.db-shm"
-  "*.csv"
-  "*.json"
+# Publish ONLY the compressed data artifacts. This is a strict whitelist:
+# directories are included so rsync can recurse, *.csv.gz / *.json.gz are
+# published, and the final catch-all exclude drops everything else — logs,
+# the SQLite catalog (+ WAL/SHM), bare *.csv/*.json, *.rejected quarantine
+# files, *.harvesting checkpoints, locks, and temp/intermediate files.
+# rsync's default for a file matching NO rule is to transfer it, so the
+# trailing '--exclude *' is what makes this default-deny; never append
+# patterns after it.
+FILTER_FLAGS=(
+  --include "*/"
+  --include "*.csv.gz"
+  --include "*.json.gz"
+  --exclude "*"
 )
 
 # ──────────────────────────────────────────────
@@ -120,6 +112,7 @@ while [[ $# -gt 0 ]]; do
       echo "  STREETSCAPE_REMOTE_USER  SSH username (default: \$USER)"
       echo "  STREETSCAPE_REMOTE_HOST  SSH host (required for remote mode; set this)"
       echo "  STREETSCAPE_REMOTE_DATA_DIR  Remote path (default: /cse/web/research/makelab/public/streetscape-tracker/data)"
+      echo "  STREETSCAPE_LOCAL_DATA_DIR   Local source dir (default: <repo>/data; used by tests)"
       exit 0
       ;;
     *)
@@ -146,15 +139,6 @@ if ! command -v rsync &> /dev/null; then
   echo "  Windows: use WSL or Git Bash, or install via winget/scoop"
   exit 1
 fi
-
-# Build filter flags (includes first so *.csv.gz survives the *.csv exclude)
-EXCLUDE_FLAGS=()
-for pattern in "${INCLUDE_PATTERNS[@]}"; do
-  EXCLUDE_FLAGS+=(--include "$pattern")
-done
-for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-  EXCLUDE_FLAGS+=(--exclude "$pattern")
-done
 
 # ──────────────────────────────────────────────
 # Sync
@@ -212,8 +196,10 @@ else
   [[ -n "$DELETE" ]] && echo "  Delete: enabled (remote files not in local will be removed)"
   echo ""
 
-  rsync -azh --chmod=D2755,F644 --progress $DRY_RUN $VERBOSE $DELETE \
-    "${EXCLUDE_FLAGS[@]}" \
+  # --prune-empty-dirs: the '*/' include would otherwise recreate every
+  # directory (even ones holding only unpublished files) on the server.
+  rsync -azh --chmod=D2755,F644 --progress --prune-empty-dirs $DRY_RUN $VERBOSE $DELETE \
+    "${FILTER_FLAGS[@]}" \
     "$LOCAL_DATA_DIR/" \
     "${REMOTE_DEST}/"
 fi

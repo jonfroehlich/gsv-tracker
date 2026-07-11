@@ -43,15 +43,17 @@ import pandas as pd
 from tqdm import tqdm
 
 from .config import METADATA_DTYPES
-from .download_common import DownloadError, generate_grid_points
+from .download_common import DownloadError, generate_grid_points, redact_credentials
 from .fileutils import load_city_csv_file
 
 logger = logging.getLogger(__name__)
 
 TILE_ZOOM = 14  # the only zoom level whose tiles carry per-image metadata
-TILE_URL_TEMPLATE = (
-    "https://tiles.mapillary.com/maps/vtp/mly1_computed_public/2/{z}/{x}/{y}?access_token={token}"
-)
+# The access token is sent as an `Authorization: OAuth <token>` header, NOT
+# a query parameter: HTTP-client exceptions stringify with the full request
+# URL, so a URL-borne token would leak into logs (and from log tails into
+# the scheduler's alert emails).
+TILE_URL_TEMPLATE = "https://tiles.mapillary.com/maps/vtp/mly1_computed_public/2/{z}/{x}/{y}"
 IMAGE_LAYER = "image"
 
 # Meters per degree of latitude (WGS84 mean). Used only for nearest-grid-
@@ -305,7 +307,7 @@ async def download_mapillary_metadata_async(
 
     async def fetch_one(x: int, y: int) -> list[dict[str, Any]]:
         nonlocal api_requests
-        url = TILE_URL_TEMPLATE.format(z=TILE_ZOOM, x=x, y=y, token=access_token)
+        url = TILE_URL_TEMPLATE.format(z=TILE_ZOOM, x=x, y=y)
         async with semaphore:
             api_requests += 1
             tile_bytes = await _fetch_tile(session, url, timeout)
@@ -313,10 +315,13 @@ async def download_mapillary_metadata_async(
         return decode_image_features(tile_bytes, x, y)
 
     try:
-        async with aiohttp.ClientSession() as session:
+        # Token in a header, not the URL — see TILE_URL_TEMPLATE comment.
+        async with aiohttp.ClientSession(
+            headers={"Authorization": f"OAuth {access_token}"}
+        ) as session:
             results = await asyncio.gather(*(fetch_one(x, y) for x, y in tiles))
     except (TimeoutError, aiohttp.ClientError) as e:
-        raise DownloadError(f"Mapillary tile download failed: {e}") from e
+        raise DownloadError(f"Mapillary tile download failed: {redact_credentials(e)}") from e
     finally:
         progress_bar.close()
 
