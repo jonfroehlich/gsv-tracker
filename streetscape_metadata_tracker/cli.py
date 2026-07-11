@@ -31,9 +31,10 @@ import os
 import sys
 from datetime import UTC, date, datetime
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 from . import (
+    config,
     create_visualization_map,
     db,
     display_search_area,
@@ -412,6 +413,7 @@ async def async_main():
     """
     # Load environment variables from .env file immediately
     load_dotenv()
+    config.warn_if_credentials_world_readable(find_dotenv(usecwd=True))
 
     args = parse_args()
 
