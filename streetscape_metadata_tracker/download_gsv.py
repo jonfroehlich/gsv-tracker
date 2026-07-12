@@ -94,6 +94,20 @@ async def fetch_gsv_pano_metadata_async(
         ) from e
 
 
+def resume_point_key(lat: float, lon: float) -> tuple[float, float]:
+    """
+    Matching key for resume bookkeeping: coordinates rounded to 9 decimals
+    (~0.1 mm — far finer than any grid step, far coarser than float noise).
+
+    The checkpoint CSV round-trip can perturb a coordinate by a few ULP
+    (pandas' fast CSV float parser does not exactly round-trip every
+    17-digit decimal), so raw float equality against freshly regenerated
+    grid points would treat some already-downloaded points as new and
+    re-request them.
+    """
+    return (round(lat, 9), round(lon, 9))
+
+
 def get_processed_points(file_path: str) -> set:
     """
     Get set of already processed points from existing download file.
@@ -102,14 +116,15 @@ def get_processed_points(file_path: str) -> set:
         file_path: Path to the intermediate download file
 
     Returns:
-        Set of (latitude, longitude) tuples for processed points
+        Set of resume_point_key() tuples for processed points. Compare
+        grid points via resume_point_key(), never by raw float equality.
     """
     if not os.path.exists(file_path):
         return set()
 
     try:
         df = pd.read_csv(file_path, dtype=METADATA_DTYPES)
-        return {(row["query_lat"], row["query_lon"]) for _, row in df.iterrows()}
+        return {resume_point_key(row["query_lat"], row["query_lon"]) for _, row in df.iterrows()}
     except Exception as e:
         logger.error(f"Error reading existing file: {str(e)}")
         return set()
@@ -328,9 +343,13 @@ async def download_gsv_metadata_async(
         # Get already processed points
         processed_points = get_processed_points(file_name_downloading_with_path)
 
-        # Filter out already processed points
+        # Filter out already processed points (quantized keys — see
+        # resume_point_key; raw float equality re-requested ULP-perturbed
+        # points after the checkpoint CSV round-trip)
         remaining_points = [
-            point for point in all_points if (point[0], point[1]) not in processed_points
+            point
+            for point in all_points
+            if resume_point_key(point[0], point[1]) not in processed_points
         ]
 
         if len(processed_points) > 0:

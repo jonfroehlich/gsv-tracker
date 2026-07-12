@@ -41,7 +41,7 @@
 }
 
 .legend-stats td:first-child {
-  color: #777;
+  color: #666; /* ≥4.5:1 on the near-white legend background */
   padding-right: 10px;
   white-space: nowrap;
 }
@@ -61,7 +61,7 @@
 /* De-emphasize standard deviation */
 .legend-stats-sd {
   font-weight: normal;
-  color: #888;
+  color: #666;
 }
 
 /* ── Divider between overview and year filter sections ───────── */
@@ -77,7 +77,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #999;
+  color: #666;
   margin-bottom: 4px;
 }
 
@@ -89,6 +89,23 @@
 .legend .year-item {
   line-height: 24px;
   font-size: 13px;
+}
+
+/* Year rows are real <button>s — strip chrome, keep the row look */
+.legend button.year-item {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.legend button.year-item:focus-visible {
+  outline: 2px solid #1a73e8;
+  outline-offset: 1px;
 }
 
 .legend i {
@@ -114,7 +131,7 @@
 
 /* De-emphasize pano counts in year rows */
 .year-count {
-  color: #888;
+  color: #666;
   font-weight: normal;
 }
 

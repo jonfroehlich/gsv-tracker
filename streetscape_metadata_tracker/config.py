@@ -1,5 +1,6 @@
 import logging
 import os
+import stat
 from typing import Any
 
 import numpy as np
@@ -19,6 +20,37 @@ METADATA_DTYPES = {
     "copyright_info": pd.StringDtype(),  # nullable string
     "status": str,  # status is never null
 }
+
+
+def warn_if_credentials_world_readable(env_path: str) -> bool:
+    """
+    Warn when the ``.env`` credential file is readable by group or others.
+
+    The ``.env`` carries a billable Google API key; on shared lab storage
+    (group-readable NFS, see deploy/README.md) a default 0644 exposes it to
+    every group member. This only warns — the deploy docs require
+    ``chmod 600 .env``.
+
+    Args:
+        env_path: Path to the loaded .env file ("" or missing → no-op).
+
+    Returns:
+        True iff a warning was logged (mode had any group/other bits set).
+    """
+    try:
+        mode = stat.S_IMODE(os.stat(env_path).st_mode)
+    except OSError:
+        return False
+    if mode & 0o077:
+        logger.warning(
+            "Credential file %s is readable by other users (mode %03o). "
+            "Restrict it with: chmod 600 %s",
+            env_path,
+            mode,
+            env_path,
+        )
+        return True
+    return False
 
 
 def load_config(provider: str = "gsv") -> dict[str, Any]:

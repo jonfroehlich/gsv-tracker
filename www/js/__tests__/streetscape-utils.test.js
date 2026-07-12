@@ -16,11 +16,16 @@ const {
   adaptCityRecord,
   escapeHtml,
   getColor,
+  getProviderFromFilename,
+  isKnownProvider,
   isValidRunFilename,
   isGoogleCopyright,
   panoDateOrNull,
   googleSharePercent,
   buildFilledHistogram,
+  withAlpha,
+  fmtYears,
+  formatChangeSummary,
 } = require("../streetscape-utils.js");
 
 // --- adaptCityRecord: v1/v2/v3 aggregate flattening ------------------------
@@ -202,6 +207,83 @@ test("isValidRunFilename: rejects traversal and non-run artifacts", () => {
   assert.equal(isValidRunFilename("cities.json.gz"), false);
   assert.equal(isValidRunFilename(""), false);
   assert.equal(isValidRunFilename(null), false);
+});
+
+// --- isKnownProvider / getProviderFromFilename: prototype-safe lookups ------
+
+test("isKnownProvider: real keys yes, prototype members no", () => {
+  assert.equal(isKnownProvider("gsv"), true);
+  assert.equal(isKnownProvider("mapillary"), true);
+  assert.equal(isKnownProvider("kartaview"), false);
+  // Object.prototype members are truthy via PROVIDERS[key] but are NOT
+  // providers — ?provider=constructor used to break the whole UI.
+  assert.equal(isKnownProvider("constructor"), false);
+  assert.equal(isKnownProvider("hasOwnProperty"), false);
+  assert.equal(isKnownProvider(null), false);
+  assert.equal(isKnownProvider(undefined), false);
+});
+
+test("getProviderFromFilename: token detection is prototype-safe", () => {
+  assert.equal(
+    getProviderFromFilename("bend--or_width_5000_height_5000_step_20_2026-07-05.csv.gz"),
+    "gsv");
+  assert.equal(
+    getProviderFromFilename("bend--or_width_5000_height_5000_step_20_mapillary_2026-07-05.csv.gz"),
+    "mapillary");
+  // Unknown and prototype-member tokens both fall back to gsv.
+  assert.equal(
+    getProviderFromFilename("bend--or_width_5000_height_5000_step_20_kartaview_2026-07-05.csv.gz"),
+    "gsv");
+  assert.equal(
+    getProviderFromFilename("bend--or_width_5000_height_5000_step_20_constructor_2026-07-05.csv.gz"),
+    "gsv");
+});
+
+// --- display helpers shared by index.js and city.js -------------------------
+
+test("withAlpha: rgb and rgba inputs gain the alpha; others pass through", () => {
+  assert.equal(withAlpha("rgb(253, 141, 60)", 0.3), "rgba(253, 141, 60, 0.3)");
+  assert.equal(withAlpha("rgba(1,2,3,0.9)", 0.5), "rgba(1, 2, 3, 0.5)");
+  assert.equal(withAlpha("#ff0000", 0.3), "#ff0000");
+  assert.equal(withAlpha(null, 0.3), null);
+});
+
+test("fmtYears: value and null", () => {
+  assert.equal(fmtYears(4.2), "4.2 years");
+  assert.equal(fmtYears(0), "0.0 years");
+  assert.equal(fmtYears(null), "—");
+  assert.equal(fmtYears(undefined), "—");
+});
+
+test("formatChangeSummary: full block, minimal block, and absent", () => {
+  assert.equal(formatChangeSummary(null), null);
+  assert.equal(formatChangeSummary(undefined), null);
+
+  const full = formatChangeSummary({
+    from: "2026-01-15",
+    panos_added: 1234,
+    panos_removed: 56,
+    capture_date_changed: 7,
+    coverage_delta_pct: -0.25,
+  });
+  assert.equal(full.from, "2026-01-15");
+  assert.equal(full.added, `+${(1234).toLocaleString()} new`);
+  assert.equal(full.removed, "−56 removed");
+  assert.equal(full.redated, "7 panos re-dated");
+  assert.equal(full.coverage, "-0.25 pct points");
+
+  // city.js's per-run JSON uses from_run_date; zero/absent fields degrade
+  const minimal = formatChangeSummary({ from_run_date: "2026-04-01" });
+  assert.equal(minimal.from, "2026-04-01");
+  assert.equal(minimal.added, "+0 new");
+  assert.equal(minimal.removed, "−0 removed");
+  assert.equal(minimal.redated, null);
+  assert.equal(minimal.coverage, null);
+
+  // Positive coverage gets an explicit sign
+  assert.equal(
+    formatChangeSummary({ from: "x", coverage_delta_pct: 1.5 }).coverage,
+    "+1.50 pct points");
 });
 
 // --- isGoogleCopyright: exact © Google match -------------------------------

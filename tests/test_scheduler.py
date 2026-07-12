@@ -1,7 +1,7 @@
 """Scheduler logic tests — pure logic only, no network or subprocesses."""
 
 import os
-from datetime import UTC, date
+from datetime import date
 
 from streetscape_metadata_tracker import db
 from streetscape_metadata_tracker.scheduler import (
@@ -264,10 +264,49 @@ def test_failure_cap_excludes_city(conn):
     assert due == []
 
 
-def test_budget_math():
-    cfg = SchedulerConfig(daily_request_budget=10_000)
-    # A 2000x2000/20 city needs 101*101 = 10201 requests > budget
-    assert (2000 // 20 + 1) ** 2 > cfg.daily_request_budget
+def test_budget_ledger_defers_second_city_when_first_consumes_budget(conn, monkeypatch):
+    """The remaining-budget check reads the LIVE api_usage ledger: after city
+    A's run records its requests, city B (same size) no longer fits today and
+    is deferred — not run over budget, and not marked as a failure."""
+    from streetscape_metadata_tracker import scheduler as sched
+
+    today = date(2026, 7, 2)
+    # Each 1000x1000/20 city estimates (50+1)^2 = 2601 requests; a 4000
+    # budget fits one such run but not two.
+    a = _register(conn, "Alpha", width=1000, height=1000, step=20)
+    b = _register(conn, "Beta", width=1000, height=1000, step=20)
+    db.assign_schedule(conn, 90)
+    conn.execute("UPDATE schedule_state SET last_success_at = NULL")  # both due
+    conn.commit()
+
+    ran = []
+
+    def fake_run(cfg, city, run_today, provider="gsv"):
+        # Simulate the real pipeline's ledger write for the requests spent
+        db.add_api_usage(conn, run_today, sched.estimate_requests(city, provider), provider)
+        ran.append(city.city_id)
+        return True
+
+    monkeypatch.setattr(sched, "_run_one_city", fake_run)
+    monkeypatch.setattr(sched.db, "connect", lambda path: conn)
+    monkeypatch.setattr(sched.time, "sleep", lambda s: None)
+    monkeypatch.setattr(sched, "generate_aggregate_v2", lambda c, d: None)
+
+    cfg = SchedulerConfig(daily_request_budget=4_000, publish_enabled=False)
+    rc = sched.cmd_run_due(cfg, today=today)
+
+    assert len(ran) == 1  # exactly one city fit the budget
+    assert rc == 0  # a budget deferral is not a failure
+    assert db.get_api_usage(conn, today, "gsv") == 2601  # B never spent requests
+    # The deferred city is untouched: still due tomorrow, no failure recorded
+    deferred = b if ran == [a] else a
+    row = conn.execute(
+        "SELECT consecutive_failures, last_success_at FROM schedule_state "
+        "WHERE city_id = ? AND provider = 'gsv'",
+        (deferred,),
+    ).fetchone()
+    assert row["consecutive_failures"] == 0
+    assert row["last_success_at"] is None
 
 
 def test_oversized_city_does_not_starve_queue(conn, monkeypatch):
@@ -295,7 +334,7 @@ def test_oversized_city_does_not_starve_queue(conn, monkeypatch):
     monkeypatch.setattr(sched, "generate_aggregate_v2", lambda c, d: None)
 
     cfg = SchedulerConfig(daily_request_budget=10_000, publish_enabled=False)
-    rc = sched.cmd_run_due(cfg)
+    rc = sched.cmd_run_due(cfg, today=date(2026, 7, 2))
 
     assert huge not in ran  # skipped: never fits any budget
     assert small in ran  # not starved by the huge city ahead of it
@@ -329,7 +368,7 @@ def test_run_due_pairs_providers_per_city(conn, monkeypatch):
             "mapillary": ProviderConfig(daily_request_budget=1_000),
         },
     )
-    rc = sched.cmd_run_due(cfg)
+    rc = sched.cmd_run_due(cfg, today=date(2026, 7, 2))
 
     assert ran == [(cid, "gsv"), (cid, "mapillary")]  # paired, gsv first
     assert rc == 1  # the (simulated) mapillary failure surfaces in the exit code
@@ -351,13 +390,11 @@ def test_run_due_pairs_providers_per_city(conn, monkeypatch):
 
 def test_run_due_provider_budgets_are_independent(conn, monkeypatch):
     """Exhausting one provider's budget must not block the other."""
-    from datetime import datetime
-
     from streetscape_metadata_tracker import scheduler as sched
     from streetscape_metadata_tracker.scheduler import ProviderConfig
 
     cid = _register(conn, "Bend", width=1000, height=1000, step=20)
-    today = datetime.now(UTC).date()
+    today = date(2026, 7, 2)  # pinned; must match the cmd_run_due call below
     # gsv's ledger is already full for today; mapillary's is untouched
     db.add_api_usage(conn, today, 10_000, provider="gsv")
 
@@ -378,6 +415,6 @@ def test_run_due_provider_budgets_are_independent(conn, monkeypatch):
             "mapillary": ProviderConfig(daily_request_budget=1_000),
         },
     )
-    sched.cmd_run_due(cfg)
+    sched.cmd_run_due(cfg, today=date(2026, 7, 2))
 
     assert ran == [(cid, "mapillary")]  # gsv deferred, mapillary still ran

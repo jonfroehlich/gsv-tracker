@@ -31,9 +31,10 @@ import os
 import sys
 from datetime import UTC, date, datetime
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 from . import (
+    config,
     create_visualization_map,
     db,
     display_search_area,
@@ -412,6 +413,7 @@ async def async_main():
     """
     # Load environment variables from .env file immediately
     load_dotenv()
+    config.warn_if_credentials_world_readable(find_dotenv(usecwd=True))
 
     args = parse_args()
 
@@ -721,7 +723,13 @@ def _check_boundary(conn, args, vis_path: str) -> int:
     boundary_vis_full_path = os.path.join(vis_path, f"{base_name}_search_boundary.html")
 
     search_area_map = display_search_area(
-        args.city, center_lat, center_lng, grid_width, grid_height, args.step
+        # `step`, not args.step: a registered city previews its FROZEN step
+        args.city,
+        center_lat,
+        center_lng,
+        grid_width,
+        grid_height,
+        step,
     )
     search_area_map.save(boundary_vis_full_path)
 

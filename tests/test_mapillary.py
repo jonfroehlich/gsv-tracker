@@ -74,6 +74,21 @@ def test_tiles_for_bbox_straddles_boundary():
     assert tiles == {(x0 - 1, y0 - 1), (x0, y0 - 1), (x0 - 1, y0), (x0, y0)}
 
 
+def test_tiles_for_bbox_wraps_across_antimeridian():
+    # A grid straddling 180° (e.g. Suva, Fiji region) arrives with
+    # min_lon > max_lon after geopy normalizes longitudes to ±180. The
+    # tile list must wrap and cover columns on BOTH sides of the seam —
+    # the naive single x-range was empty, silently yielding a 0-tile run.
+    tiles = dm.tiles_for_bbox(179.98, -18.2, -179.98, -18.1, zoom=14)
+    assert tiles
+    xs = {x for x, _ in tiles}
+    n = 2**14
+    assert (n - 1) in xs  # easternmost column (just west of 180°)
+    assert 0 in xs  # westernmost column (just east of -180°)
+    # No spurious mid-ocean columns: only the two seam-adjacent ones
+    assert xs == {0, n - 1}
+
+
 def test_grid_bbox_contains_every_grid_point():
     lat, lon = SEATTLE
     width, height, step = 1000, 600, 20

@@ -24,6 +24,22 @@ ExecStart=%h/streetscape-tracker/.venv/bin/python -m streetscape_metadata_tracke
 # A full day of cities can legitimately take hours
 TimeoutStartSec=12h
 
+# ── Sandboxing ─────────────────────────────────────────────────────────
+# The job needs exactly: the checkout (data/, logs/, the SQLite catalog)
+# and the NFS-mounted public docroot. Everything else is read-only.
+# PrivateUsers= is required first: the mount-namespace options below are
+# unavailable to user units without it (they fail with EPERM).
+# Verify after the first sandboxed night:
+#   journalctl --user -u streetscape-tracker.service | grep -i -m1 'permission\|read-only'
+PrivateUsers=true
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+PrivateTmp=true
+ProtectSystem=strict
+# Real paths, not the %h symlink — mount namespacing resolves symlinks.
+ReadWritePaths=/projects/makeabilitylab/streetscape-tracker
+ReadWritePaths=/cse/web/research/makelab/public/streetscape-tracker
+
 # ── Resource guardrails ────────────────────────────────────────────────
 # This host is shared with other lab services (and storage is on a shared NFS
 # array). These caps keep nightly collection from starving co-tenants.

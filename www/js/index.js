@@ -25,7 +25,12 @@ map.on("popupclose", () => {
 
 // Active provider, persisted in the URL (?provider=mapillary)
 const providerParam = new URLSearchParams(window.location.search).get("provider");
-let currentProvider = PROVIDERS[providerParam] ? providerParam : "gsv";
+let currentProvider = isKnownProvider(providerParam) ? providerParam : "gsv";
+
+// Fill color for cities with no age data (0 dated panos → null median).
+// Previously they fell through getColor(null) → 0 years → newest-yellow,
+// indistinguishable from genuinely fresh coverage.
+const NO_DATA_COLOR = "#666666";
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
   attribution: "© OpenStreetMap contributors © CARTO",
@@ -43,6 +48,9 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
  */
 function createPopupHistogram(histogramData, currentYear) {
   const canvas = document.createElement("canvas");
+  canvas.setAttribute("role", "img");
+  canvas.setAttribute("aria-label",
+    `Bar chart of ${PROVIDERS[currentProvider].panoNoun} by capture year`);
   const years = Object.keys(histogramData).map(Number).sort((a, b) => a - b);
   const counts = years.map((y) => histogramData[y]);
   const ages = years.map((y) => currentYear - y);
@@ -85,7 +93,6 @@ function createPopupHistogram(histogramData, currentYear) {
  * @returns {HTMLElement}
  */
 function createTooltip(city) {
-  const cityName = city.city || city.state;
   const container = document.createElement("div");
   container.style.minWidth = "250px";
 
@@ -111,24 +118,22 @@ function createTooltip(city) {
 
   // Change-since-last-run line (schema v2), colored by direction
   let changeHtml = "";
-  if (city.change) {
-    const ch = city.change;
-    const added = ch.panos_added ?? 0;
-    const removed = ch.panos_removed ?? 0;
+  const change = formatChangeSummary(city.change);
+  if (change) {
     changeHtml = `
-      <div style="margin-top:12px"><strong>Since ${escapeHtml(ch.from)}:</strong></div>
+      <div style="margin-top:12px"><strong>Since ${escapeHtml(change.from)}:</strong></div>
       <ul class="popup-stats-list">
-        <li><span style="color:#2e7d32">+${added.toLocaleString()} new</span> /
-            <span style="color:#c62828">−${removed.toLocaleString()} removed</span> panoramas</li>
-        ${ch.capture_date_changed ? `<li>${ch.capture_date_changed.toLocaleString()} panos re-dated</li>` : ""}
-        ${ch.coverage_delta_pct != null ? `<li>Coverage: ${ch.coverage_delta_pct >= 0 ? "+" : ""}${ch.coverage_delta_pct.toFixed(2)} pct points</li>` : ""}
+        <li><span style="color:#2e7d32">${change.added}</span> /
+            <span style="color:#c62828">${change.removed}</span> panoramas</li>
+        ${change.redated ? `<li>${change.redated}</li>` : ""}
+        ${change.coverage ? `<li>Coverage: ${change.coverage}</li>` : ""}
       </ul>`;
   }
 
   // City/state/country names come from OSM/Nominatim (publicly editable
   // third-party data) — escape everything data-derived entering innerHTML.
   container.innerHTML = `
-    <h3>${escapeHtml(cityName)}, ${escapeHtml(city.state.name)}, ${escapeHtml(city.country.name)}</h3>
+    <h3>${escapeHtml(getCityLabel(city))}</h3>
     <strong>Coverage Statistics:</strong>
     <ul class="popup-stats-list">
       <li>Data Collected: ${escapeHtml(city.latest_run_date) || (city.collection_info?.end_time ? new Date(city.collection_info.end_time).toLocaleDateString() : "Unknown")}</li>
@@ -182,21 +187,25 @@ function createTooltip(city) {
 // ── Legend ─────────────────────────────────────────────────────
 
 /**
- * Populate the legend panel with one row per integer-age bucket.
+ * Populate the legend panel with one row per integer-age bucket, plus a
+ * non-interactive "No age data" row when any city lacks a median age.
  *
  * @param {number} maxAge - Maximum median age across all cities.
  * @param {Object[]} cities - Array of city records.
- */
-/**
- * Populate the legend panel with one row per integer-age bucket.
  */
 function createLegend(maxAge, cities) {
   const legend = document.getElementById("legend");
   const maxYears = Math.ceil(maxAge);
 
   const ageCounts = new Array(maxYears + 1).fill(0);
+  let noDataCount = 0;
   cities.forEach((city) => {
-    const age = Math.floor(city.pano_age_stats.median_pano_age_years);
+    const median = city.pano_age_stats.median_pano_age_years;
+    if (median == null) {
+      noDataCount++;
+      return;
+    }
+    const age = Math.floor(median);
     if (age <= maxYears) ageCounts[age]++;
   });
 
@@ -206,36 +215,43 @@ function createLegend(maxAge, cities) {
     const n = ageCounts[age];
     const label = n > 0 ? `(${n} ${n === 1 ? "city" : "cities"})` : "(no cities)";
 
+    // Real <button>s: native Enter/Space activation and focus handling,
+    // with aria-pressed carrying the toggle state.
     html += `
-      <div class="legend-item" role="listitem" tabindex="0"
-           data-age="${age}" aria-label="${age} years, ${label}">
-        <div class="legend-color" style="background:${color}" aria-hidden="true"></div>
+      <button type="button" class="legend-item" data-age="${age}"
+              aria-pressed="false"
+              aria-label="Highlight cities with median age ${age} year${age !== 1 ? "s" : ""} ${label}">
+        <span class="legend-color" style="background:${color}" aria-hidden="true"></span>
         ${age} year${age !== 1 ? "s" : ""} ${label}
+      </button>`;
+  }
+  if (noDataCount > 0) {
+    html += `
+      <div class="legend-item">
+        <span class="legend-color" style="background:${NO_DATA_COLOR}" aria-hidden="true"></span>
+        No age data (${noDataCount})
       </div>`;
   }
   legend.innerHTML = html;
 
-  // Click & keyboard handlers
-  legend.querySelectorAll(".legend-item").forEach((item) => {
-    const handler = () => {
+  // Click handlers (the "No age data" row is a plain div and stays
+  // non-interactive; buttons handle keyboard activation natively)
+  legend.querySelectorAll("button.legend-item").forEach((item) => {
+    item.addEventListener("click", () => {
       const isAlreadySelected = item.classList.contains("selected");
-      
+
       // Clear selection from all items
-      legend.querySelectorAll(".legend-item").forEach(i => i.classList.remove("selected"));
+      legend.querySelectorAll("button.legend-item").forEach((i) => {
+        i.classList.remove("selected");
+        i.setAttribute("aria-pressed", "false");
+      });
 
       if (isAlreadySelected) {
         resetHighlights();
       } else {
         item.classList.add("selected");
+        item.setAttribute("aria-pressed", "true");
         highlightCitiesByExactAge(parseInt(item.dataset.age, 10));
-      }
-    };
-
-    item.addEventListener("click", handler);
-    item.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        handler();
       }
     });
   });
@@ -250,8 +266,9 @@ function createLegend(maxAge, cities) {
  * @param {number} targetAge
  * @param {boolean} [zoomToHighlightedCities=false]
  */
-function highlightCitiesByExactAge(targetAge, zoomToHighlightedCities = false) {
+function highlightCitiesByExactAge(targetAge) {
   const tolerance = 0.5;
+  lastHighlightedCity = AGE_BUCKET_HIGHLIGHT; // supersedes any hover
 
   [charts.pano, charts.area].forEach((chart) => {
     const ds = chart.data.datasets[0];
@@ -259,7 +276,7 @@ function highlightCitiesByExactAge(targetAge, zoomToHighlightedCities = false) {
       const age = Math.floor(pt.y);
       return Math.abs(age - targetAge) <= tolerance
         ? pt.backgroundColor
-        : pt.backgroundColor.replace("rgb", "rgba").replace(")", ",0.3)");
+        : withAlpha(pt.backgroundColor, 0.3);
     });
     ds.pointRadius = ds.data.map((pt) =>
       Math.abs(Math.floor(pt.y) - targetAge) <= tolerance ? 6 : 3
@@ -274,40 +291,35 @@ function highlightCitiesByExactAge(targetAge, zoomToHighlightedCities = false) {
     chart.update();
   });
 
-  const highlightedCities = [];
   mapRectangles.forEach((rect) => {
-    const age = Math.floor(rect.city.pano_age_stats.median_pano_age_years);
+    const median = rect.city.pano_age_stats.median_pano_age_years;
+    // Null median (no age data) never matches an age bucket
+    const age = median != null ? Math.floor(median) : NaN;
     if (Math.abs(age - targetAge) <= tolerance) {
       // Selected state
-      rect.setStyle({ 
-        fillOpacity: 0.8, 
+      rect.setStyle({
+        fillOpacity: 0.8,
         weight: 2,
-        opacity: 1 
+        opacity: 1
       });
       rect.bringToFront();
     } else {
       // Unselected state: significantly more "faded"
-      rect.setStyle({ 
+      rect.setStyle({
         fillOpacity: 0.1, // Very faint fill
         weight: 0.1,       // Thin borders
         opacity: 0.2       // Faded borders
       });
     }
   });
-
-  if (highlightedCities.length > 0 && zoomToHighlightedCities) {
-    const minLat = Math.min(...highlightedCities.map((c) => c.bounds.min_lat));
-    const maxLat = Math.max(...highlightedCities.map((c) => c.bounds.max_lat));
-    const minLon = Math.min(...highlightedCities.map((c) => c.bounds.min_lon));
-    const maxLon = Math.max(...highlightedCities.map((c) => c.bounds.max_lon));
-    const latPad = (maxLat - minLat) * 0.2;
-    const lonPad = (maxLon - minLon) * 0.2;
-    map.fitBounds([
-      [minLat - latPad, minLon - lonPad],
-      [maxLat + latPad, maxLon + lonPad],
-    ]);
-  }
 }
+
+// The current highlight state: null (defaults), a city record (hover), or
+// AGE_BUCKET_HIGHLIGHT (legend selection). Hover events fire per mousemove;
+// restyling ~1,100 rectangles and updating two charts on every one froze
+// the map, so highlightCity/resetHighlights no-op when nothing changed.
+const AGE_BUCKET_HIGHLIGHT = Symbol("age-bucket");
+let lastHighlightedCity = null;
 
 /**
  * Highlight a single city across both scatter charts and the map.
@@ -315,12 +327,13 @@ function highlightCitiesByExactAge(targetAge, zoomToHighlightedCities = false) {
  * @param {Object} city - The city record to highlight.
  */
 function highlightCity(city) {
+  if (city === lastHighlightedCity) return;
+  lastHighlightedCity = city;
+
   [charts.pano, charts.area].forEach((chart) => {
     const ds = chart.data.datasets[0];
     ds.pointBackgroundColor = ds.data.map((pt) =>
-      pt.city === city
-        ? pt.backgroundColor
-        : pt.backgroundColor.replace("rgb", "rgba").replace(")", ",0.3)")
+      pt.city === city ? pt.backgroundColor : withAlpha(pt.backgroundColor, 0.3)
     );
     ds.pointRadius = ds.data.map((pt) => (pt.city === city ? 6 : 3));
     ds.borderWidth = ds.data.map((pt) => (pt.city === city ? 2 : 0));
@@ -339,6 +352,9 @@ function highlightCity(city) {
 
 /** Reset all chart and map highlights back to their defaults. */
 function resetHighlights() {
+  if (lastHighlightedCity === null) return;
+  lastHighlightedCity = null;
+
   [charts.pano, charts.area].forEach((chart) => {
     const ds = chart.data.datasets[0];
     ds.pointBackgroundColor = ds.data.map((pt) => pt.backgroundColor);
@@ -361,7 +377,7 @@ function resetHighlights() {
  * @returns {string}  e.g. "Seattle, Washington, United States"
  */
 function getCityLabel(city) {
-  const name = city.city || city.state?.name || city.country.name;
+  const name = city.city || city.state?.name || city.country?.name || "Unknown";
   const parts = [name];
   if (city.state?.name && city.state.name !== name) parts.push(city.state.name);
   if (city.country?.name) parts.push(city.country.name);
@@ -569,14 +585,19 @@ function initCitySearch(cities) {
  * @param {Object[]} cities - Array of city records.
  */
 function createScatterPlots(cities) {
-  const panoData = cities.map((city) => ({
+  // Cities without a median age have no y value to plot — they stay on
+  // the map (greyed) but are omitted from the scatters.
+  const datedCities = cities.filter(
+    (c) => c.pano_age_stats.median_pano_age_years != null);
+
+  const panoData = datedCities.map((city) => ({
     x: city.pano_count,
     y: city.pano_age_stats.median_pano_age_years,
     city,
     backgroundColor: getColor(city.pano_age_stats.median_pano_age_years, currentProvider),
   }));
 
-  const areaData = cities.map((city) => ({
+  const areaData = datedCities.map((city) => ({
     x: city.search_area_km2,
     y: city.pano_age_stats.median_pano_age_years,
     city,
@@ -589,14 +610,10 @@ function createScatterPlots(cities) {
     plugins: {
       tooltip: {
         callbacks: {
-          label: (ctx) => {
-            const c = ctx.raw.city;
-            const name = c.city || c.state?.name || c.country.name;
-            const loc = c.state?.name
-              ? `${name}, ${c.state.name}`
-              : `${name}, ${c.country.name}`;
-            return [loc, `Age: ${ctx.raw.y.toFixed(1)} years`];
-          },
+          label: (ctx) => [
+            getCityLabel(ctx.raw.city),
+            `Age: ${ctx.raw.y.toFixed(1)} years`,
+          ],
         },
       },
     },
@@ -652,9 +669,10 @@ function createScatterPlots(cities) {
       scales: {
         ...sharedOptions.scales,
         x: {
+          // Auto-ranged: a fixed min of 100 hid every city with fewer
+          // than 100 panos (small towns, sparse Mapillary coverage)
           type: "logarithmic",
           title: { display: true, text: "Total Panos (log scale)" },
-          min: 100,
         },
       },
     },
@@ -682,9 +700,9 @@ function createScatterPlots(cities) {
       scales: {
         ...sharedOptions.scales,
         x: {
+          // Auto-ranged (a fixed min of 1 hid sub-km² villages)
           type: "logarithmic",
           title: { display: true, text: "Area (km², log scale)" },
-          min: 1,
         },
       },
     },
@@ -741,8 +759,9 @@ function renderProvider(fitMap = false) {
       [city.bounds.max_lat, city.bounds.max_lon],
     ];
 
+    const median = city.pano_age_stats.median_pano_age_years;
     const rect = L.rectangle(bounds, {
-      color: getColor(city.pano_age_stats.median_pano_age_years, currentProvider),
+      color: median != null ? getColor(median, currentProvider) : NO_DATA_COLOR,
       weight: 1,
       fillOpacity: 0.6,
     }).addTo(map);
@@ -775,7 +794,7 @@ function renderProvider(fitMap = false) {
  * @param {string} provider - Provider key (see PROVIDERS).
  */
 function setProvider(provider) {
-  if (!PROVIDERS[provider] || provider === currentProvider || !rawCitiesData) return;
+  if (!isKnownProvider(provider) || provider === currentProvider) return;
   currentProvider = provider;
 
   const url = new URL(window.location);
@@ -783,7 +802,10 @@ function setProvider(provider) {
   else url.searchParams.set("provider", provider);
   history.replaceState(null, "", url);
 
-  renderProvider();
+  // Before the payload arrives, just record the choice — the initial
+  // renderProvider(true) in loadData() picks it up. (Previously a click
+  // during the fetch was silently reverted.)
+  if (rawCitiesData) renderProvider();
 }
 
 /** Wire up the provider radio group and reflect the initial state. */
@@ -800,10 +822,12 @@ function initProviderToggle() {
 
 /** Fetch cities.json.gz, then render the active provider's view. */
 async function loadData() {
+  // Wire the toggle BEFORE the fetch so a click during loading is
+  // recorded (setProvider defers the render until data arrives).
+  initProviderToggle();
   try {
     rawCitiesData = await fetchGzippedJson(STREETSCAPE_DATA_BASE_URL + "cities.json.gz");
     document.getElementById("loading").style.display = "none";
-    initProviderToggle();
     renderProvider(true);
   } catch (error) {
     console.error("Error loading data:", error);

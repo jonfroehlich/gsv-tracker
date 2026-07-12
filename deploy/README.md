@@ -33,7 +33,9 @@ ln -s /projects/makeabilitylab/streetscape-tracker ~/streetscape-tracker
 
 cd ~/streetscape-tracker
 python3.11 -m venv .venv          # 3.11+ for tomllib
-.venv/bin/pip install -r requirements.txt
+# requirements.lock pins exact versions (uv pip compile --universal) so the
+# deploy matches CI byte-for-byte; requirements.txt holds the loose floors.
+.venv/bin/pip install -r requirements.lock
 
 # API keys — copy your working .env up from the laptop (least error-prone):
 #   (from the laptop)  scp .env makelab1.cs.washington.edu:/projects/makeabilitylab/streetscape-tracker/.env

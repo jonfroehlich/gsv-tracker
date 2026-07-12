@@ -36,6 +36,18 @@ def sanitize_for_json(obj: Any) -> Any:
     return obj
 
 
+def _write_json_gz_atomic(path: str, payload: Any) -> None:
+    """
+    Write a ``.json.gz`` via a temp sibling + ``os.replace`` so a crash or
+    concurrent reader (including the publish rsync, whose glob skips the
+    ``.tmp`` name) never sees a truncated file.
+    """
+    tmp_path = path + ".tmp"
+    with gzip.open(tmp_path, "wt", encoding="utf-8") as f:
+        json.dump(sanitize_for_json(payload), f, indent=2, allow_nan=False)
+    os.replace(tmp_path, path)
+
+
 def find_missing_json_files(data_dir: str) -> list[str]:
     """
     Find all csv.gz files that don't have corresponding JSON.gz files.
@@ -395,9 +407,8 @@ def generate_city_metadata_summary_as_json(
             "histogram_of_capture_dates": asdict(google_pano_stats.daily_distribution),
         }
 
-    # Save compressed JSON (sanitize first: NaN is not valid JSON)
-    with gzip.open(json_filename_with_path, "wt", encoding="utf-8") as f:
-        json.dump(sanitize_for_json(metadata), f, indent=2, allow_nan=False)
+    # Save compressed JSON (atomic; sanitized — NaN is not valid JSON)
+    _write_json_gz_atomic(json_filename_with_path, metadata)
 
     logger.info(f"Saved compressed JSON to: {json_filename_with_path}")
     return json_filename_with_path
@@ -592,118 +603,7 @@ def generate_aggregate_v2(conn, data_dir: str) -> dict[str, Any]:
     }
 
     output_path = os.path.join(data_dir, "cities.json.gz")
-    with gzip.open(output_path, "wt", encoding="utf-8") as f:
-        json.dump(sanitize_for_json(summary), f, indent=2, allow_nan=False)
+    _write_json_gz_atomic(output_path, summary)
     logger.info(f"Wrote v3 aggregate for {len(cities_out)} cities to {output_path}")
-
-    return summary
-
-
-def generate_aggregate_summary_as_json(json_dir: str) -> dict[str, Any]:
-    """
-    Generate and save a summary of all city JSON files in the specified directory.
-
-    Args:
-        json_path: Path to directory containing city JSON files
-
-    Returns:
-        Dictionary containing aggregated city summaries
-    """
-    logger.debug(
-        f"Generating aggregate summary cities.json file for all city JSON files in {json_dir}"
-    )
-
-    cities_data = []
-    raw_city_data = []  # Store complete city data for histogram merging
-
-    # Find all JSON files in directory except the cities.json file
-    json_files = [
-        f for f in os.listdir(json_dir) if f.endswith(".json.gz") and f != "cities.json.gz"
-    ]
-    logger.info(f"Found {len(json_files)} JSON.gz files in {json_dir}")
-
-    for json_file in tqdm(json_files, desc="Processing city files", unit="file"):
-        file_path = os.path.join(json_dir, json_file)
-
-        try:
-            logger.debug(f"Opening {file_path}...")
-            with gzip.open(file_path, "rt", encoding="utf-8") as f:
-                city_data = json.load(f)
-
-            raw_city_data.append(city_data)  # Store complete data for histogram merging
-
-            # Extract relevant information
-            city_summary = {
-                # Basic information
-                "city": city_data["city"]["name"],
-                "state": {
-                    "name": city_data["city"]["state"]["name"],
-                    "code": city_data["city"]["state"]["code"],
-                },
-                "country": {
-                    "name": city_data["city"]["country"]["name"],
-                    "code": city_data["city"]["country"]["code"],
-                },
-                # Location information
-                "center": {
-                    "latitude": city_data["city"]["center"]["latitude"],
-                    "longitude": city_data["city"]["center"]["longitude"],
-                },
-                "bounds": city_data["city"]["bounds"],
-                # File information
-                "data_file": {
-                    "filename": city_data["data_file"]["filename"],
-                    "size_bytes": city_data["data_file"]["size_bytes"],
-                },
-                # Coverage information
-                "search_area_km2": city_data["search_grid"]["area_km2"],
-                "coverage_rate_percent": city_data["coverage"]["coverage_rate"],
-                # Panorama counts
-                "panorama_counts": {
-                    "unique_panos": city_data["all_panos"]["duplicate_stats"]["total_unique_panos"],
-                    "unique_google_panos": city_data["google_panos"]["duplicate_stats"][
-                        "total_unique_panos"
-                    ],
-                },
-                # Age statistics for unique panoramas
-                "all_panos_age_stats": city_data["all_panos"]["age_stats"],
-                "google_panos_age_stats": city_data["google_panos"]["age_stats"],
-                # Collection metadata
-                "collection_info": {
-                    "start_time": city_data["download"]["start_time"],
-                    "end_time": city_data["download"]["end_time"],
-                    "duration_seconds": city_data["download"]["duration_seconds"],
-                },
-                # Add city-specific histograms
-                "histogram_of_capture_dates_by_year": {
-                    "all_panos": city_data["all_panos"]["histogram_of_capture_dates_by_year"],
-                    "google_panos": city_data["google_panos"]["histogram_of_capture_dates_by_year"],
-                },
-            }
-
-            cities_data.append(city_summary)
-
-        except Exception as e:
-            import traceback
-
-            logger.error(f"Error processing {json_file}: {str(e)}")
-            logger.error("Full traceback:")
-            logger.error(traceback.format_exc())
-
-    # Merge histograms from all cities
-    merged_histograms = merge_capture_date_histograms(raw_city_data)
-
-    # Create the final summary
-    summary = {
-        "cities_count": len(cities_data),
-        "creation_timestamp": pd.Timestamp.now().isoformat(),
-        "histogram_of_capture_dates": merged_histograms,
-        "cities": cities_data,
-    }
-
-    # Save the aggregate summary as compressed JSON (sanitize first: NaN is not valid JSON)
-    output_path = os.path.join(json_dir, "cities.json.gz")
-    with gzip.open(output_path, "wt", encoding="utf-8") as f:
-        json.dump(sanitize_for_json(summary), f, indent=2, allow_nan=False)
 
     return summary

@@ -1,5 +1,4 @@
 import logging
-from functools import lru_cache
 
 import pandas as pd
 import pycountry  # for ISO country codes
@@ -74,13 +73,14 @@ def get_state_abbreviation(state_name: str | None) -> str | None:
 def get_country_code(country_name: str | None) -> str | None:
     """
     Get the standard two-letter ISO country code.
-    Returns original string if no code is found.
 
     Args:
         country_name: Full name of the country
 
     Returns:
-        Two-letter ISO country code, original string if not found, or None if input is None
+        Two-letter ISO country code, or None when the input is None or no
+        code could be resolved. (It used to fall back to the full name,
+        which polluted `country.code` fields downstream with non-codes.)
     """
     if not country_name:
         return None
@@ -115,7 +115,8 @@ def get_country_code(country_name: str | None) -> str | None:
     except (LookupError, AttributeError):
         pass
 
-    return country_name
+    logging.warning(f"No ISO country code found for {country_name!r}")
+    return None
 
 
 class EnhancedLocation:
@@ -522,14 +523,20 @@ class EnhancedLocation:
         return ", ".join(components)
 
 
-@lru_cache(maxsize=128)
+# Success-only memo for get_city_location_data. Deliberately NOT lru_cache:
+# that cached None results, so one geocoder timeout poisoned the query as
+# "city not found" for the rest of the process (e.g. a whole run_cities.py
+# batch). Genuine not-founds re-query, which is rare and rate-limited anyway.
+_location_cache: dict[tuple[str, float | None, float | None], "EnhancedLocation"] = {}
+
+
 def get_city_location_data(
     city_query_str: str, center_lat: float | None = None, center_lng: float | None = None
 ) -> EnhancedLocation | None:
     """
     Get location information for a city including coordinates, country, and bounding box.
     If center coordinates are provided, uses them to help disambiguate common city names.
-    Uses caching to avoid repeated lookups.
+    Successful lookups are cached for the process lifetime; failures are not.
 
     If you supply center_lat and center_lng, the function will attempt to find the closest
     matching city. For example:
@@ -575,6 +582,11 @@ def get_city_location_data(
         logging.error("City name cannot be empty")
         return None
 
+    cache_key = (city_query_str, center_lat, center_lng)
+    cached = _location_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         # If center coordinates provided, use them for disambiguation
         found_loc = None
@@ -610,6 +622,7 @@ def get_city_location_data(
 
             enhancedLoc = EnhancedLocation(city_query_str, found_loc)
             logging.info(f"From query string '{city_query_str}', created '{enhancedLoc}'")
+            _location_cache[cache_key] = enhancedLoc
             return enhancedLoc
 
         else:

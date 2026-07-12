@@ -23,3 +23,13 @@ body {
   inset: 0;
   background-color: #0f0f0f; /* Matches CARTO dark map tiles */
 }
+
+/* ── Screen-reader-only content ─────────────────────────────── */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

@@ -4,7 +4,6 @@ from .download_gsv import download_gsv_metadata_async
 from .download_mapillary import download_mapillary_metadata_async
 from .fileutils import load_city_csv_file, open_in_browser
 from .geoutils import get_city_location_data, get_search_dimensions
-from .json_summarizer import generate_aggregate_summary_as_json
 from .naming import (
     ParsedFilename,
     generate_base_filename,
@@ -22,7 +21,6 @@ __all__ = [
     "display_search_area",
     "download_gsv_metadata_async",
     "download_mapillary_metadata_async",
-    "generate_aggregate_summary_as_json",
     "generate_base_filename",
     "generate_run_filename",
     "get_city_location_data",

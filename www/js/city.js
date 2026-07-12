@@ -73,7 +73,15 @@ map.on("click", (e) => {
 
 // ── Legend (Leaflet control) ───────────────────────────────────
 const legendControl = L.control({ position: "topright" });
-legendControl.onAdd = () => L.DomUtil.create("div", "legend");
+legendControl.onAdd = () => {
+  const div = L.DomUtil.create("div", "legend");
+  // Keep legend interaction local: without these, clicking a year toggle
+  // also fires the map's click handler and scrolling the legend zooms
+  // the map underneath it.
+  L.DomEvent.disableClickPropagation(div);
+  L.DomEvent.disableScrollPropagation(div);
+  return div;
+};
 legendControl.addTo(map);
 
 /**
@@ -109,7 +117,7 @@ function updateLegend(years) {
             <td>${collectionDateGlobal || "Unknown"}</td>
           </tr>
           <tr>
-            <td>Panoramas</td>
+            <td>Dated panoramas</td>
             <td>${totalPanosGlobal.toLocaleString()}</td>
           </tr>
           <tr>
@@ -143,7 +151,7 @@ function updateLegend(years) {
         </tbody>
       </table>`;
   } else {
-    html += `<p class="legend-meta">Total panos: ${totalPanosGlobal.toLocaleString()}</p>`;
+    html += `<p class="legend-meta">Dated panos: ${totalPanosGlobal.toLocaleString()}</p>`;
   }
 
   // ── Section 2: Snapshot history (v2 temporal data) ────────
@@ -166,16 +174,16 @@ function updateLegend(years) {
               onchange="switchRun(this.value)">${options}</select>`;
   }
 
-  if (changeGlobal) {
-    const ch = changeGlobal;
+  const change = formatChangeSummary(changeGlobal);
+  if (change) {
     html += `
       <div class="legend-divider"></div>
-      <div class="legend-year-header">Since ${escapeHtml(ch.from_run_date)}</div>
+      <div class="legend-year-header">Since ${escapeHtml(change.from)}</div>
       <p class="legend-meta" style="margin:4px 0 0">
-        <span style="color:#7bd88f">+${(ch.panos_added ?? 0).toLocaleString()} new</span> /
-        <span style="color:#ff8a80">−${(ch.panos_removed ?? 0).toLocaleString()} removed</span>
-        ${ch.capture_date_changed ? `<br>${ch.capture_date_changed.toLocaleString()} panos re-dated` : ""}
-        ${ch.coverage_delta_pct != null ? `<br>Coverage ${ch.coverage_delta_pct >= 0 ? "+" : ""}${ch.coverage_delta_pct.toFixed(2)} pct pts` : ""}
+        <span style="color:#7bd88f">${change.added}</span> /
+        <span style="color:#ff8a80">${change.removed}</span>
+        ${change.redated ? `<br>${change.redated}` : ""}
+        ${change.coverage ? `<br>Coverage ${change.coverage}` : ""}
       </p>`;
   }
 
@@ -191,18 +199,30 @@ function updateLegend(years) {
       const isActive = activeYears.has(year);
       const count = markersByYear[year]?.length || 0;
 
+      // Real <button>s (native Enter/Space + focus) with aria-pressed
+      // toggle state; the color swatch is decorative.
       html += `
-        <div class="year-item ${isActive ? "active-item" : ""}">
+        <button type="button" class="year-item ${isActive ? "active-item" : ""}"
+                data-year="${year}" aria-pressed="${isActive}"
+                aria-label="Filter to year ${year}, ${count.toLocaleString()} panoramas"
+                onclick="toggleYear(${year})">
           <i style="background:${color}" class="${isActive ? "active" : ""}"
-             role="button" tabindex="0" aria-label="Toggle year ${year}"
-             onclick="toggleYear(${year})"
-             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleYear(${year})}"></i>
+             aria-hidden="true"></i>
           ${year} <span class="year-count">(${count.toLocaleString()})</span>
-        </div>`;
+        </button>`;
     });
   }
 
+  // Replacing innerHTML destroys the focused element; if focus was on a
+  // year button, put it back on the same year so keyboard users don't get
+  // dropped to <body> on every toggle.
+  const focusedYear = div.contains(document.activeElement)
+    ? document.activeElement.dataset?.year
+    : null;
   div.innerHTML = html;
+  if (focusedYear != null) {
+    div.querySelector(`.year-item[data-year="${focusedYear}"]`)?.focus();
+  }
 }
 
 /**
@@ -444,19 +464,21 @@ function createTemporalPlot(temporalData, canvas) {
       responsive: true,
       maintainAspectRatio: false,
       scales: {
+        // Tick/title color: #ccc on the rgba(80,80,80,.9) panel ≈ 6:1
+        // contrast (#999 was ~2.9:1, below WCAG AA).
         x: {
           type: "time",
           time: { unit: "year", displayFormats: { year: "YYYY" } },
           grid: { display: false, color: "#888" },
           border: { color: "#888" },
-          ticks: { color: "#999" },
-          title: { color: "#999", display: true, text: "Capture Date" },
+          ticks: { color: "#ccc" },
+          title: { color: "#ccc", display: true, text: "Capture Date" },
         },
         y: {
           grid: { display: false, color: "#888" },
-          ticks: { color: "#999" },
+          ticks: { color: "#ccc" },
           border: { color: "#888" },
-          title: { color: "#999", display: true, text: "Num of Panoramas" },
+          title: { color: "#ccc", display: true, text: "Num of Panoramas" },
           beginAtZero: true,
         },
       },
@@ -476,28 +498,77 @@ function createTemporalPlot(temporalData, canvas) {
     plugins: [verticalLinePlugin],
   });
 
-  // Date-selection click handler
-  canvas.addEventListener("click", (evt) => {
-    const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
-
-    if (points.length) {
-      const data = chart.data.datasets[points[0].datasetIndex].data[points[0].index];
-      const clickedDate = new Date(data.x);
-
-      if (selectedDate && selectedDate.getTime() === clickedDate.getTime()) {
-        selectedDate = null;
-        resetMarkerStyles();
-        resetChartColors(chart);
-      } else {
-        selectedDate = clickedDate;
-        highlightMarkersForDate(selectedDate);
-        updateChartColorsForDate(chart, selectedDate);
-      }
+  /** Apply (or toggle off) the date filter for one capture date. */
+  function selectFilterDate(date) {
+    if (selectedDate && date && selectedDate.getTime() === date.getTime()) {
+      date = null; // re-selecting the active date clears the filter
+    }
+    selectedDate = date;
+    if (date) {
+      highlightMarkersForDate(date);
+      updateChartColorsForDate(chart, date);
     } else {
-      selectedDate = null;
       resetMarkerStyles();
       resetChartColors(chart);
     }
+  }
+
+  // Date-selection click handler
+  canvas.addEventListener("click", (evt) => {
+    const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+    if (points.length) {
+      const data = chart.data.datasets[points[0].datasetIndex].data[points[0].index];
+      selectFilterDate(new Date(data.x));
+    } else {
+      selectFilterDate(null);
+    }
+  });
+
+  // Keyboard path to the same filter — canvas points can't be tabbed to.
+  // Left/Right step through capture dates, Home/End jump, Escape clears.
+  // Selections are announced through a visually-hidden live region.
+  canvas.setAttribute("tabindex", "0");
+  canvas.setAttribute("role", "application");
+  canvas.setAttribute("aria-label",
+    "Panoramas by capture date. Use Left and Right arrow keys to filter the map by date, Escape to clear the filter.");
+
+  const liveRegion = document.createElement("div");
+  liveRegion.className = "visually-hidden";
+  liveRegion.setAttribute("aria-live", "polite");
+  canvas.parentElement.appendChild(liveRegion);
+
+  let keyboardIdx = -1;
+
+  canvas.addEventListener("keydown", (e) => {
+    if (temporalData.length === 0) return;
+
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      const delta = e.key === "ArrowRight" ? 1 : -1;
+      keyboardIdx = keyboardIdx === -1
+        ? (delta === 1 ? 0 : temporalData.length - 1)
+        : Math.min(Math.max(keyboardIdx + delta, 0), temporalData.length - 1);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      keyboardIdx = 0;
+    } else if (e.key === "End") {
+      e.preventDefault();
+      keyboardIdx = temporalData.length - 1;
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      keyboardIdx = -1;
+      selectFilterDate(null);
+      liveRegion.textContent = "Date filter cleared";
+      return;
+    } else {
+      return;
+    }
+
+    const d = temporalData[keyboardIdx];
+    selectedDate = null; // force re-apply even if the same date is revisited
+    selectFilterDate(d.date);
+    liveRegion.textContent =
+      `${d.date.toLocaleDateString()}: ${d.count.toLocaleString()} panoramas highlighted`;
   });
 }
 
@@ -554,14 +625,9 @@ function updateChartColorsForDate(chart, date) {
   ds.backgroundColor = ds.data.map((pt) => {
     const ptDate = new Date(pt.x);
     const age = new Date().getFullYear() - ptDate.getFullYear();
-    const base = getColor(age, providerGlobal);
     const opacity = ptDate.toDateString() === dateStr ? 1 : 0.3;
     pt.opacity = opacity;
-
-    const match = base.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-    return match
-      ? `rgba(${match[1]}, ${match[2]}, ${match[3]}, ${opacity})`
-      : base;
+    return withAlpha(getColor(age, providerGlobal), opacity);
   });
 
   ds.pointBackgroundColor = ds.backgroundColor;
@@ -620,9 +686,33 @@ function buildPopupHtml(captureDate, ageFormatted, panoId, photographer) {
  * Progress is tracked against the *compressed* byte count reported in
  * the city metadata JSON, giving an accurate download percentage.
  */
+/**
+ * Show a load error in the progress panel. Replaces the old alert(),
+ * which blocked the page and left no trace once dismissed; the panel
+ * stays visible next to the "Back to Overview Map" link.
+ *
+ * @param {string} message
+ */
+function showLoadError(message) {
+  document.getElementById("progress-bar").style.display = "none";
+  document.getElementById("progress-container").style.display = "block";
+  document.getElementById("progress-text").textContent = message;
+}
+
 async function loadData() {
   if (!csvFile && !decodedCityQuery) {
-    alert("Please provide either a file parameter or city parameter");
+    showLoadError("No city specified — open this page from the overview map, "
+      + "or add ?file= or ?city= to the URL.");
+    return;
+  }
+
+  // The streaming pipeline needs the native DecompressionStream
+  // (Safari < 16.4 lacks it). Fail with a clear message instead of a
+  // ReferenceError mid-download.
+  if (typeof DecompressionStream === "undefined") {
+    showLoadError("This browser can't stream the map data (it lacks "
+      + "DecompressionStream). Please use a current Chrome, Firefox, Edge, "
+      + "or Safari 16.4+.");
     return;
   }
 
@@ -644,7 +734,7 @@ async function loadData() {
       rawCities = await fetchGzippedJson(STREETSCAPE_DATA_BASE_URL + "cities.json.gz");
       // ?city= queries resolve against the requested provider's view
       // (?provider=mapillary), defaulting to GSV
-      const queryProvider = PROVIDERS[urlParams.get("provider")]
+      const queryProvider = isKnownProvider(urlParams.get("provider"))
         ? urlParams.get("provider") : "gsv";
       citiesData = adaptCitiesPayload(rawCities, queryProvider);
     } catch (e) {
@@ -659,8 +749,7 @@ async function loadData() {
       const parsedQuery = parseLocationQuery(decodedCityQuery, citiesData);
       const result = findBestMatchingCity(parsedQuery, citiesData);
       if (!result.match) {
-        progressContainer.style.display = "none";
-        alert(result.error);
+        showLoadError(result.error);
         return;
       }
       targetFile = result.match.data_file.filename;
@@ -725,7 +814,7 @@ async function loadData() {
     const copyrightNote = !copyrightAvailableGlobal
       ? `<em>Copyright info not recorded (archival import); counts include all panoramas</em><br>`
       : "";
-    const fmtYears = (v) => (v != null ? `${v.toFixed(1)} years` : "—");
+    // fmtYears comes from streetscape-utils.js
     const tooltipHtml = `
       <div style="font-family:sans-serif">
         <strong>${escapeHtml(cityLabel)}</strong><br>
@@ -768,14 +857,20 @@ async function loadData() {
     if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${targetFile}`);
 
     let receivedBytes = 0;
+    let lastShownPct = -1;
     const progressStream = new TransformStream({
       transform(chunk, controller) {
         receivedBytes += chunk.length;
-        const pct = Math.min((receivedBytes / totalBytes) * 100, 99);
-        progressFill.style.width = `${pct}%`;
-        progressFill.setAttribute("aria-valuenow", Math.round(pct));
-        progressText.textContent =
-          `Downloading ${fileSizeMB} MB for ${cityLabel}… ${Math.round(pct)}%`;
+        // Only touch the DOM when the whole percent changes — this fires
+        // per network chunk (thousands of times on a big city)
+        const pct = Math.min(Math.round((receivedBytes / totalBytes) * 100), 99);
+        if (pct !== lastShownPct) {
+          lastShownPct = pct;
+          progressFill.style.width = `${pct}%`;
+          progressFill.setAttribute("aria-valuenow", pct);
+          progressText.textContent =
+            `Downloading ${fileSizeMB} MB for ${cityLabel}… ${pct}%`;
+        }
         controller.enqueue(chunk);
       },
     });
@@ -809,8 +904,9 @@ async function loadData() {
             !isGoogleCopyright(row.copyright_info)) ||
           !row.capture_date ||
           !row.pano_id ||
-          !row.pano_lat ||
-          !row.pano_lon ||
+          // == null, not falsy: 0.0 is a valid coordinate (equator/meridian)
+          row.pano_lat == null ||
+          row.pano_lon == null ||
           processedPanos.has(row.pano_id)
         ) continue;
 
@@ -866,9 +962,13 @@ async function loadData() {
     // only complete lines (up to the last newline) to PapaParse, keeping
     // the header row prepended so every batch parses correctly.
     //
-    // PapaParse handles RFC 4180 quoting (fields with embedded commas,
-    // quotes, or newlines) correctly on each batch because it sees a
-    // well-formed CSV fragment with headers on every call.
+    // PapaParse handles quoted fields with embedded commas or quotes
+    // correctly on each batch because it sees a well-formed CSV fragment
+    // with headers on every call. Caveat: a quoted field containing a
+    // literal NEWLINE would be split across batches by the lastIndexOf
+    // splitter above. That can't occur here — the writers (METADATA_DTYPES
+    // schema, standardize_capture_date, pandas to_csv defaults) never emit
+    // multi-line field values.
 
     // Per-column typing: only coordinates are numeric. Blanket
     // dynamicTyping would coerce pano_id to a float — Mapillary IDs are
@@ -919,11 +1019,10 @@ async function loadData() {
           processRows(result.data);
         }
       } else {
-        const result = Papa.parse(`${headerLine}\n${completeText}`, {
-          header: true,
-          dynamicTyping: true,
-          skipEmptyLines: true,
-        });
+        // Same options as the first chunk — a blanket dynamicTyping here
+        // would coerce pano_id to a float on every later chunk (Mapillary
+        // IDs exceed 2^53 and silently round).
+        const result = Papa.parse(`${headerLine}\n${completeText}`, csvParseOptions);
         processRows(result.data);
       }
     }
@@ -948,8 +1047,7 @@ async function loadData() {
 
   } catch (error) {
     console.error("Error loading or parsing city data:", error);
-    progressContainer.style.display = "none";
-    alert(`Failed to load city data: ${error.message}`);
+    showLoadError(`Failed to load city data: ${error.message}`);
   }
 }
 

@@ -5,8 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Streetscape Tracker — City Explorer</title>
 
-  <!-- Stylesheets -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+  <!-- Stylesheets (CDN assets carry SRI hashes: a compromised or tampered
+       CDN response is refused by the browser rather than executed) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"
+        integrity="sha512-Zcn6bjR/8RZbLEpLIeOwNtzREBAJnUKESxces60Mpoj+2okopSAcSUIUOseddDm0cxnGQzxIR7vJgsLZbdLE3w=="
+        crossorigin="anonymous" />
   <link rel="stylesheet" href="css/streetscape-shared.css" />
   <link rel="stylesheet" href="css/index.css" />
 </head>
@@ -59,19 +62,27 @@
 
   <div class="chart-container" aria-label="Scatter-plot charts">
     <div class="scatter-plot-container">
-      <canvas id="panoScatter"></canvas>
+      <canvas id="panoScatter" role="img"
+              aria-label="Scatter plot of total panorama count versus median age for each city"></canvas>
     </div>
     <div class="scatter-plot-container">
-      <canvas id="areaScatter"></canvas>
+      <canvas id="areaScatter" role="img"
+              aria-label="Scatter plot of city area versus median age for each city"></canvas>
     </div>
   </div>
 
-  <div id="legend" class="legend" role="list" aria-label="Median age legend"></div>
+  <div id="legend" class="legend" role="group" aria-label="Median age legend"></div>
 
   <!-- Scripts (order matters: libs → shared utils → page logic) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"
+          integrity="sha512-BwHfrr4c9kmRkLw6iXFdzcdWV/PGkVgiIyIWLLlTSXzWQzxuSg4DiQUCpauz/EWjgk5TYQqX/kvn9pG1NpYfqg=="
+          crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"
+          integrity="sha512-ZwR1/gSZM3ai6vCdI+LVF1zSq/5HznD3ZSTk7kajkaj4D292NLuduDCO1c/NT8Id+jE58KYLKT7hXnbtryGmMg=="
+          crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"
+          integrity="sha512-g2TeAWw5GPnX7z0Kn8nFbYfeHcvAu/tx6d6mrLe/90mkCxO+RcptyYpksUz35EO337F83bZwcmUyHiHamspkfg=="
+          crossorigin="anonymous"></script>
   <script src="js/streetscape-utils.js"></script>
   <script src="js/index.js"></script>
 </body>

@@ -2,7 +2,7 @@
 
 import pytest
 
-from streetscape_metadata_tracker.config import load_config
+from streetscape_metadata_tracker.config import load_config, warn_if_credentials_world_readable
 
 
 def test_load_config_gsv_requires_only_its_own_key(monkeypatch):
@@ -37,3 +37,30 @@ def test_load_config_empty_credential_raises(monkeypatch, provider, env_var):
 def test_load_config_unknown_provider_raises():
     with pytest.raises(ValueError, match="[Uu]nknown provider"):
         load_config("kartaview")
+
+
+# --- warn_if_credentials_world_readable: .env mode check --------------------
+
+
+def test_env_mode_600_is_quiet(tmp_path, caplog):
+    env = tmp_path / ".env"
+    env.write_text("GMAPS_API_KEY=k\n")
+    env.chmod(0o600)
+    assert warn_if_credentials_world_readable(str(env)) is False
+    assert "chmod 600" not in caplog.text
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o640, 0o604, 0o666])
+def test_env_group_or_world_readable_warns(tmp_path, caplog, mode):
+    env = tmp_path / ".env"
+    env.write_text("GMAPS_API_KEY=k\n")
+    env.chmod(mode)
+    assert warn_if_credentials_world_readable(str(env)) is True
+    assert "chmod 600" in caplog.text
+    # The warning must never include the credential value itself.
+    assert "GMAPS_API_KEY=k" not in caplog.text
+
+
+def test_env_missing_or_empty_path_is_noop():
+    assert warn_if_credentials_world_readable("") is False
+    assert warn_if_credentials_world_readable("/nonexistent/.env") is False

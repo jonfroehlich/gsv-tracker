@@ -418,10 +418,21 @@ def _collect_due(conn, cfg: SchedulerConfig, today: date):
     return ordered, providers_for_city
 
 
-def cmd_run_due(cfg: SchedulerConfig, dry_run: bool = False, limit: int | None = None) -> int:
-    """Collect all cities due today, within per-provider budgets, publish."""
+def cmd_run_due(
+    cfg: SchedulerConfig,
+    dry_run: bool = False,
+    limit: int | None = None,
+    today: date | None = None,
+) -> int:
+    """
+    Collect all cities due today, within per-provider budgets, publish.
+
+    ``today`` is injectable so tests can pin a date (a wall-clock read here
+    can cross UTC midnight mid-test and flake); production callers omit it.
+    """
     conn = db.connect(cfg.db_path)
-    today = datetime.now(UTC).date()
+    if today is None:
+        today = datetime.now(UTC).date()
     providers = cfg.enabled_providers()
 
     # Ensure new cities (and newly enabled providers) have stagger assignments

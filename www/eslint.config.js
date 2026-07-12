@@ -30,6 +30,7 @@ const vendorGlobals = {
 const sharedGlobals = {
   STREETSCAPE_DATA_BASE_URL: "readonly",
   PROVIDERS: "readonly",
+  isKnownProvider: "readonly",
   getColor: "readonly",
   escapeHtml: "readonly",
   isValidRunFilename: "readonly",
@@ -41,6 +42,9 @@ const sharedGlobals = {
   panoDateOrNull: "readonly",
   googleSharePercent: "readonly",
   buildFilledHistogram: "readonly",
+  withAlpha: "readonly",
+  fmtYears: "readonly",
+  formatChangeSummary: "readonly",
 };
 
 const browserRules = {
