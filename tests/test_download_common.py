@@ -52,6 +52,32 @@ def test_grid_indices_cover_the_full_rectangle():
     assert idx == expected
 
 
+def test_grid_coordinates_literal_anchor():
+    """Pin exact output coordinates for one known grid.
+
+    The other grid tests verify structure (counts, indices, relative
+    spacing) — properties a mirrored bug in the implementation could still
+    satisfy. These literals were hand-checked against independent geodesy:
+    100 m north of 47.6°N is +0.000899° lat; 100 m east is +0.001330° lon
+    (1° lon ≈ 75.1 km at that latitude). A regression in the bearing/
+    distance math changes them and fails here.
+    """
+    points = generate_grid_points(SEATTLE, width_steps=2, height_steps=2, step_length=100)
+    by_idx = {(i, j): (lat, lon) for lat, lon, i, j in points}
+    assert by_idx[(1, 0)] == (
+        pytest.approx(47.607099, abs=5e-6),
+        pytest.approx(-122.332100, abs=5e-6),
+    )
+    assert by_idx[(0, 1)] == (
+        pytest.approx(47.606200, abs=5e-6),
+        pytest.approx(-122.330770, abs=5e-6),
+    )
+    assert by_idx[(-1, -1)] == (
+        pytest.approx(47.605301, abs=5e-6),
+        pytest.approx(-122.333430, abs=5e-6),
+    )
+
+
 def test_grid_step_spacing_matches_step_length():
     step = 100
     points = generate_grid_points(SEATTLE, width_steps=2, height_steps=2, step_length=step)

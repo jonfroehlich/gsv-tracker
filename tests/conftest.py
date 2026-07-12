@@ -11,18 +11,11 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from streetscape_metadata_tracker import db  # noqa: E402
+from streetscape_metadata_tracker.config import METADATA_DTYPES  # noqa: E402
 
-COLUMNS = [
-    "query_lat",
-    "query_lon",
-    "query_timestamp",
-    "pano_lat",
-    "pano_lon",
-    "pano_id",
-    "capture_date",
-    "copyright_info",
-    "status",
-]
+# The run CSV schema, from its single source of truth — a column added to
+# (or reordered in) METADATA_DTYPES flows into every synthetic fixture.
+COLUMNS = list(METADATA_DTYPES)
 
 
 def make_city_df(

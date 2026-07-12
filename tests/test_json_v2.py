@@ -504,9 +504,10 @@ def test_aggregate_v3_two_providers(conn, data_dir):
     # Per-provider global histograms; mapillary's google section stays empty
     hists = summary["histogram_of_capture_dates"]
     assert set(hists) == {"gsv", "mapillary"}
-    assert hists["mapillary"]["all_panos_yearly"] == {"2021": 1, "2024": 1} or hists["mapillary"][
-        "all_panos_yearly"
-    ] == {2021: 1, 2024: 1}
+    # In-memory yearly histograms use int year keys (see
+    # merge_capture_date_histograms); the strict_load below covers the
+    # str-keyed JSON round-trip.
+    assert hists["mapillary"]["all_panos_yearly"] == {2021: 1, 2024: 1}
     assert hists["mapillary"]["google_panos_yearly"] == {}
 
     strict_load(os.path.join(data_dir, "cities.json.gz"))
