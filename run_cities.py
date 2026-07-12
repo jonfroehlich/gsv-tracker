@@ -174,27 +174,39 @@ def setup_logging(args: argparse.Namespace) -> str:
     return str(log_path)
 
 
+def split_city_and_flags(city_args: list[str]) -> tuple[str, list[str]]:
+    """
+    Split one parsed cities-file line into (city_name, flag_tokens).
+
+    Tokens before the first ``--flag`` are the (possibly unquoted) city
+    name and are rejoined with single spaces — so both
+    ``Seattle, WA --width 2000`` and ``"Seattle, WA" --width 2000`` yield
+    the city name ``"Seattle, WA"``. Everything from the first flag on
+    (including flag values) passes through unchanged.
+
+    Args:
+        city_args: Tokens from parse_city_line().
+
+    Returns:
+        (city_name, remaining_flag_and_value_tokens)
+    """
+    city_name_parts: list[str] = []
+    other_args: list[str] = []
+    for arg in city_args:
+        if arg.startswith("--") or other_args:
+            other_args.append(arg)
+        else:
+            city_name_parts.append(arg)
+    return " ".join(city_name_parts), other_args
+
+
 def run_streetscape_tracker(city_args: list[str], global_args: argparse.Namespace) -> bool:
     """Run the Streetscape Metadata Tracker for a specific city."""
     # Use the same interpreter (and venv) that launched this script
     cmd = [sys.executable, "streetscape_tracker.py"]
 
-    # Add city name - join all parts until we hit an argument starting with --
-    city_name_parts = []
-    other_args = []
-    for arg in city_args:
-        if arg.startswith("--"):
-            other_args.extend([arg])
-        else:
-            if other_args:  # If we've already seen a --, this is a value for it
-                other_args.extend([arg])
-            else:  # Otherwise it's part of the city name
-                city_name_parts.append(arg)
-
-    # Add the city name as a single argument
-    cmd.append(" ".join(city_name_parts))
-
-    # Add any other city-specific args
+    city_name, other_args = split_city_and_flags(city_args)
+    cmd.append(city_name)
     cmd.extend(other_args)
 
     # Add global execution args
