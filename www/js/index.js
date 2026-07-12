@@ -118,17 +118,15 @@ function createTooltip(city) {
 
   // Change-since-last-run line (schema v2), colored by direction
   let changeHtml = "";
-  if (city.change) {
-    const ch = city.change;
-    const added = ch.panos_added ?? 0;
-    const removed = ch.panos_removed ?? 0;
+  const change = formatChangeSummary(city.change);
+  if (change) {
     changeHtml = `
-      <div style="margin-top:12px"><strong>Since ${escapeHtml(ch.from)}:</strong></div>
+      <div style="margin-top:12px"><strong>Since ${escapeHtml(change.from)}:</strong></div>
       <ul class="popup-stats-list">
-        <li><span style="color:#2e7d32">+${added.toLocaleString()} new</span> /
-            <span style="color:#c62828">−${removed.toLocaleString()} removed</span> panoramas</li>
-        ${ch.capture_date_changed ? `<li>${ch.capture_date_changed.toLocaleString()} panos re-dated</li>` : ""}
-        ${ch.coverage_delta_pct != null ? `<li>Coverage: ${ch.coverage_delta_pct >= 0 ? "+" : ""}${ch.coverage_delta_pct.toFixed(2)} pct points</li>` : ""}
+        <li><span style="color:#2e7d32">${change.added}</span> /
+            <span style="color:#c62828">${change.removed}</span> panoramas</li>
+        ${change.redated ? `<li>${change.redated}</li>` : ""}
+        ${change.coverage ? `<li>Coverage: ${change.coverage}</li>` : ""}
       </ul>`;
   }
 
@@ -268,8 +266,9 @@ function createLegend(maxAge, cities) {
  * @param {number} targetAge
  * @param {boolean} [zoomToHighlightedCities=false]
  */
-function highlightCitiesByExactAge(targetAge, zoomToHighlightedCities = false) {
+function highlightCitiesByExactAge(targetAge) {
   const tolerance = 0.5;
+  lastHighlightedCity = AGE_BUCKET_HIGHLIGHT; // supersedes any hover
 
   [charts.pano, charts.area].forEach((chart) => {
     const ds = chart.data.datasets[0];
@@ -277,7 +276,7 @@ function highlightCitiesByExactAge(targetAge, zoomToHighlightedCities = false) {
       const age = Math.floor(pt.y);
       return Math.abs(age - targetAge) <= tolerance
         ? pt.backgroundColor
-        : pt.backgroundColor.replace("rgb", "rgba").replace(")", ",0.3)");
+        : withAlpha(pt.backgroundColor, 0.3);
     });
     ds.pointRadius = ds.data.map((pt) =>
       Math.abs(Math.floor(pt.y) - targetAge) <= tolerance ? 6 : 3
@@ -292,42 +291,35 @@ function highlightCitiesByExactAge(targetAge, zoomToHighlightedCities = false) {
     chart.update();
   });
 
-  const highlightedCities = [];
   mapRectangles.forEach((rect) => {
     const median = rect.city.pano_age_stats.median_pano_age_years;
     // Null median (no age data) never matches an age bucket
     const age = median != null ? Math.floor(median) : NaN;
     if (Math.abs(age - targetAge) <= tolerance) {
       // Selected state
-      rect.setStyle({ 
-        fillOpacity: 0.8, 
+      rect.setStyle({
+        fillOpacity: 0.8,
         weight: 2,
-        opacity: 1 
+        opacity: 1
       });
       rect.bringToFront();
     } else {
       // Unselected state: significantly more "faded"
-      rect.setStyle({ 
+      rect.setStyle({
         fillOpacity: 0.1, // Very faint fill
         weight: 0.1,       // Thin borders
         opacity: 0.2       // Faded borders
       });
     }
   });
-
-  if (highlightedCities.length > 0 && zoomToHighlightedCities) {
-    const minLat = Math.min(...highlightedCities.map((c) => c.bounds.min_lat));
-    const maxLat = Math.max(...highlightedCities.map((c) => c.bounds.max_lat));
-    const minLon = Math.min(...highlightedCities.map((c) => c.bounds.min_lon));
-    const maxLon = Math.max(...highlightedCities.map((c) => c.bounds.max_lon));
-    const latPad = (maxLat - minLat) * 0.2;
-    const lonPad = (maxLon - minLon) * 0.2;
-    map.fitBounds([
-      [minLat - latPad, minLon - lonPad],
-      [maxLat + latPad, maxLon + lonPad],
-    ]);
-  }
 }
+
+// The current highlight state: null (defaults), a city record (hover), or
+// AGE_BUCKET_HIGHLIGHT (legend selection). Hover events fire per mousemove;
+// restyling ~1,100 rectangles and updating two charts on every one froze
+// the map, so highlightCity/resetHighlights no-op when nothing changed.
+const AGE_BUCKET_HIGHLIGHT = Symbol("age-bucket");
+let lastHighlightedCity = null;
 
 /**
  * Highlight a single city across both scatter charts and the map.
@@ -335,12 +327,13 @@ function highlightCitiesByExactAge(targetAge, zoomToHighlightedCities = false) {
  * @param {Object} city - The city record to highlight.
  */
 function highlightCity(city) {
+  if (city === lastHighlightedCity) return;
+  lastHighlightedCity = city;
+
   [charts.pano, charts.area].forEach((chart) => {
     const ds = chart.data.datasets[0];
     ds.pointBackgroundColor = ds.data.map((pt) =>
-      pt.city === city
-        ? pt.backgroundColor
-        : pt.backgroundColor.replace("rgb", "rgba").replace(")", ",0.3)")
+      pt.city === city ? pt.backgroundColor : withAlpha(pt.backgroundColor, 0.3)
     );
     ds.pointRadius = ds.data.map((pt) => (pt.city === city ? 6 : 3));
     ds.borderWidth = ds.data.map((pt) => (pt.city === city ? 2 : 0));
@@ -359,6 +352,9 @@ function highlightCity(city) {
 
 /** Reset all chart and map highlights back to their defaults. */
 function resetHighlights() {
+  if (lastHighlightedCity === null) return;
+  lastHighlightedCity = null;
+
   [charts.pano, charts.area].forEach((chart) => {
     const ds = chart.data.datasets[0];
     ds.pointBackgroundColor = ds.data.map((pt) => pt.backgroundColor);
@@ -673,9 +669,10 @@ function createScatterPlots(cities) {
       scales: {
         ...sharedOptions.scales,
         x: {
+          // Auto-ranged: a fixed min of 100 hid every city with fewer
+          // than 100 panos (small towns, sparse Mapillary coverage)
           type: "logarithmic",
           title: { display: true, text: "Total Panos (log scale)" },
-          min: 100,
         },
       },
     },
@@ -703,9 +700,9 @@ function createScatterPlots(cities) {
       scales: {
         ...sharedOptions.scales,
         x: {
+          // Auto-ranged (a fixed min of 1 hid sub-km² villages)
           type: "logarithmic",
           title: { display: true, text: "Area (km², log scale)" },
-          min: 1,
         },
       },
     },

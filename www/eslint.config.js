@@ -42,6 +42,9 @@ const sharedGlobals = {
   panoDateOrNull: "readonly",
   googleSharePercent: "readonly",
   buildFilledHistogram: "readonly",
+  withAlpha: "readonly",
+  fmtYears: "readonly",
+  formatChangeSummary: "readonly",
 };
 
 const browserRules = {

@@ -53,9 +53,6 @@ const MAX_COLOR_AGE_BY_PROVIDER = Object.fromEntries(
     [key, (Date.now() - p.launchDate.getTime()) / MS_PER_YEAR])
 );
 
-/** Back-compat alias (GSV scale), referenced by older code/comments. */
-const MAX_COLOR_AGE_IN_YEARS = MAX_COLOR_AGE_BY_PROVIDER.gsv;
-
 /**
  * Return a CSS `rgb()` color for a given panorama age using a
  * three-stop YlOrRd interpolation (light yellow → orange → dark red),
@@ -74,7 +71,7 @@ const MAX_COLOR_AGE_IN_YEARS = MAX_COLOR_AGE_BY_PROVIDER.gsv;
  *   getColor(11, "mapillary");   // dark red — oldest possible Mapillary
  */
 function getColor(age, provider = "gsv") {
-  const maxAge = MAX_COLOR_AGE_BY_PROVIDER[provider] ?? MAX_COLOR_AGE_IN_YEARS;
+  const maxAge = MAX_COLOR_AGE_BY_PROVIDER[provider] ?? MAX_COLOR_AGE_BY_PROVIDER.gsv;
   const ratio = Math.min(age / maxAge, 1);
 
   let r, g, b;
@@ -384,6 +381,55 @@ function buildFilledHistogram(rawHistogram, currentYear) {
   return filled;
 }
 
+/**
+ * Add (or replace) an alpha channel on a CSS `rgb()`/`rgba()` color.
+ * Non-rgb inputs (hex, named colors) are returned unchanged.
+ *
+ * @param {string} color - e.g. "rgb(253, 141, 60)".
+ * @param {number} alpha - 0..1.
+ * @returns {string} e.g. "rgba(253, 141, 60, 0.3)".
+ */
+function withAlpha(color, alpha) {
+  const m = /^rgba?\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(color || "");
+  return m ? `rgba(${m[1]}, ${m[2]}, ${m[3]}, ${alpha})` : color;
+}
+
+/**
+ * Format an age in years for display: "4.2 years", or an em dash when the
+ * value is absent (null age stats on a 0-pano run).
+ *
+ * @param {?number} v - Age in years.
+ * @returns {string}
+ */
+function fmtYears(v) {
+  return v != null ? `${v.toFixed(1)} years` : "—";
+}
+
+/**
+ * Pre-format the display strings for a change_from_previous_run block so
+ * index.js (overview popup) and city.js (legend) render identical numbers
+ * and only differ in markup. Returns null when there is no change block.
+ *
+ * @param {?Object} change - {panos_added, panos_removed,
+ *   capture_date_changed, coverage_delta_pct, from/from_run_date}.
+ * @returns {?{from: string, added: string, removed: string,
+ *   redated: ?string, coverage: ?string}}
+ */
+function formatChangeSummary(change) {
+  if (!change) return null;
+  return {
+    from: change.from ?? change.from_run_date ?? "",
+    added: `+${(change.panos_added ?? 0).toLocaleString()} new`,
+    removed: `−${(change.panos_removed ?? 0).toLocaleString()} removed`,
+    redated: change.capture_date_changed
+      ? `${change.capture_date_changed.toLocaleString()} panos re-dated`
+      : null,
+    coverage: change.coverage_delta_pct != null
+      ? `${change.coverage_delta_pct >= 0 ? "+" : ""}${change.coverage_delta_pct.toFixed(2)} pct points`
+      : null,
+  };
+}
+
 // Node/CommonJS export shim for the unit tests (issue #123). This is a no-op
 // in the browser, where these symbols are plain globals loaded via <script>.
 if (typeof module !== "undefined" && module.exports) {
@@ -402,5 +448,8 @@ if (typeof module !== "undefined" && module.exports) {
     panoDateOrNull,
     googleSharePercent,
     buildFilledHistogram,
+    withAlpha,
+    fmtYears,
+    formatChangeSummary,
   };
 }

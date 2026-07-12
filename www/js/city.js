@@ -174,16 +174,16 @@ function updateLegend(years) {
               onchange="switchRun(this.value)">${options}</select>`;
   }
 
-  if (changeGlobal) {
-    const ch = changeGlobal;
+  const change = formatChangeSummary(changeGlobal);
+  if (change) {
     html += `
       <div class="legend-divider"></div>
-      <div class="legend-year-header">Since ${escapeHtml(ch.from_run_date)}</div>
+      <div class="legend-year-header">Since ${escapeHtml(change.from)}</div>
       <p class="legend-meta" style="margin:4px 0 0">
-        <span style="color:#7bd88f">+${(ch.panos_added ?? 0).toLocaleString()} new</span> /
-        <span style="color:#ff8a80">−${(ch.panos_removed ?? 0).toLocaleString()} removed</span>
-        ${ch.capture_date_changed ? `<br>${ch.capture_date_changed.toLocaleString()} panos re-dated` : ""}
-        ${ch.coverage_delta_pct != null ? `<br>Coverage ${ch.coverage_delta_pct >= 0 ? "+" : ""}${ch.coverage_delta_pct.toFixed(2)} pct pts` : ""}
+        <span style="color:#7bd88f">${change.added}</span> /
+        <span style="color:#ff8a80">${change.removed}</span>
+        ${change.redated ? `<br>${change.redated}` : ""}
+        ${change.coverage ? `<br>Coverage ${change.coverage}` : ""}
       </p>`;
   }
 
@@ -625,14 +625,9 @@ function updateChartColorsForDate(chart, date) {
   ds.backgroundColor = ds.data.map((pt) => {
     const ptDate = new Date(pt.x);
     const age = new Date().getFullYear() - ptDate.getFullYear();
-    const base = getColor(age, providerGlobal);
     const opacity = ptDate.toDateString() === dateStr ? 1 : 0.3;
     pt.opacity = opacity;
-
-    const match = base.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-    return match
-      ? `rgba(${match[1]}, ${match[2]}, ${match[3]}, ${opacity})`
-      : base;
+    return withAlpha(getColor(age, providerGlobal), opacity);
   });
 
   ds.pointBackgroundColor = ds.backgroundColor;
@@ -691,9 +686,33 @@ function buildPopupHtml(captureDate, ageFormatted, panoId, photographer) {
  * Progress is tracked against the *compressed* byte count reported in
  * the city metadata JSON, giving an accurate download percentage.
  */
+/**
+ * Show a load error in the progress panel. Replaces the old alert(),
+ * which blocked the page and left no trace once dismissed; the panel
+ * stays visible next to the "Back to Overview Map" link.
+ *
+ * @param {string} message
+ */
+function showLoadError(message) {
+  document.getElementById("progress-bar").style.display = "none";
+  document.getElementById("progress-container").style.display = "block";
+  document.getElementById("progress-text").textContent = message;
+}
+
 async function loadData() {
   if (!csvFile && !decodedCityQuery) {
-    alert("Please provide either a file parameter or city parameter");
+    showLoadError("No city specified — open this page from the overview map, "
+      + "or add ?file= or ?city= to the URL.");
+    return;
+  }
+
+  // The streaming pipeline needs the native DecompressionStream
+  // (Safari < 16.4 lacks it). Fail with a clear message instead of a
+  // ReferenceError mid-download.
+  if (typeof DecompressionStream === "undefined") {
+    showLoadError("This browser can't stream the map data (it lacks "
+      + "DecompressionStream). Please use a current Chrome, Firefox, Edge, "
+      + "or Safari 16.4+.");
     return;
   }
 
@@ -730,8 +749,7 @@ async function loadData() {
       const parsedQuery = parseLocationQuery(decodedCityQuery, citiesData);
       const result = findBestMatchingCity(parsedQuery, citiesData);
       if (!result.match) {
-        progressContainer.style.display = "none";
-        alert(result.error);
+        showLoadError(result.error);
         return;
       }
       targetFile = result.match.data_file.filename;
@@ -796,7 +814,7 @@ async function loadData() {
     const copyrightNote = !copyrightAvailableGlobal
       ? `<em>Copyright info not recorded (archival import); counts include all panoramas</em><br>`
       : "";
-    const fmtYears = (v) => (v != null ? `${v.toFixed(1)} years` : "—");
+    // fmtYears comes from streetscape-utils.js
     const tooltipHtml = `
       <div style="font-family:sans-serif">
         <strong>${escapeHtml(cityLabel)}</strong><br>
@@ -839,14 +857,20 @@ async function loadData() {
     if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${targetFile}`);
 
     let receivedBytes = 0;
+    let lastShownPct = -1;
     const progressStream = new TransformStream({
       transform(chunk, controller) {
         receivedBytes += chunk.length;
-        const pct = Math.min((receivedBytes / totalBytes) * 100, 99);
-        progressFill.style.width = `${pct}%`;
-        progressFill.setAttribute("aria-valuenow", Math.round(pct));
-        progressText.textContent =
-          `Downloading ${fileSizeMB} MB for ${cityLabel}… ${Math.round(pct)}%`;
+        // Only touch the DOM when the whole percent changes — this fires
+        // per network chunk (thousands of times on a big city)
+        const pct = Math.min(Math.round((receivedBytes / totalBytes) * 100), 99);
+        if (pct !== lastShownPct) {
+          lastShownPct = pct;
+          progressFill.style.width = `${pct}%`;
+          progressFill.setAttribute("aria-valuenow", pct);
+          progressText.textContent =
+            `Downloading ${fileSizeMB} MB for ${cityLabel}… ${pct}%`;
+        }
         controller.enqueue(chunk);
       },
     });
@@ -938,9 +962,13 @@ async function loadData() {
     // only complete lines (up to the last newline) to PapaParse, keeping
     // the header row prepended so every batch parses correctly.
     //
-    // PapaParse handles RFC 4180 quoting (fields with embedded commas,
-    // quotes, or newlines) correctly on each batch because it sees a
-    // well-formed CSV fragment with headers on every call.
+    // PapaParse handles quoted fields with embedded commas or quotes
+    // correctly on each batch because it sees a well-formed CSV fragment
+    // with headers on every call. Caveat: a quoted field containing a
+    // literal NEWLINE would be split across batches by the lastIndexOf
+    // splitter above. That can't occur here — the writers (METADATA_DTYPES
+    // schema, standardize_capture_date, pandas to_csv defaults) never emit
+    // multi-line field values.
 
     // Per-column typing: only coordinates are numeric. Blanket
     // dynamicTyping would coerce pano_id to a float — Mapillary IDs are
@@ -1019,8 +1047,7 @@ async function loadData() {
 
   } catch (error) {
     console.error("Error loading or parsing city data:", error);
-    progressContainer.style.display = "none";
-    alert(`Failed to load city data: ${error.message}`);
+    showLoadError(`Failed to load city data: ${error.message}`);
   }
 }
 
