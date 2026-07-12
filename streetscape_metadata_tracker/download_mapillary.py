@@ -101,13 +101,24 @@ def tile_frac_to_lonlat(fx: float, fy: float, zoom: int) -> tuple[float, float]:
 def tiles_for_bbox(
     min_lon: float, min_lat: float, max_lon: float, max_lat: float, zoom: int = TILE_ZOOM
 ) -> list[tuple[int, int]]:
-    """All (x, y) tile indices at the given zoom intersecting the bbox."""
+    """
+    All (x, y) tile indices at the given zoom intersecting the bbox.
+
+    A bbox that crosses the antimeridian (min_lon > max_lon after geopy
+    normalizes longitudes to ±180 — e.g. Suva, Fiji) wraps: it covers the
+    x columns from min_lon to the right edge plus those from the left edge
+    to max_lon. The naive single range was empty there, silently yielding
+    a 0-tile (0-pano) run.
+    """
     fx_min, fy_max = lonlat_to_tile_frac(min_lon, min_lat, zoom)  # y grows southward
     fx_max, fy_min = lonlat_to_tile_frac(max_lon, max_lat, zoom)
     n = 2**zoom
-    x_range = range(max(0, int(fx_min)), min(n - 1, int(fx_max)) + 1)
+    if fx_min > fx_max:  # bbox crosses the antimeridian
+        x_indices = [*range(max(0, int(fx_min)), n), *range(0, min(n - 1, int(fx_max)) + 1)]
+    else:
+        x_indices = list(range(max(0, int(fx_min)), min(n - 1, int(fx_max)) + 1))
     y_range = range(max(0, int(fy_min)), min(n - 1, int(fy_max)) + 1)
-    return [(x, y) for x in x_range for y in y_range]
+    return [(x, y) for x in x_indices for y in y_range]
 
 
 def grid_bbox(

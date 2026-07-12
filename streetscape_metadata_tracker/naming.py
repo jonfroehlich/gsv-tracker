@@ -192,7 +192,7 @@ def generate_base_filename(
 
     Examples:
         >>> generate_base_filename("St. Louis, MO, USA", 1000, 1000, 20)
-        'st-louis--mo--usa_width_1000_height_1000_step_20'
+        'st.-louis--mo--usa_width_1000_height_1000_step_20'
     """
     safe_name = sanitize_city_query_str(city_query_str)
     return f"{safe_name}_width_{int(grid_width)}_height_{int(grid_height)}_step_{int(step_length)}"

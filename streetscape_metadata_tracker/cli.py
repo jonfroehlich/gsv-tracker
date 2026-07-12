@@ -723,7 +723,13 @@ def _check_boundary(conn, args, vis_path: str) -> int:
     boundary_vis_full_path = os.path.join(vis_path, f"{base_name}_search_boundary.html")
 
     search_area_map = display_search_area(
-        args.city, center_lat, center_lng, grid_width, grid_height, args.step
+        # `step`, not args.step: a registered city previews its FROZEN step
+        args.city,
+        center_lat,
+        center_lng,
+        grid_width,
+        grid_height,
+        step,
     )
     search_area_map.save(boundary_vis_full_path)
 

@@ -3,7 +3,6 @@ import os
 
 from streetscape_metadata_tracker import get_default_data_dir
 from streetscape_metadata_tracker.json_summarizer import (
-    generate_aggregate_summary_as_json,
     generate_missing_city_json_files,
 )
 
@@ -51,7 +50,13 @@ def main():
         return 1
 
     generate_missing_city_json_files(args.data_dir)
-    generate_aggregate_summary_as_json(args.data_dir)
+    # The aggregate cities.json.gz is built from the SQLite catalog, not by
+    # globbing json files (the legacy v1 exporter was removed). Rebuild with:
+    #   python -m streetscape_metadata_tracker.scheduler regenerate-aggregate
+    print(
+        "Per-run JSONs generated. To rebuild the aggregate cities.json.gz, run:\n"
+        "  python -m streetscape_metadata_tracker.scheduler regenerate-aggregate"
+    )
 
     return 0
 
