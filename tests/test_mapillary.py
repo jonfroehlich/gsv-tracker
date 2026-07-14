@@ -287,12 +287,14 @@ def _run_download(
     served = []
 
     async def fake_fetch(session, url, timeout):
-        # The token must travel as an Authorization header, never in the
-        # URL (URL-borne credentials leak via exception text into logs).
-        m = re.search(r"/2/14/(\d+)/(\d+)$", url)
+        # The tiles CDN requires the token as a ?access_token= query param
+        # (it 403s the Authorization header the Graph API uses). URL-borne
+        # credentials are scrubbed from logged exception text by
+        # download_common.redact_credentials (see test_credential_redaction).
+        m = re.search(r"/2/14/(\d+)/(\d+)\?access_token=MLY", url)
         assert m, f"unexpected tile URL: {url}"
-        assert "access_token" not in url
-        assert session.headers.get("Authorization") == "OAuth MLY|test|token"
+        assert "access_token=MLY|test|token" in url
+        assert session.headers.get("Authorization") is None
         xy = (int(m.group(1)), int(m.group(2)))
         served.append(xy)
         return tiles_by_xy.get(xy, mapbox_vector_tile.encode([]))

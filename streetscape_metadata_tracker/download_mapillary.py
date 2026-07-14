@@ -49,10 +49,13 @@ from .fileutils import load_city_csv_file
 logger = logging.getLogger(__name__)
 
 TILE_ZOOM = 14  # the only zoom level whose tiles carry per-image metadata
-# The access token is sent as an `Authorization: OAuth <token>` header, NOT
-# a query parameter: HTTP-client exceptions stringify with the full request
-# URL, so a URL-borne token would leak into logs (and from log tails into
-# the scheduler's alert emails).
+# The tiles CDN only accepts the token as an `?access_token=` query
+# parameter — it rejects the `Authorization: OAuth <token>` header the Graph
+# API uses (verified: header -> HTTP 403, query param -> 200). This matches
+# how download_gsv.py carries `key=` in the URL. A URL-borne token would
+# otherwise leak into logs via HTTP-client exceptions that stringify the
+# full request URL, so every raised/logged error text must pass through
+# download_common.redact_credentials (which scrubs `access_token=`).
 TILE_URL_TEMPLATE = "https://tiles.mapillary.com/maps/vtp/mly1_computed_public/2/{z}/{x}/{y}"
 IMAGE_LAYER = "image"
 
@@ -341,7 +344,7 @@ async def download_mapillary_metadata_async(
 
     async def fetch_one(x: int, y: int) -> list[dict[str, Any]]:
         nonlocal api_requests
-        url = TILE_URL_TEMPLATE.format(z=TILE_ZOOM, x=x, y=y)
+        url = f"{TILE_URL_TEMPLATE.format(z=TILE_ZOOM, x=x, y=y)}?access_token={access_token}"
         async with semaphore:
             api_requests += 1
             tile_bytes = await _fetch_tile(session, url, timeout)
@@ -349,10 +352,9 @@ async def download_mapillary_metadata_async(
         return decode_image_features(tile_bytes, x, y)
 
     try:
-        # Token in a header, not the URL — see TILE_URL_TEMPLATE comment.
-        async with aiohttp.ClientSession(
-            headers={"Authorization": f"OAuth {access_token}"}
-        ) as session:
+        # Token rides in each tile URL as ?access_token= — see TILE_URL_TEMPLATE
+        # comment (the tiles CDN 403s the Authorization header).
+        async with aiohttp.ClientSession() as session:
             results = await asyncio.gather(*(fetch_one(x, y) for x, y in tiles))
     except DownloadError as e:
         # e.g. the rejected-token error from _fetch_tile; attach the spent
