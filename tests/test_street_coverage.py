@@ -313,3 +313,121 @@ def test_fetch_graph_without_conn_skips_catalog(tmp_path, monkeypatch):
     cache.touch()
     monkeypatch.setattr(ox, "load_graphml", lambda path: nx.MultiDiGraph())
     fetch_graph(city, str(tmp_path))  # must not raise without a catalog
+
+
+def _fake_city(city_id="bend--or"):
+    from streetscape_metadata_tracker.db import CityRow
+
+    return CityRow(
+        city_id=city_id,
+        display_name="Bend, OR",
+        city_name="Bend",
+        state_name="Oregon",
+        state_code="OR",
+        country_name="United States",
+        country_code="US",
+        center_lat=44.05,
+        center_lon=-121.31,
+        grid_width_m=5000,
+        grid_height_m=5000,
+        step_m=20,
+        created_at="2026-01-01T00:00:00+00:00",
+        enabled=True,
+        notes=None,
+    )
+
+
+def test_fetch_graph_download_registers_and_refresh_replaces(tmp_path, monkeypatch):
+    """A fresh download saves the GraphML and registers the catalog row;
+    --refresh re-downloads and REPLACES the row (counts updated, still one
+    row) rather than erroring or appending."""
+    import networkx as nx
+
+    from streetscape_metadata_tracker import db
+    from streetscape_street_analyzer import download_street_network as dsn
+
+    conn = db.connect(str(tmp_path / "catalog.db"))
+    city_id = db.register_city(
+        conn,
+        city_name="Bend",
+        state_name="Oregon",
+        state_code="OR",
+        country_name="United States",
+        country_code="US",
+        center_lat=44.05,
+        center_lon=-121.31,
+        grid_width_m=5000,
+        grid_height_m=5000,
+        step_m=20,
+    )
+    city = db.resolve_city(conn, city_id)
+
+    def fake_graph(n_edges):
+        g = nx.MultiDiGraph()
+        for i in range(n_edges):
+            g.add_edge(i, i + 1)
+        return g
+
+    downloads = []
+
+    def fake_download(bbox, network_type):
+        downloads.append(bbox)
+        return fake_graph(3 if len(downloads) == 1 else 7)
+
+    monkeypatch.setattr(dsn, "_download_graph", fake_download)
+    monkeypatch.setattr(dsn.ox, "save_graphml", lambda g, p: open(p, "w").close())
+
+    dsn.fetch_graph(city, str(tmp_path), conn=conn)
+    row = db.get_street_network(conn, city_id)
+    assert row["edge_count"] == 3
+    assert (tmp_path / "osm_cache" / f"{city_id}_streets_network.graphml").exists()
+
+    # Cache now exists: a plain call must NOT re-download...
+    monkeypatch.setattr(dsn.ox, "load_graphml", lambda p: fake_graph(3))
+    dsn.fetch_graph(city, str(tmp_path), conn=conn)
+    assert len(downloads) == 1
+
+    # ...but refresh=True re-downloads and replaces the single catalog row.
+    dsn.fetch_graph(city, str(tmp_path), conn=conn, refresh=True)
+    assert len(downloads) == 2
+    row = db.get_street_network(conn, city_id)
+    assert row["edge_count"] == 7
+    assert conn.execute("SELECT COUNT(*) FROM street_networks").fetchone()[0] == 1
+    conn.close()
+
+
+def test_network_cache_filename_types():
+    from streetscape_street_analyzer.download_street_network import network_cache_filename
+
+    # The default drive network keeps the original un-suffixed name so caches
+    # (and catalog rows) predating network_type stay valid.
+    assert network_cache_filename("bend--or") == "bend--or_streets_network.graphml"
+    assert network_cache_filename("bend--or", "drive") == "bend--or_streets_network.graphml"
+    assert network_cache_filename("bend--or", "walk") == "bend--or_streets_network_walk.graphml"
+
+
+def test_graph_to_edges_collapses_reciprocal_edges():
+    """osmnx returns both directions of a two-way street; identical geometry
+    must be collapsed to one row so segments aren't double-counted."""
+    import networkx as nx
+
+    from streetscape_street_analyzer.download_street_network import graph_to_edges
+
+    g = nx.MultiDiGraph(crs="EPSG:4326")
+    g.add_node(1, x=-121.310, y=44.050)
+    g.add_node(2, x=-121.309, y=44.050)
+    g.add_node(3, x=-121.308, y=44.050)
+    two_way = LineString([(-121.310, 44.050), (-121.309, 44.050)])
+    g.add_edge(1, 2, highway="residential", length=80.0, geometry=two_way)
+    g.add_edge(2, 1, highway="residential", length=80.0, geometry=two_way)  # reciprocal
+    g.add_edge(
+        2,
+        3,
+        highway="service",
+        length=80.0,
+        geometry=LineString([(-121.309, 44.050), (-121.308, 44.050)]),
+    )
+
+    edges = graph_to_edges(g)
+    assert len(edges) == 2  # 3 directed edges -> 2 unique segments
+    assert sorted(edges["highway"]) == ["residential", "service"]
