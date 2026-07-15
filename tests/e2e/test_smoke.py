@@ -149,6 +149,32 @@ def test_provider_toggle_persists_via_query_param(page: Page, base_url):
     expect(page.locator("path.leaflet-interactive")).to_have_count(1)
 
 
+def test_metric_toggle_recolors_and_persists_via_query_param(page: Page, base_url):
+    errors = _capture_errors(page)
+    page.goto(f"{base_url}/index.html")
+    expect(page.locator("path.leaflet-interactive")).to_have_count(2)
+    expect(page.locator("#legend h4")).to_have_text("Median Age (years)")  # default
+
+    page.locator('input[name="metric"][value="coverage"]').check()
+    page.wait_for_url("**metric=coverage**")
+    # Same cities, recolored: legend switches to coverage deciles, and the
+    # popup's always-on coverage line renders a percentage (no NaN/Infinity).
+    expect(page.locator("path.leaflet-interactive")).to_have_count(2)
+    expect(page.locator("#legend h4")).to_have_text("Grid Coverage (%)")
+    page.locator("path.leaflet-interactive").first.click(force=True)
+    popup = page.locator(".leaflet-popup-content")
+    expect(popup).to_have_count(1)
+    assert "Grid Coverage:" in popup.inner_text()
+    page.keyboard.press("Escape")
+
+    # The choice survives a reload (persisted in the URL, re-read on load).
+    page.reload()
+    expect(page.locator('input[name="metric"][value="coverage"]')).to_be_checked()
+    expect(page.locator("#legend h4")).to_have_text("Grid Coverage (%)")
+
+    assert errors == []
+
+
 def test_city_page_multirun_gsv_renders_chart_and_snapshot_select(page: Page, base_url):
     errors = _capture_errors(page)
     page.goto(f"{base_url}/city.html?file={ALPHA_LATEST}")

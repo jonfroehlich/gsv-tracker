@@ -13,11 +13,14 @@ const assert = require("node:assert/strict");
 
 const {
   PROVIDERS,
+  METRICS,
   adaptCityRecord,
   escapeHtml,
   getColor,
+  coverageColor,
   getProviderFromFilename,
   isKnownProvider,
+  isKnownMetric,
   isValidRunFilename,
   isGoogleCopyright,
   panoDateOrNull,
@@ -384,6 +387,81 @@ test("getColor: null age (0-pano run) coerces to the newest stop, not NaN", () =
   // the color must be the valid age-0 stop — never "rgb(NaN, NaN, NaN)".
   assert.equal(getColor(null), "rgb(255, 255, 178)");
   assert.equal(getColor(null, "mapillary"), "rgb(255, 255, 178)");
+});
+
+// --- coverageColor: sequential teal coverage scale ---------------------------
+
+test("coverageColor: exact stops at 0%, 50%, and 100%", () => {
+  assert.equal(coverageColor(0), "rgb(21, 86, 97)");
+  assert.equal(coverageColor(50), "rgb(69, 170, 176)");
+  assert.equal(coverageColor(100), "rgb(127, 244, 227)");
+});
+
+test("coverageColor: out-of-range percentages clamp to the end stops", () => {
+  assert.equal(coverageColor(-5), coverageColor(0));
+  assert.equal(coverageColor(150), coverageColor(100));
+});
+
+test("coverageColor: lightness increases monotonically with coverage", () => {
+  // Higher coverage must always read brighter on the dark basemap. Use the
+  // channel sum as a lightness proxy — sufficient for a single-hue ramp.
+  const lightness = (pct) => {
+    const [, r, g, b] = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(coverageColor(pct));
+    return Number(r) + Number(g) + Number(b);
+  };
+  for (let pct = 10; pct <= 100; pct += 10) {
+    assert.ok(lightness(pct) > lightness(pct - 10),
+      `coverageColor(${pct}) must be lighter than coverageColor(${pct - 10})`);
+  }
+});
+
+// --- METRICS / isKnownMetric: the "color by" registry ------------------------
+
+test("isKnownMetric: real keys yes, prototype members no", () => {
+  assert.equal(isKnownMetric("age"), true);
+  assert.equal(isKnownMetric("coverage"), true);
+  assert.equal(isKnownMetric("panos"), false);
+  // ?metric= is attacker-controlled: Object.prototype member names must
+  // not pass (same guard as isKnownProvider).
+  assert.equal(isKnownMetric("constructor"), false);
+  assert.equal(isKnownMetric("hasOwnProperty"), false);
+  assert.equal(isKnownMetric(null), false);
+  assert.equal(isKnownMetric(undefined), false);
+});
+
+test("METRICS.age: valueOf null-guards missing age stats", () => {
+  assert.equal(
+    METRICS.age.valueOf({ pano_age_stats: { median_pano_age_years: 4.2 } }),
+    4.2);
+  assert.equal(METRICS.age.valueOf({ pano_age_stats: {} }), null);
+  assert.equal(METRICS.age.valueOf({}), null);
+});
+
+test("METRICS.age: buckets and labels match the historical legend", () => {
+  assert.equal(METRICS.age.bucketOf(4.9), 4);
+  assert.equal(METRICS.age.bucketLabel(1), "1 year");
+  assert.equal(METRICS.age.bucketLabel(3), "3 years");
+  // 0..ceil(max) ascending, and safe on an all-no-data provider view
+  assert.deepEqual(METRICS.age.legendBuckets([0.5, 7.2]),
+    [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.deepEqual(METRICS.age.legendBuckets([]), [0]);
+});
+
+test("METRICS.coverage: valueOf, decile buckets, and labels", () => {
+  assert.equal(METRICS.coverage.valueOf({ coverage_rate_percent: 51.2 }), 51.2);
+  assert.equal(METRICS.coverage.valueOf({}), null);
+  assert.equal(METRICS.coverage.bucketOf(0), 0);
+  assert.equal(METRICS.coverage.bucketOf(9.99), 0);
+  assert.equal(METRICS.coverage.bucketOf(10), 1);
+  assert.equal(METRICS.coverage.bucketOf(95), 9);
+  // 100% must fold into the top decile, not a phantom bucket 10
+  assert.equal(METRICS.coverage.bucketOf(100), 9);
+  assert.equal(METRICS.coverage.bucketLabel(0), "0–10%");
+  assert.equal(METRICS.coverage.bucketLabel(9), "90–100%");
+  // Best coverage listed first
+  assert.deepEqual(METRICS.coverage.legendBuckets([]),
+    [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
+  assert.equal(METRICS.coverage.formatValue(51.25), "51.3%");
 });
 
 test("panoDateOrNull: date-only strings are local calendar dates (no TZ shift)", () => {
