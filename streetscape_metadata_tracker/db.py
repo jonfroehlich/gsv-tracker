@@ -27,7 +27,7 @@ from .naming import sanitize_city_query_str
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS cities (
@@ -99,6 +99,11 @@ CREATE TABLE IF NOT EXISTS run_diffs (
     UNIQUE (from_run_id, to_run_id)
 );
 
+-- Daily request-budget ledger. Besides the collection providers ('gsv',
+-- 'mapillary'), the strings 'gsv_streets' / 'mapillary_streets' are reserved
+-- as isolated budget channels for street-coverage collection (issue #99):
+-- separate API keys so street experiments can't exhaust the production grid
+-- collector's quota. Reservation is by convention — no CHECK constraint.
 CREATE TABLE IF NOT EXISTS api_usage (
     usage_date  TEXT NOT NULL,
     provider    TEXT NOT NULL DEFAULT 'gsv',
@@ -137,6 +142,25 @@ CREATE TABLE IF NOT EXISTS history_harvests (
     started_at           TEXT,
     finished_at          TEXT,
     UNIQUE (city_id, provider, harvest_date)
+);
+
+-- Frozen OSM street networks (issue #103). A provider-agnostic city asset,
+-- like frozen grid geometry: fetched once per city (bbox derived from the
+-- frozen grid) and shared by all providers and street analyses, so coverage
+-- numbers stay comparable across runs. network_type distinguishes future
+-- 'walk'/'all' networks (issue #99) from the default 'drive'. The GraphML
+-- itself lives unpublished under data/osm_cache/; a --refresh re-fetch
+-- replaces the row (no history).
+CREATE TABLE IF NOT EXISTS street_networks (
+    network_id       INTEGER PRIMARY KEY,
+    city_id          TEXT NOT NULL REFERENCES cities(city_id),
+    network_type     TEXT NOT NULL DEFAULT 'drive',
+    graphml_filename TEXT NOT NULL UNIQUE,
+    node_count       INTEGER,
+    edge_count       INTEGER,
+    osmnx_version    TEXT,
+    fetched_at       TEXT NOT NULL,
+    UNIQUE (city_id, network_type)
 );
 """
 
@@ -340,6 +364,9 @@ def init_schema(conn: sqlite3.Connection) -> None:
         user_version = 3
     if user_version == 3:
         _migrate_v3_to_v4(conn)
+    # v4 -> v5 is purely additive (the street_networks table), so like v2 -> v3
+    # it needs no rebuild migration: the CREATE TABLE IF NOT EXISTS in _SCHEMA
+    # creates it, and the version stamp below records the upgrade.
     conn.executescript(_SCHEMA)
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -773,6 +800,68 @@ def get_latest_history_harvest(
            WHERE city_id = ? AND provider = ?
            ORDER BY harvest_date DESC LIMIT 1""",
         (city_id, provider),
+    ).fetchone()
+
+
+# ── Frozen OSM street networks (issue #103) ────────────────────────────────
+
+
+def register_street_network(
+    conn: sqlite3.Connection,
+    *,
+    city_id: str,
+    graphml_filename: str,
+    network_type: str = "drive",
+    node_count: int | None = None,
+    edge_count: int | None = None,
+    osmnx_version: str | None = None,
+) -> int:
+    """
+    Catalog a city's frozen OSM street network. Idempotent on
+    (city_id, network_type): a --refresh re-fetch replaces the prior row
+    (counts, osmnx version, fetched_at) rather than erroring — the network is
+    a frozen asset with replace-on-refresh semantics, not a history.
+
+    Returns the network_id.
+    """
+    conn.execute(
+        """INSERT INTO street_networks
+           (city_id, network_type, graphml_filename, node_count, edge_count,
+            osmnx_version, fetched_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(city_id, network_type) DO UPDATE SET
+             graphml_filename = excluded.graphml_filename,
+             node_count = excluded.node_count,
+             edge_count = excluded.edge_count,
+             osmnx_version = excluded.osmnx_version,
+             fetched_at = excluded.fetched_at""",
+        (
+            city_id,
+            network_type,
+            graphml_filename,
+            node_count,
+            edge_count,
+            osmnx_version,
+            utc_now_iso(),
+        ),
+    )
+    conn.commit()
+    row = conn.execute(
+        """SELECT network_id FROM street_networks
+           WHERE city_id = ? AND network_type = ?""",
+        (city_id, network_type),
+    ).fetchone()
+    return row["network_id"]
+
+
+def get_street_network(
+    conn: sqlite3.Connection, city_id: str, network_type: str = "drive"
+) -> sqlite3.Row | None:
+    """The city's frozen street network of the given type, or None."""
+    return conn.execute(
+        """SELECT * FROM street_networks
+           WHERE city_id = ? AND network_type = ?""",
+        (city_id, network_type),
     ).fetchone()
 
 
