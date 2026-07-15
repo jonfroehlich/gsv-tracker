@@ -207,3 +207,78 @@
   width: 400px;
   height: 200px;
 }
+
+/* ── OSM street-coverage panel (top-left, below back link) ───── */
+#street-coverage-container {
+  position: absolute;
+  top: 56px;
+  left: 10px;
+  width: 300px;
+  background: rgba(80, 80, 80, 0.92);
+  color: #eee;
+  border-radius: 4px;
+  padding: 10px;
+  box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+  font-family: sans-serif;
+  display: none;
+}
+
+#street-coverage-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 14px;
+}
+
+.street-toggle {
+  font-size: 12px;
+  color: #cfcfcf;
+  cursor: pointer;
+}
+
+.street-toggle input {
+  vertical-align: middle;
+  margin-right: 3px;
+}
+
+#street-coverage-headline {
+  margin: 6px 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #e6e6e6;
+}
+
+.street-headline-pct {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.street-headline-sub {
+  display: block;
+  color: #bcbcbc;
+  font-size: 11px;
+}
+
+.street-legend {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: #cfcfcf;
+  margin-bottom: 6px;
+}
+
+.street-legend i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  vertical-align: middle;
+  border-radius: 2px;
+}
+
+#street-chart-wrap {
+  position: relative;
+  height: 180px;
+}

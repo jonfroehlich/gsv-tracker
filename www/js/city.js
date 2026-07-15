@@ -1045,6 +1045,10 @@ async function loadData() {
       map.fitBounds(L.latLngBounds(validPoints));
     }
 
+    // Optional OSM street-coverage overlay (issue #24); a no-op when the
+    // run has no "_streets.json.gz" artifact.
+    renderStreetCoverage(map, targetFile, providerGlobal);
+
   } catch (error) {
     console.error("Error loading or parsing city data:", error);
     showLoadError(`Failed to load city data: ${error.message}`);
