@@ -275,4 +275,11 @@ a.view-details-btn:focus-visible {
   outline-offset: 1px;
 }
 
+/* ── "Color by" metric toggle (age / coverage) ──────────────── */
+/* Shares .provider-toggle's chrome; only the vertical offset differs
+   (stacked directly below the provider toggle). */
+.metric-toggle {
+  top: 112px;
+}
+
 /* .visually-hidden lives in streetscape-shared.css (used by both pages) */

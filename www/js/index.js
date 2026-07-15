@@ -2,9 +2,15 @@
  * index.js
  * Overview-map logic for Streetscape City Explorer.
  *
- * Depends on globals from streetscape-utils.js (PROVIDERS, getColor,
+ * Depends on globals from streetscape-utils.js (PROVIDERS, METRICS, getColor,
  * fetchGzippedJson, adaptCitiesPayload, STREETSCAPE_DATA_BASE_URL) and the
  * Leaflet / Chart.js libraries.
+ *
+ * Two orthogonal view toggles, both persisted in the URL:
+ *   ?provider= — which imagery provider's data to show (gsv / mapillary)
+ *   ?metric=   — which scalar colors the view (age / coverage); the map
+ *                rectangles, legend buckets, and scatter-plot y-axes all
+ *                follow the active metric
  */
 
 // ── Global state ──────────────────────────────────────────────
@@ -23,13 +29,17 @@ map.on("popupclose", () => {
   activePopupChart = null;
 });
 
-// Active provider, persisted in the URL (?provider=mapillary)
-const providerParam = new URLSearchParams(window.location.search).get("provider");
+// Active provider and color-by metric, persisted in the URL
+// (?provider=mapillary&metric=coverage)
+const overviewUrlParams = new URLSearchParams(window.location.search);
+const providerParam = overviewUrlParams.get("provider");
 let currentProvider = isKnownProvider(providerParam) ? providerParam : "gsv";
+const metricParam = overviewUrlParams.get("metric");
+let currentMetric = isKnownMetric(metricParam) ? metricParam : "age";
 
-// Fill color for cities with no age data (0 dated panos → null median).
-// Previously they fell through getColor(null) → 0 years → newest-yellow,
-// indistinguishable from genuinely fresh coverage.
+// Fill color for cities with no value for the active metric (e.g. 0 dated
+// panos → null median age). Previously they fell through getColor(null) →
+// 0 years → newest-yellow, indistinguishable from genuinely fresh coverage.
 const NO_DATA_COLOR = "#666666";
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
@@ -139,6 +149,9 @@ function createTooltip(city) {
       <li>Data Collected: ${escapeHtml(city.latest_run_date) || (city.collection_info?.end_time ? new Date(city.collection_info.end_time).toLocaleDateString() : "Unknown")}</li>
       ${snapshotsHtml}
       <li>Area: ${city.search_area_km2.toFixed(1)} km²</li>
+      <li>Grid Coverage: ${city.coverage_rate_percent != null
+        ? `${city.coverage_rate_percent.toFixed(1)}% of search points`
+        : "No data"}</li>
       ${panoLinesHtml}
     </ul>
     <div style="margin-top:12px"><strong>Age Statistics:</strong></div>
@@ -187,54 +200,57 @@ function createTooltip(city) {
 // ── Legend ─────────────────────────────────────────────────────
 
 /**
- * Populate the legend panel with one row per integer-age bucket, plus a
- * non-interactive "No age data" row when any city lacks a median age.
+ * Populate the legend panel with one row per bucket of the active metric
+ * (integer years for age, deciles for coverage), plus a non-interactive
+ * "No data" row when any city lacks a value.
  *
- * @param {number} maxAge - Maximum median age across all cities.
  * @param {Object[]} cities - Array of city records.
  */
-function createLegend(maxAge, cities) {
+function createLegend(cities) {
+  const metric = METRICS[currentMetric];
   const legend = document.getElementById("legend");
-  const maxYears = Math.ceil(maxAge);
+  legend.setAttribute("aria-label", `${metric.legendTitle} legend`);
 
-  const ageCounts = new Array(maxYears + 1).fill(0);
+  const values = [];
   let noDataCount = 0;
+  const bucketCounts = new Map();
   cities.forEach((city) => {
-    const median = city.pano_age_stats.median_pano_age_years;
-    if (median == null) {
+    const value = metric.valueOf(city);
+    if (value == null) {
       noDataCount++;
       return;
     }
-    const age = Math.floor(median);
-    if (age <= maxYears) ageCounts[age]++;
+    values.push(value);
+    const bucket = metric.bucketOf(value);
+    bucketCounts.set(bucket, (bucketCounts.get(bucket) || 0) + 1);
   });
 
-  let html = "<h4>Median Age (years)</h4>";
-  for (let age = 0; age <= maxYears; age++) {
-    const color = getColor(age, currentProvider);
-    const n = ageCounts[age];
+  let html = `<h4>${metric.legendTitle}</h4>`;
+  metric.legendBuckets(values).forEach((bucket) => {
+    const color = metric.bucketColor(bucket, currentProvider);
+    const n = bucketCounts.get(bucket) || 0;
     const label = n > 0 ? `(${n} ${n === 1 ? "city" : "cities"})` : "(no cities)";
 
     // Real <button>s: native Enter/Space activation and focus handling,
     // with aria-pressed carrying the toggle state.
     html += `
-      <button type="button" class="legend-item" data-age="${age}"
+      <button type="button" class="legend-item" data-bucket="${bucket}"
               aria-pressed="false"
-              aria-label="Highlight cities with median age ${age} year${age !== 1 ? "s" : ""} ${label}">
+              aria-label="Highlight cities with ${metric.label.toLowerCase()} ${metric.bucketLabel(bucket)} ${label}">
         <span class="legend-color" style="background:${color}" aria-hidden="true"></span>
-        ${age} year${age !== 1 ? "s" : ""} ${label}
+        ${metric.bucketLabel(bucket)} ${label}
       </button>`;
-  }
+  });
   if (noDataCount > 0) {
     html += `
       <div class="legend-item">
         <span class="legend-color" style="background:${NO_DATA_COLOR}" aria-hidden="true"></span>
-        No age data (${noDataCount})
+        No data (${noDataCount})
       </div>`;
   }
   legend.innerHTML = html;
 
-  // Click handlers (the "No age data" row is a plain div and stays
+  // Click handlers (the "No data" row is a plain div and stays
   // non-interactive; buttons handle keyboard activation natively)
   legend.querySelectorAll("button.legend-item").forEach((item) => {
     item.addEventListener("click", () => {
@@ -251,7 +267,7 @@ function createLegend(maxAge, cities) {
       } else {
         item.classList.add("selected");
         item.setAttribute("aria-pressed", "true");
-        highlightCitiesByExactAge(parseInt(item.dataset.age, 10));
+        highlightCitiesByBucket(parseInt(item.dataset.bucket, 10));
       }
     });
   });
@@ -260,42 +276,37 @@ function createLegend(maxAge, cities) {
 // ── Highlighting helpers ──────────────────────────────────────
 
 /**
- * Dim everything except cities whose floored median age matches
- * {@link targetAge}.
+ * Dim everything except cities whose active-metric bucket matches
+ * {@link targetBucket} (integer years for age, deciles for coverage).
  *
- * @param {number} targetAge
- * @param {boolean} [zoomToHighlightedCities=false]
+ * @param {number} targetBucket
  */
-function highlightCitiesByExactAge(targetAge) {
-  const tolerance = 0.5;
-  lastHighlightedCity = AGE_BUCKET_HIGHLIGHT; // supersedes any hover
+function highlightCitiesByBucket(targetBucket) {
+  const metric = METRICS[currentMetric];
+  lastHighlightedCity = BUCKET_HIGHLIGHT; // supersedes any hover
+
+  // Null value (no data) never matches a bucket
+  const inBucket = (city) => {
+    const value = metric.valueOf(city);
+    return value != null && metric.bucketOf(value) === targetBucket;
+  };
 
   [charts.pano, charts.area].forEach((chart) => {
     const ds = chart.data.datasets[0];
-    ds.pointBackgroundColor = ds.data.map((pt) => {
-      const age = Math.floor(pt.y);
-      return Math.abs(age - targetAge) <= tolerance
-        ? pt.backgroundColor
-        : withAlpha(pt.backgroundColor, 0.3);
-    });
-    ds.pointRadius = ds.data.map((pt) =>
-      Math.abs(Math.floor(pt.y) - targetAge) <= tolerance ? 6 : 3
+    ds.pointBackgroundColor = ds.data.map((pt) =>
+      // Selected points go fully opaque (base points sit at 0.8)
+      inBucket(pt.city) ? withAlpha(pt.backgroundColor, 1) : withAlpha(pt.backgroundColor, 0.3)
     );
-    ds.borderWidth = ds.data.map((pt) =>
-      Math.abs(Math.floor(pt.y) - targetAge) <= tolerance ? 2 : 0
-    );
+    ds.pointRadius = ds.data.map((pt) => (inBucket(pt.city) ? 6 : 3));
+    ds.borderWidth = ds.data.map((pt) => (inBucket(pt.city) ? 2 : 0));
     ds.borderColor = ds.data.map((pt) =>
-      Math.abs(Math.floor(pt.y) - targetAge) <= tolerance
-        ? "rgba(0,0,0,0.8)" : "rgba(0,0,0,0)"
+      inBucket(pt.city) ? "rgba(0,0,0,0.8)" : "rgba(0,0,0,0)"
     );
     chart.update();
   });
 
   mapRectangles.forEach((rect) => {
-    const median = rect.city.pano_age_stats.median_pano_age_years;
-    // Null median (no age data) never matches an age bucket
-    const age = median != null ? Math.floor(median) : NaN;
-    if (Math.abs(age - targetAge) <= tolerance) {
+    if (inBucket(rect.city)) {
       // Selected state
       rect.setStyle({
         fillOpacity: 0.8,
@@ -315,10 +326,10 @@ function highlightCitiesByExactAge(targetAge) {
 }
 
 // The current highlight state: null (defaults), a city record (hover), or
-// AGE_BUCKET_HIGHLIGHT (legend selection). Hover events fire per mousemove;
+// BUCKET_HIGHLIGHT (legend selection). Hover events fire per mousemove;
 // restyling ~1,100 rectangles and updating two charts on every one froze
 // the map, so highlightCity/resetHighlights no-op when nothing changed.
-const AGE_BUCKET_HIGHLIGHT = Symbol("age-bucket");
+const BUCKET_HIGHLIGHT = Symbol("metric-bucket");
 let lastHighlightedCity = null;
 
 /**
@@ -333,7 +344,8 @@ function highlightCity(city) {
   [charts.pano, charts.area].forEach((chart) => {
     const ds = chart.data.datasets[0];
     ds.pointBackgroundColor = ds.data.map((pt) =>
-      pt.city === city ? pt.backgroundColor : withAlpha(pt.backgroundColor, 0.3)
+      // Hovered city goes fully opaque (base points sit at 0.8)
+      pt.city === city ? withAlpha(pt.backgroundColor, 1) : withAlpha(pt.backgroundColor, 0.3)
     );
     ds.pointRadius = ds.data.map((pt) => (pt.city === city ? 6 : 3));
     ds.borderWidth = ds.data.map((pt) => (pt.city === city ? 2 : 0));
@@ -358,9 +370,9 @@ function resetHighlights() {
   [charts.pano, charts.area].forEach((chart) => {
     const ds = chart.data.datasets[0];
     ds.pointBackgroundColor = ds.data.map((pt) => pt.backgroundColor);
-    ds.pointRadius = ds.data.map(() => 4);
-    ds.borderWidth = ds.data.map(() => 1);
-    ds.borderColor = ds.data.map(() => "rgba(0,0,0,0.2)");
+    ds.pointRadius = ds.data.map(() => 3);
+    ds.borderWidth = ds.data.map(() => 0);
+    ds.borderColor = ds.data.map(() => "rgba(0,0,0,0)");
     chart.update();
   });
 
@@ -579,30 +591,42 @@ function initCitySearch(cities) {
 // ── Scatter plots ─────────────────────────────────────────────
 
 /**
- * Create the two bottom-right scatter plots: pano count vs. age
- * and city area vs. age.
+ * Create the two bottom-right scatter plots: pano count vs. the active
+ * metric and city area vs. the active metric (y-axis and point colors
+ * both follow the "color by" toggle).
  *
  * @param {Object[]} cities - Array of city records.
  */
 function createScatterPlots(cities) {
-  // Cities without a median age have no y value to plot — they stay on
+  const metric = METRICS[currentMetric];
+
+  // Cities without a metric value have no y value to plot — they stay on
   // the map (greyed) but are omitted from the scatters.
-  const datedCities = cities.filter(
-    (c) => c.pano_age_stats.median_pano_age_years != null);
+  const valuedCities = cities.filter((c) => metric.valueOf(c) != null);
 
-  const panoData = datedCities.map((city) => ({
+  // 80%-opaque points: with ~1,100 overlapping dots, slight translucency
+  // shows density instead of a solid mass (hover/legend selection bumps the
+  // highlighted points back to full opacity).
+  const panoData = valuedCities.map((city) => ({
     x: city.pano_count,
-    y: city.pano_age_stats.median_pano_age_years,
+    y: metric.valueOf(city),
     city,
-    backgroundColor: getColor(city.pano_age_stats.median_pano_age_years, currentProvider),
+    backgroundColor: withAlpha(metric.color(metric.valueOf(city), currentProvider), 0.8),
   }));
 
-  const areaData = datedCities.map((city) => ({
+  const areaData = valuedCities.map((city) => ({
     x: city.search_area_km2,
-    y: city.pano_age_stats.median_pano_age_years,
+    y: metric.valueOf(city),
     city,
-    backgroundColor: getColor(city.pano_age_stats.median_pano_age_years, currentProvider),
+    backgroundColor: withAlpha(metric.color(metric.valueOf(city), currentProvider), 0.8),
   }));
+
+  // Canvas aria-labels track the active metric (the static HTML defaults
+  // describe the default age view)
+  document.getElementById("panoScatter").setAttribute("aria-label",
+    `Scatter plot of total panorama count versus ${metric.label.toLowerCase()} for each city`);
+  document.getElementById("areaScatter").setAttribute("aria-label",
+    `Scatter plot of city area versus ${metric.label.toLowerCase()} for each city`);
 
   const sharedOptions = {
     responsive: true,
@@ -612,7 +636,7 @@ function createScatterPlots(cities) {
         callbacks: {
           label: (ctx) => [
             getCityLabel(ctx.raw.city),
-            `Age: ${ctx.raw.y.toFixed(1)} years`,
+            `${metric.label}: ${metric.formatValue(ctx.raw.y)}`,
           ],
         },
       },
@@ -620,7 +644,10 @@ function createScatterPlots(cities) {
     scales: {
       y: {
         beginAtZero: true,
-        title: { display: true, text: "Median Age (years)" },
+        // Coverage is a percentage — pin the top at 100 so a 40%-max
+        // provider view doesn't stretch to look like full coverage
+        max: metric.yMax ?? undefined,
+        title: { display: true, text: metric.axisTitle },
       },
     },
     onHover: (_event, elements) => {
@@ -653,10 +680,13 @@ function createScatterPlots(cities) {
       datasets: [{
         data: panoData,
         backgroundColor: panoData.map((d) => d.backgroundColor),
-        pointRadius: 4,
-        pointHoverRadius: 7,
-        borderColor: "rgba(0,0,0,0.2)",
-        borderWidth: 1,
+        pointRadius: 3,
+        pointHoverRadius: 6,
+        borderWidth: 0, // the black ring appears only on hover/bucket highlight
+        // Let marks at the scale extremes (100% coverage, rightmost pano
+        // counts) draw their full circle instead of being cut by the plot
+        // edge; 8px covers pointHoverRadius + highlight border.
+        clip: 8,
       }],
     },
     options: {
@@ -664,7 +694,7 @@ function createScatterPlots(cities) {
       plugins: {
         ...sharedOptions.plugins,
         legend: { display: false },
-        title: { display: true, text: "Pano Count vs Median Age" },
+        title: { display: true, text: `Pano Count vs ${metric.titleNoun}` },
       },
       scales: {
         ...sharedOptions.scales,
@@ -684,10 +714,10 @@ function createScatterPlots(cities) {
       datasets: [{
         data: areaData,
         backgroundColor: areaData.map((d) => d.backgroundColor),
-        pointRadius: 4,
-        pointHoverRadius: 7,
-        borderColor: "rgba(0,0,0,0.2)",
-        borderWidth: 1,
+        pointRadius: 3,
+        pointHoverRadius: 6,
+        borderWidth: 0, // ring only on hover/bucket highlight
+        clip: 8, // same edge-overflow allowance as the pano scatter
       }],
     },
     options: {
@@ -695,7 +725,7 @@ function createScatterPlots(cities) {
       plugins: {
         ...sharedOptions.plugins,
         legend: { display: false },
-        title: { display: true, text: "City Size (km²) vs Median Age" },
+        title: { display: true, text: `City Size (km²) vs ${metric.titleNoun}` },
       },
       scales: {
         ...sharedOptions.scales,
@@ -713,13 +743,15 @@ function createScatterPlots(cities) {
 
 /**
  * Render everything (banner, legend, rectangles, scatter plots, search)
- * for the current provider from the already-fetched payload.
+ * for the current provider and color-by metric from the already-fetched
+ * payload.
  *
  * @param {boolean} [fitMap=false] - Fit the viewport to all cities
- *   (first render only; provider switches keep the current view).
+ *   (first render only; provider/metric switches keep the current view).
  */
 function renderProvider(fitMap = false) {
   const providerInfo = PROVIDERS[currentProvider];
+  const metric = METRICS[currentMetric];
   const { meta, cities } = adaptCitiesPayload(rawCitiesData, currentProvider);
 
   // Clear previous provider's view
@@ -747,10 +779,7 @@ function renderProvider(fitMap = false) {
   }
 
   // Legend
-  const maxAge = Math.max(
-    ...cities.map((c) => c.pano_age_stats.median_pano_age_years || 0)
-  );
-  createLegend(maxAge, cities);
+  createLegend(cities);
 
   // Map rectangles
   cities.forEach((city) => {
@@ -759,9 +788,9 @@ function renderProvider(fitMap = false) {
       [city.bounds.max_lat, city.bounds.max_lon],
     ];
 
-    const median = city.pano_age_stats.median_pano_age_years;
+    const value = metric.valueOf(city);
     const rect = L.rectangle(bounds, {
-      color: median != null ? getColor(median, currentProvider) : NO_DATA_COLOR,
+      color: value != null ? metric.color(value, currentProvider) : NO_DATA_COLOR,
       weight: 1,
       fillOpacity: 0.6,
     }).addTo(map);
@@ -818,13 +847,44 @@ function initProviderToggle() {
   });
 }
 
+/**
+ * Switch the active color-by metric, re-render from the cached payload,
+ * and persist the choice in the URL. Mirrors setProvider.
+ *
+ * @param {string} metric - Metric key (see METRICS).
+ */
+function setMetric(metric) {
+  if (!isKnownMetric(metric) || metric === currentMetric) return;
+  currentMetric = metric;
+
+  const url = new URL(window.location);
+  if (metric === "age") url.searchParams.delete("metric");
+  else url.searchParams.set("metric", metric);
+  history.replaceState(null, "", url);
+
+  // Before the payload arrives, just record the choice — the initial
+  // renderProvider(true) in loadData() picks it up.
+  if (rawCitiesData) renderProvider();
+}
+
+/** Wire up the color-by radio group and reflect the initial state. */
+function initMetricToggle() {
+  document.querySelectorAll('input[name="metric"]').forEach((radio) => {
+    radio.checked = radio.value === currentMetric;
+    radio.addEventListener("change", () => {
+      if (radio.checked) setMetric(radio.value);
+    });
+  });
+}
+
 // ── Data loading ──────────────────────────────────────────────
 
 /** Fetch cities.json.gz, then render the active provider's view. */
 async function loadData() {
-  // Wire the toggle BEFORE the fetch so a click during loading is
-  // recorded (setProvider defers the render until data arrives).
+  // Wire the toggles BEFORE the fetch so a click during loading is
+  // recorded (setProvider/setMetric defer the render until data arrives).
   initProviderToggle();
+  initMetricToggle();
   try {
     rawCitiesData = await fetchGzippedJson(STREETSCAPE_DATA_BASE_URL + "cities.json.gz");
     document.getElementById("loading").style.display = "none";
