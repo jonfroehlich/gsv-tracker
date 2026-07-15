@@ -44,18 +44,41 @@ chmod 600 .env                    # seal the keys; the parent dir is group-reada
 
 ## 2. Move the data + catalog up
 
-From the machine that currently holds `data/` (laptop), ~15 GB:
+The SQLite catalog `streetscape_tracker.db` lives **inside** `data/`, so this
+one rsync carries both the ~15 GB of snapshots *and* the catalog itself.
+Copying the live catalog is the point: it is the only place the frozen grid
+geometry, city aliases, and boundary re-registrations (issue #91) exist —
+none of that is reconstructable from the CSV/JSON files alone, and the DB is
+never in git. This is a *different* rsync from `sync_data_to_server.sh`, which
+publishes to the public docroot and deliberately **excludes** the DB.
+
+First, make sure the catalog is checkpointed and no session has it open, so
+rsync copies a consistent file rather than a stale one with pending writes in
+the `-wal` sidecar:
+
+```bash
+# (on the laptop) flush the WAL into the main .db, then confirm nothing holds it
+sqlite3 data/streetscape_tracker.db "PRAGMA wal_checkpoint(TRUNCATE);"
+```
+
+Then copy `data/` up (includes the `.db`; the `-wal`/`-shm` sidecars will be
+empty after the checkpoint):
 
 ```bash
 rsync -azh --progress data/ makelab1.cs.washington.edu:/projects/makeabilitylab/streetscape-tracker/data/
 ```
 
-Then register the existing files as baseline runs (dry-run first, review, execute):
+That's it — makelab1 now has your exact catalog. The migration script below is
+a **safety-net no-op** in this path: with the catalog already populated it just
+re-confirms every file is registered and reports zero changes. Run it only to
+verify (or if you ever seed makelab1 from data files *without* copying the DB —
+note that route loses the #91 boundary re-registrations, which live solely in
+the catalog):
 
 ```bash
 cd ~/streetscape-tracker
-.venv/bin/python scripts/migrate_to_db.py            # dry run
-.venv/bin/python scripts/migrate_to_db.py --execute
+.venv/bin/python scripts/migrate_to_db.py            # dry run — expect 0 new registrations
+.venv/bin/python scripts/migrate_to_db.py --execute  # optional; safe to skip if dry run is clean
 ```
 
 ## 3. Sanity-check the config
