@@ -17,6 +17,7 @@ from tqdm import tqdm
 
 from .config import METADATA_DTYPES
 from .download_common import (
+    AsyncRateLimiter,
     DownloadError,
     generate_grid_points,
     redact_credentials,
@@ -27,6 +28,10 @@ from .fileutils import load_city_csv_file
 logger = logging.getLogger(__name__)
 
 __all__ = ["download_gsv_metadata_async", "fetch_gsv_pano_metadata_async"]
+
+# A run whose permanently-failed points exceed this fraction of the grid is
+# aborted (checkpoint kept) instead of finalized as an immutable snapshot.
+MAX_FAILED_POINT_FRACTION = 0.01
 
 
 def create_helpful_permission_error(path: str) -> str:
@@ -55,6 +60,7 @@ async def fetch_gsv_pano_metadata_async(
     api_key: str,
     session: aiohttp.ClientSession,
     timeout: aiohttp.ClientTimeout,
+    limiter: AsyncRateLimiter | None = None,
 ) -> dict[str, Any]:
     """
     Get the closest pano data from Google Street View API using aiohttp with retry logic.
@@ -65,6 +71,8 @@ async def fetch_gsv_pano_metadata_async(
         api_key: Google Street View API key
         session: aiohttp ClientSession for making requests
         timeout: Request timeout settings
+        limiter: Optional rate limiter; acquired before every attempt
+            (including backoff retries) so retried requests are paced too
 
     Returns:
         Dict containing the API response
@@ -76,6 +84,8 @@ async def fetch_gsv_pano_metadata_async(
     # text touching this URL must be scrubbed with redact_credentials()
     # before it is logged or re-raised.
     url = f"https://maps.googleapis.com/maps/api/streetview/metadata?location={lat},{lon}&key={api_key}"
+    if limiter is not None:
+        await limiter.acquire()
     try:
         async with session.get(url, timeout=timeout) as response:
             if response.status != 200:
@@ -138,6 +148,7 @@ async def process_batch_async(
     timeout: aiohttp.ClientTimeout,
     connection_limit: int,
     failed_points_queue: asyncio.Queue,
+    limiter: AsyncRateLimiter | None = None,
 ) -> list[dict]:
     """
     Process a batch of points asynchronously and append results to the
@@ -153,7 +164,7 @@ async def process_batch_async(
         async with aiohttp.ClientSession(connector=connector) as session:
             tasks = []
             for lat, lon, _i, _j in points:
-                task = fetch_gsv_pano_metadata_async(lat, lon, api_key, session, timeout)
+                task = fetch_gsv_pano_metadata_async(lat, lon, api_key, session, timeout, limiter)
                 tasks.append(task)
 
             responses = await asyncio.gather(*tasks, return_exceptions=True)
@@ -174,6 +185,16 @@ async def process_batch_async(
                 query_timestamp = now_utc.isoformat()
 
                 status = response["status"]
+
+                # Quota throttling arrives as a normal HTTP 200 with this
+                # body status. It says nothing about the grid point itself,
+                # so treat it like a transient failure (retry queue), never
+                # a final row — a written OVER_QUERY_LIMIT row would read as
+                # "no imagery" and corrupt coverage stats and future diffs.
+                if status == "OVER_QUERY_LIMIT":
+                    await failed_points_queue.put((lat, lon, i, j))
+                    continue
+
                 result = {
                     "query_lat": lat,
                     "query_lon": lon,
@@ -256,6 +277,7 @@ async def download_gsv_metadata_async(
     connection_limit: int = 50,
     request_timeout: float = 30.0,
     max_retries: int = 3,
+    max_requests_per_minute: int = 24_000,
 ) -> dict[str, Any]:
     """
     Fetch GSV metadata for a city using async/await pattern with safe intermediate file saving.
@@ -277,6 +299,12 @@ async def download_gsv_metadata_async(
         connection_limit: Maximum number of concurrent connections to the API
         request_timeout: Timeout for each request in seconds
         max_retries: Maximum number of retry attempts for failed points
+        max_requests_per_minute: Client-side pacing cap shared by all
+            concurrent requests in this run. Default 24,000 is 80% of the
+            GSV metadata API's default 30,000/min project quota; scale it
+            with your granted quota. <= 0 disables pacing. Exceeding the
+            server-side quota is not just slower — throttled points burn
+            retries and can abort the run via the failed-point guard.
 
     Returns:
         Dict with:
@@ -297,6 +325,13 @@ async def download_gsv_metadata_async(
 
     # Set up timeout
     timeout = aiohttp.ClientTimeout(total=request_timeout)
+
+    # One limiter for the whole run: initial batches and retry passes share
+    # the same token bucket, so the aggregate request rate stays under the
+    # per-minute quota no matter how the work is scheduled.
+    limiter = AsyncRateLimiter(max_requests_per_minute)
+    if max_requests_per_minute > 0:
+        logger.info(f"Client-side rate limit: {max_requests_per_minute} requests/minute")
 
     # Derive working file paths from the requested output path
     if not output_csv_gz_path.endswith(".csv.gz"):
@@ -393,6 +428,7 @@ async def download_gsv_metadata_async(
                     timeout,
                     connection_limit,
                     failed_points_queue,
+                    limiter,
                 )
 
                 # Update progress bar
@@ -424,11 +460,14 @@ async def download_gsv_metadata_async(
                             timeout,
                             connection_limit,
                             failed_points_queue,
+                            limiter,
                         )
 
-                # Wait a bit before next retry
+                # Wait before the next retry pass: throttled points need the
+                # provider's per-minute quota window to reset, so the delay
+                # must be a meaningful fraction of a minute.
                 if retry_count < max_retries and not failed_points_queue.empty():
-                    await asyncio.sleep(5 * retry_count)  # Increasing delay between retries
+                    await asyncio.sleep(20 * retry_count)
 
             # Log any permanently failed points
             remaining_failed = []
@@ -446,6 +485,21 @@ async def download_gsv_metadata_async(
                         f.write(f"{lat},{lon},{i},{j}\n")
 
             progress_bar.close()
+
+            # Refuse to finalize a run with too many holes (cf. the history
+            # harvester's same guard). Failed points get no CSV row at all,
+            # so a heavily throttled run would otherwise register as a
+            # clean-looking snapshot that silently lost coverage — invisible
+            # to detect_systemic_failure, poison for run-to-run diffs. The
+            # .downloading checkpoint survives, so the next attempt resumes.
+            if len(remaining_failed) > MAX_FAILED_POINT_FRACTION * len(all_points):
+                raise DownloadError(
+                    f"{len(remaining_failed)} of {len(all_points)} grid points "
+                    f"({len(remaining_failed) / len(all_points):.1%}) still failed after "
+                    f"{max_retries} retries (> {MAX_FAILED_POINT_FRACTION:.0%} threshold); "
+                    f"refusing to finalize an incomplete snapshot. Partial progress is "
+                    f"checkpointed and will resume on the next run."
+                )
 
             # Rename the downloading file to final csv
             os.rename(file_name_downloading_with_path, file_name_with_path)

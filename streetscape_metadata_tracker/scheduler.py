@@ -68,6 +68,9 @@ class SchedulerConfig:
     connection_limit: int = 50
     request_timeout_s: float = 30.0
     sleep_between_cities_s: int = 60
+    # Client-side gsv pacing; 80% of the API's default 30k/min quota. Scale
+    # with the project's granted quota. 0 disables.
+    max_requests_per_minute: int = 24_000
     # [paths]
     data_dir: str = str(_PROJECT_ROOT / "data")
     db_path: str = ""
@@ -136,6 +139,7 @@ def load_scheduler_config(path: str | None = None) -> SchedulerConfig:
         connection_limit=dl.get("connection_limit", 50),
         request_timeout_s=dl.get("request_timeout_s", 30.0),
         sleep_between_cities_s=dl.get("sleep_between_cities_s", 60),
+        max_requests_per_minute=dl.get("max_requests_per_minute", 24_000),
         data_dir=paths.get("data_dir", str(_PROJECT_ROOT / "data")),
         db_path=paths.get("db_path", ""),
         log_dir=paths.get("log_dir", str(_PROJECT_ROOT / "logs")),
@@ -356,6 +360,8 @@ def _run_one_city(
         str(cfg.batch_size),
         "--connection-limit",
         str(cfg.connection_limit),
+        "--max-requests-per-minute",
+        str(cfg.max_requests_per_minute),
         "--timeout",
         str(cfg.request_timeout_s),
         # The scheduler already decided this city is due (cycle − grace),
