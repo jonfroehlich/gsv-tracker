@@ -4,10 +4,12 @@ served-from-memory pattern as the Mapillary tests. No network.
 
 Covers the 2026-07-16 incident class: Google signals per-minute quota
 exhaustion as an HTTP 200 body with status OVER_QUERY_LIMIT. Such responses
-say nothing about the grid point itself, so they must be retried and must
-never be written to the immutable snapshot as final rows; a run left with
-too many holes after retries must abort (keeping its resume checkpoint)
-rather than register a clean-looking snapshot that silently lost coverage.
+say nothing about the grid point itself, so they must be retried rather than
+written as a final row while retries remain; a run left with too many holes
+after retries must abort (keeping its resume checkpoint) rather than register
+a clean-looking snapshot that silently lost coverage. A sub-threshold residual
+is written back as a failure row (never dropped) so every grid point stays
+present and run-to-run diffs still align.
 """
 
 import asyncio
@@ -83,6 +85,7 @@ def test_over_query_limit_is_retried_and_never_written(tmp_path, monkeypatch):
             return dict(THROTTLED)
         return _ok_response(lat, lon)
 
+    _patch_instant_retry_sleep(monkeypatch)  # skip the pre-retry quota-reset wait
     # A limiter far above the request volume: verifies the wiring without
     # ever pacing (its 1-second burst capacity exceeds the whole run).
     result, out = _run_download(
@@ -124,10 +127,11 @@ def test_persistent_throttle_aborts_and_keeps_checkpoint(tmp_path, monkeypatch):
     assert (tmp_path / f"{base}.csv.downloading").exists(), "checkpoint must survive for resume"
 
 
-def test_small_residual_failure_still_finalizes(tmp_path, monkeypatch):
-    """One permanently failed point out of 121 (0.8% < the 1% threshold)
-    keeps today's behavior: finalize without that point's row and record
-    the stragglers in the failed-points sidecar."""
+def test_small_residual_throttle_finalizes_with_failure_row(tmp_path, monkeypatch):
+    """One permanently throttled point out of 121 (0.8% < the 1% threshold)
+    finalizes: the point is written back as an OVER_QUERY_LIMIT failure row
+    (never dropped) so the grid stays complete, and it is also recorded in the
+    failed-points sidecar."""
     unlucky: set = set()
 
     async def fake_fetch(lat, lon, api_key, session, timeout, limiter=None):
@@ -145,9 +149,34 @@ def test_small_residual_failure_still_finalizes(tmp_path, monkeypatch):
     )
 
     df = result["df"]
-    assert len(df) == 120
-    assert set(df["status"]) == {"OK"}
+    assert len(df) == 121  # every grid point present — no hole
+    assert set(df["status"]) == {"OK", "OVER_QUERY_LIMIT"}
+    assert (df["status"] == "OVER_QUERY_LIMIT").sum() == 1
     assert result["api_requests"] == 121 + 3 * 1
     sidecar = tmp_path / "bend_width_200_height_200_step_20_2026-07-16_failed_points.csv"
     assert sidecar.exists()
     assert len(sidecar.read_text().strip().splitlines()) == 2  # header + 1 point
+
+
+def test_residual_network_failure_written_as_request_failed(tmp_path, monkeypatch):
+    """A point whose request keeps raising (no body status) is exhausted as a
+    REQUEST_FAILED row, still keeping the grid complete for diff alignment."""
+    unlucky: set = set()
+
+    async def fake_fetch(lat, lon, api_key, session, timeout, limiter=None):
+        key = _point_key(lat, lon)
+        if not unlucky:
+            unlucky.add(key)
+        if key in unlucky:
+            raise DownloadError("connection reset")
+        return _ok_response(lat, lon)
+
+    _patch_instant_retry_sleep(monkeypatch)
+    result, out = _run_download(
+        tmp_path, monkeypatch, fake_fetch, grid_m=200, max_requests_per_minute=0
+    )
+
+    df = result["df"]
+    assert len(df) == 121
+    assert set(df["status"]) == {"OK", "REQUEST_FAILED"}
+    assert (df["status"] == "REQUEST_FAILED").sum() == 1

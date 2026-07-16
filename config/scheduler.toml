@@ -17,6 +17,10 @@ max_cities_per_day = 20
 # A (city, provider) pair is skipped after this many consecutive failures
 # until re-enabled.
 max_consecutive_failures = 5
+# Floor for the per-city subprocess timeout. For GSV the effective timeout is
+# derived from the grid's estimated request count and max_requests_per_minute
+# (with headroom), so large cities are not SIGKILLed mid-run; this floor still
+# applies to small cities and to the fast Mapillary provider.
 city_timeout_minutes = 180
 
 # Legacy fallback: when no [providers.*] sections exist below, this is the
