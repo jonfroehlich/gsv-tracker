@@ -33,6 +33,7 @@ const sharedGlobals = {
   METRICS: "readonly",
   isKnownProvider: "readonly",
   isKnownMetric: "readonly",
+  parseFilterParam: "readonly",
   getColor: "readonly",
   coverageColor: "readonly",
   escapeHtml: "readonly",

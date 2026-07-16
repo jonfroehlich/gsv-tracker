@@ -21,6 +21,7 @@ const {
   getProviderFromFilename,
   isKnownProvider,
   isKnownMetric,
+  parseFilterParam,
   isValidRunFilename,
   isGoogleCopyright,
   panoDateOrNull,
@@ -462,6 +463,37 @@ test("METRICS.coverage: valueOf, decile buckets, and labels", () => {
   assert.deepEqual(METRICS.coverage.legendBuckets([]),
     [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
   assert.equal(METRICS.coverage.formatValue(51.25), "51.3%");
+});
+
+test("METRICS rangeLabel: age singular/plural, coverage decile edges", () => {
+  // Single-bucket ranges read like the bucket rows themselves
+  assert.equal(METRICS.age.rangeLabel(1, 1), "1 year");
+  assert.equal(METRICS.age.rangeLabel(2, 2), "2 years");
+  assert.equal(METRICS.age.rangeLabel(2, 5), "2–5 years");
+  // Decile bucket b spans [10b, 10b+10) — a single decile matches its
+  // bucketLabel, and the top bucket's upper edge is 100%, never 90%
+  assert.equal(METRICS.coverage.rangeLabel(3, 3),
+    METRICS.coverage.bucketLabel(3));
+  assert.equal(METRICS.coverage.rangeLabel(2, 7), "20–80%");
+  assert.equal(METRICS.coverage.rangeLabel(0, 9), "0–100%");
+});
+
+test("parseFilterParam: valid ranges parse, hostile input is rejected", () => {
+  // URL-supplied ?filter=MIN-MAX against an age span of buckets 0..18
+  assert.deepEqual(parseFilterParam("2-5", 0, 18), { min: 2, max: 5 });
+  assert.deepEqual(parseFilterParam("0-18", 0, 18), { min: 0, max: 18 });
+  assert.deepEqual(parseFilterParam("7-7", 0, 9), { min: 7, max: 7 });
+
+  // Rejected (null), never clamped or half-applied
+  assert.equal(parseFilterParam("5-2", 0, 18), null);   // inverted
+  assert.equal(parseFilterParam("2-25", 0, 18), null);  // beyond span
+  assert.equal(parseFilterParam("-1-3", 0, 18), null);  // negative / malformed
+  assert.equal(parseFilterParam("2-", 0, 18), null);
+  assert.equal(parseFilterParam("2-5-7", 0, 18), null);
+  assert.equal(parseFilterParam("abc", 0, 18), null);
+  assert.equal(parseFilterParam("", 0, 18), null);
+  assert.equal(parseFilterParam(null, 0, 18), null);
+  assert.equal(parseFilterParam(undefined, 0, 18), null);
 });
 
 test("panoDateOrNull: date-only strings are local calendar dates (no TZ shift)", () => {

@@ -109,6 +109,129 @@ button.legend-item:focus-visible {
   flex-shrink: 0;
 }
 
+/* Rows outside the active filter range mirror the map's dimming */
+.legend-item.dimmed {
+  opacity: 0.45;
+}
+
+/* ── Legend range-filter slider ─────────────────────────────── */
+.legend-filter {
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.legend-filter-readout {
+  font-size: 0.85em;
+  margin-bottom: 2px;
+}
+
+.legend-hint {
+  font-size: 0.75em;
+  color: #444;
+  margin-top: 2px;
+}
+
+/* Dual-thumb slider: two native range inputs stacked on one custom track.
+   The inputs themselves ignore pointer events; only their thumbs are
+   grabbable, so both handles work with mouse, touch, and keyboard. The
+   band between the thumbs is also draggable (slides the whole window). */
+.legend-slider {
+  position: relative;
+  height: 24px;
+  touch-action: none; /* window drags shouldn't scroll the legend on touch */
+}
+
+.legend-slider.dragging,
+.legend-slider.dragging .legend-slider-fill.draggable {
+  cursor: grabbing;
+}
+
+.legend-slider-track {
+  position: absolute;
+  top: 10px;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.legend-slider-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: #1a73e8;
+}
+
+.legend-slider-fill.draggable {
+  cursor: grab;
+}
+
+.legend-slider input[type="range"] {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 24px;
+  margin: 0;
+  background: none;
+  pointer-events: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.legend-slider input[type="range"]::-webkit-slider-runnable-track {
+  -webkit-appearance: none;
+  height: 24px;
+  background: transparent;
+  border: none;
+}
+
+.legend-slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  pointer-events: auto;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  margin-top: 5px; /* (24px input − 14px thumb) / 2, centers on the track */
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #1a73e8;
+  cursor: grab;
+}
+
+.legend-slider input[type="range"]::-moz-range-track {
+  background: transparent;
+  border: none;
+}
+
+.legend-slider input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #1a73e8;
+  cursor: grab;
+}
+
+/* Focus ring on the thumb itself (outline on the input would draw a
+   full-width box since the input is transparent) */
+.legend-slider input[type="range"]:focus-visible {
+  outline: none;
+}
+
+.legend-slider input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.4);
+}
+
+.legend-slider input[type="range"]:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.4);
+}
+
 /* ── Leaflet popup overrides ────────────────────────────────── */
 .leaflet-popup-content {
   width: 400px !important;

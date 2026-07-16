@@ -143,6 +143,10 @@ function coverageColor(pct) {
  *   bucketLabel/bucketColor(bucket[, provider]) → legend row text/swatch
  *   legendBuckets(values) → bucket ids in display order (given the
  *                    non-null values present, for data-driven ranges)
+ *   rangeLabel(minBucket, maxBucket) → filter-readout text for an inclusive
+ *                    bucket range, e.g. "2–5 years" / "30–80%"
+ *   sliderLabel    → metric noun for the range-slider thumbs' aria-labels,
+ *                    e.g. "Minimum median age (years)"
  *   formatValue(value) → tooltip text, e.g. "4.2 years" / "51.2%"
  *   yMax           → scatter y-axis cap (null = auto)
  */
@@ -163,6 +167,10 @@ const METRICS = {
       const maxYears = Math.ceil(Math.max(0, ...values));
       return Array.from({ length: maxYears + 1 }, (_, i) => i);
     },
+    rangeLabel: (min, max) => min === max
+      ? `${min} year${min !== 1 ? "s" : ""}`
+      : `${min}–${max} years`,
+    sliderLabel: "median age (years)",
     formatValue: (v) => `${v.toFixed(1)} years`,
   },
   coverage: {
@@ -182,6 +190,9 @@ const METRICS = {
     bucketColor: (bucket) => coverageColor(bucket * 10 + 5),
     // 90–100% first — best-coverage top, mirroring newest-first for age
     legendBuckets: () => Array.from({ length: 10 }, (_, i) => 9 - i),
+    // Decile bucket b spans [10b, 10b+10), so the upper edge is (max+1)*10
+    rangeLabel: (min, max) => `${min * 10}–${(max + 1) * 10}%`,
+    sliderLabel: "grid coverage (%)",
     formatValue: (v) => `${v.toFixed(1)}%`,
   },
 };
@@ -196,6 +207,28 @@ const METRICS = {
  */
 function isKnownMetric(key) {
   return typeof key === "string" && Object.hasOwn(METRICS, key);
+}
+
+/**
+ * Parse a URL-supplied `?filter=MIN-MAX` value (inclusive bucket ids for
+ * the active metric) into a validated range. Like isKnownMetric, this
+ * treats the input as hostile: anything malformed, inverted, or outside
+ * [minBucket, maxBucket] is rejected rather than clamped, so a stale or
+ * hand-edited URL can't produce a half-applied filter.
+ *
+ * @param {*} str - Raw parameter value, e.g. "2-5".
+ * @param {number} minBucket - Lowest valid bucket id for the metric.
+ * @param {number} maxBucket - Highest valid bucket id for the metric.
+ * @returns {?{min: number, max: number}} The range, or null if invalid.
+ */
+function parseFilterParam(str, minBucket, maxBucket) {
+  if (typeof str !== "string") return null;
+  const match = /^(\d+)-(\d+)$/.exec(str);
+  if (!match) return null;
+  const min = parseInt(match[1], 10);
+  const max = parseInt(match[2], 10);
+  if (min > max || min < minBucket || max > maxBucket) return null;
+  return { min, max };
 }
 
 /**
@@ -548,6 +581,7 @@ if (typeof module !== "undefined" && module.exports) {
     METRICS,
     isKnownProvider,
     isKnownMetric,
+    parseFilterParam,
     getColor,
     coverageColor,
     escapeHtml,
