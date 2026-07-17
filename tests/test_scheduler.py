@@ -5,10 +5,13 @@ from datetime import date
 
 from streetscape_metadata_tracker import db
 from streetscape_metadata_tracker.scheduler import (
+    ResourceGuardConfig,
     SchedulerConfig,
+    SystemPressure,
     build_parser,
     estimate_requests,
     load_scheduler_config,
+    plan_connection_limit,
 )
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -248,6 +251,106 @@ def test_makelab1_production_config_is_wired():
     # Data/DB live on lab storage (makelab2), not in the web docroot.
     assert "/projects/makeabilitylab/streetscape-tracker" in cfg.db_path
     assert "/cse/web/" not in cfg.db_path and "/cse/web/" not in cfg.data_dir
+    # Shared-host resource guard is active in production.
+    assert cfg.resource_guard.enabled
+
+
+def test_run_one_city_honors_connection_limit_override(conn, monkeypatch):
+    """The resource guard lowers concurrency by passing a connection_limit
+    override, which must reach the subprocess as --connection-limit."""
+    from streetscape_metadata_tracker import scheduler as sched
+
+    cid = _register(conn, "Bend")
+    city = db.resolve_city(conn, cid)
+    captured = {}
+
+    def fake_run(cmd, timeout=None, cwd=None):
+        captured["cmd"] = cmd
+
+        class R:
+            returncode = 0
+
+        return R()
+
+    monkeypatch.setattr(sched.subprocess, "run", fake_run)
+    assert sched._run_one_city(SchedulerConfig(), city, date(2026, 7, 1), "gsv", connection_limit=7)
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--connection-limit") + 1] == "7"
+
+
+def test_plan_connection_limit_no_pressure_keeps_base():
+    # No /proc data (non-Linux, read failure) → never throttle.
+    assert plan_connection_limit(50, None, ResourceGuardConfig()) == (50, None)
+
+
+def test_plan_connection_limit_disabled_is_noop():
+    cfg = ResourceGuardConfig(enabled=False)
+    starved = SystemPressure(load5=999.0, ncpu=8, mem_available_gb=0.1)
+    assert plan_connection_limit(50, starved, cfg) == (50, None)
+
+
+def test_plan_connection_limit_healthy_box_keeps_base():
+    cfg = ResourceGuardConfig()
+    healthy = SystemPressure(load5=1.0, ncpu=48, mem_available_gb=100.0)
+    assert plan_connection_limit(50, healthy, cfg) == (50, None)
+
+
+def test_plan_connection_limit_low_memory_drops_to_floor():
+    cfg = ResourceGuardConfig(min_available_memory_gb=8.0, min_connection_limit=5)
+    tight = SystemPressure(load5=0.0, ncpu=48, mem_available_gb=2.0)
+    limit, reason = plan_connection_limit(50, tight, cfg)
+    assert limit == 5
+    assert "low memory" in reason
+
+
+def test_plan_connection_limit_high_load_scales_proportionally():
+    # ceiling = 0.9 * 10 = 9; load 18 is 2× over → half the base.
+    cfg = ResourceGuardConfig(max_load_per_core=0.9, min_connection_limit=5)
+    busy = SystemPressure(load5=18.0, ncpu=10, mem_available_gb=64.0)
+    limit, reason = plan_connection_limit(50, busy, cfg)
+    assert limit == 25  # int(50 * 9 / 18)
+    assert "high load" in reason
+
+
+def test_plan_connection_limit_never_below_floor():
+    cfg = ResourceGuardConfig(min_connection_limit=5)
+    extreme = SystemPressure(load5=10_000.0, ncpu=8, mem_available_gb=100.0)
+    limit, _ = plan_connection_limit(50, extreme, cfg)
+    assert limit == 5
+
+
+def test_read_system_pressure_returns_none_when_proc_unavailable(monkeypatch):
+    import builtins
+
+    from streetscape_metadata_tracker import scheduler as sched
+
+    def boom(*a, **k):
+        raise OSError("no /proc here")
+
+    monkeypatch.setattr(builtins, "open", boom)
+    assert sched.read_system_pressure() is None
+
+
+def test_config_parses_resource_guard(tmp_path):
+    p = tmp_path / "s.toml"
+    p.write_text(
+        "[resource_guard]\n"
+        "enabled = true\n"
+        "min_available_memory_gb = 12.0\n"
+        "max_load_per_core = 0.5\n"
+        "min_connection_limit = 3\n"
+    )
+    cfg = load_scheduler_config(str(p))
+    assert cfg.resource_guard.enabled
+    assert cfg.resource_guard.min_available_memory_gb == 12.0
+    assert cfg.resource_guard.max_load_per_core == 0.5
+    assert cfg.resource_guard.min_connection_limit == 3
+
+
+def test_config_resource_guard_defaults_on(tmp_path):
+    cfg = load_scheduler_config(str(tmp_path / "nope.toml"))
+    assert cfg.resource_guard.enabled is True
+    assert cfg.resource_guard.min_connection_limit == 5
 
 
 def test_due_cities_stalest_first(conn):
@@ -315,7 +418,7 @@ def test_budget_ledger_defers_second_city_when_first_consumes_budget(conn, monke
 
     ran = []
 
-    def fake_run(cfg, city, run_today, provider="gsv"):
+    def fake_run(cfg, city, run_today, provider="gsv", connection_limit=None):
         # Simulate the real pipeline's ledger write for the requests spent
         db.add_api_usage(conn, run_today, sched.estimate_requests(city, provider), provider)
         ran.append(city.city_id)
@@ -361,7 +464,7 @@ def test_oversized_city_does_not_starve_queue(conn, monkeypatch):
     monkeypatch.setattr(
         sched,
         "_run_one_city",
-        lambda cfg, city, today, provider="gsv": ran.append(city.city_id) or True,
+        lambda cfg, city, today, provider="gsv", connection_limit=None: ran.append(city.city_id) or True,
     )
     monkeypatch.setattr(sched.db, "connect", lambda path: conn)
     monkeypatch.setattr(sched.time, "sleep", lambda s: None)
@@ -387,7 +490,7 @@ def test_run_due_pairs_providers_per_city(conn, monkeypatch):
     monkeypatch.setattr(
         sched,
         "_run_one_city",
-        lambda cfg, city, today, provider="gsv": (
+        lambda cfg, city, today, provider="gsv", connection_limit=None: (
             ran.append((city.city_id, provider)) or (provider == "gsv")
         ),
     )
@@ -436,7 +539,7 @@ def test_run_due_provider_budgets_are_independent(conn, monkeypatch):
     monkeypatch.setattr(
         sched,
         "_run_one_city",
-        lambda cfg, city, today, provider="gsv": ran.append((city.city_id, provider)) or True,
+        lambda cfg, city, today, provider="gsv", connection_limit=None: ran.append((city.city_id, provider)) or True,
     )
     monkeypatch.setattr(sched.db, "connect", lambda path: conn)
     monkeypatch.setattr(sched.time, "sleep", lambda s: None)
