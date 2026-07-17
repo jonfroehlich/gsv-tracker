@@ -242,7 +242,9 @@ def plan_connection_limit(
     limit = base_limit
     reasons = []
 
-    if pressure.mem_available_gb < cfg.min_available_memory_gb:
+    # Each condition contributes a reason only if it actually LOWERS the limit,
+    # so the caller never logs a no-op throttle (e.g. base already at the floor).
+    if pressure.mem_available_gb < cfg.min_available_memory_gb and floor < limit:
         limit = floor
         reasons.append(
             f"low memory ({pressure.mem_available_gb:.1f}G available "
@@ -253,8 +255,9 @@ def plan_connection_limit(
     if load_ceiling > 0 and pressure.load5 > load_ceiling:
         # Scale down in proportion to how far load exceeds the ceiling.
         scaled = max(floor, int(base_limit * load_ceiling / pressure.load5))
-        limit = min(limit, scaled)
-        reasons.append(f"high load ({pressure.load5:.1f} > {load_ceiling:.0f})")
+        if scaled < limit:
+            limit = scaled
+            reasons.append(f"high load ({pressure.load5:.1f} > {load_ceiling:.0f})")
 
     return limit, ("; ".join(reasons) if reasons else None)
 

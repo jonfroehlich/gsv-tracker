@@ -319,6 +319,13 @@ def test_plan_connection_limit_never_below_floor():
     assert limit == 5
 
 
+def test_plan_connection_limit_no_reason_when_limit_unchanged():
+    # base already <= floor: "throttling" can't lower it, so no reason/no-op log.
+    cfg = ResourceGuardConfig(min_connection_limit=5)
+    starved = SystemPressure(load5=9999.0, ncpu=8, mem_available_gb=0.1)
+    assert plan_connection_limit(3, starved, cfg) == (3, None)
+
+
 def test_read_system_pressure_returns_none_when_proc_unavailable(monkeypatch):
     import builtins
 
@@ -464,7 +471,9 @@ def test_oversized_city_does_not_starve_queue(conn, monkeypatch):
     monkeypatch.setattr(
         sched,
         "_run_one_city",
-        lambda cfg, city, today, provider="gsv", connection_limit=None: ran.append(city.city_id) or True,
+        lambda cfg, city, today, provider="gsv", connection_limit=None: (
+            ran.append(city.city_id) or True
+        ),
     )
     monkeypatch.setattr(sched.db, "connect", lambda path: conn)
     monkeypatch.setattr(sched.time, "sleep", lambda s: None)
@@ -539,7 +548,9 @@ def test_run_due_provider_budgets_are_independent(conn, monkeypatch):
     monkeypatch.setattr(
         sched,
         "_run_one_city",
-        lambda cfg, city, today, provider="gsv", connection_limit=None: ran.append((city.city_id, provider)) or True,
+        lambda cfg, city, today, provider="gsv", connection_limit=None: (
+            ran.append((city.city_id, provider)) or True
+        ),
     )
     monkeypatch.setattr(sched.db, "connect", lambda path: conn)
     monkeypatch.setattr(sched.time, "sleep", lambda s: None)
