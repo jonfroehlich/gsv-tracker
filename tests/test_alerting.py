@@ -208,6 +208,13 @@ class TestSendAlertSmtp:
         assert send_alert(self._cfg(recipient=""), "s", "b") is False
         assert captured == []
 
+    def test_bad_header_is_swallowed(self, monkeypatch):
+        # A newline in the subject makes EmailMessage header assignment raise
+        # ValueError; alerting must catch it, not crash the run.
+        captured = _patch_smtp(monkeypatch)
+        assert send_alert(self._cfg(), "line one\nInjected: header", "b") is False
+        assert captured == []
+
 
 def test_config_loader_reads_alerts_section(tmp_path):
     from streetscape_metadata_tracker.scheduler import load_scheduler_config

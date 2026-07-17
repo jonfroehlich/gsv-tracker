@@ -126,15 +126,18 @@ def _send_smtp(cfg: AlertConfig, subject: str, full_subject: str, body: str) -> 
         logger.error('Alert not sent — transport "smtp" requires [alerts] smtp_host')
         return False
     password = os.environ.get(SMTP_PASSWORD_ENV) or cfg.smtp_password
-    msg = build_smtp_message(cfg.smtp_from, cfg.recipient, full_subject, body)
     try:
+        # build_smtp_message is inside the try: EmailMessage header assignment
+        # raises ValueError on e.g. a newline in the subject, and alerting must
+        # never take down a collection run.
+        msg = build_smtp_message(cfg.smtp_from, cfg.recipient, full_subject, body)
         with smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=30) as smtp:
             if cfg.smtp_starttls:
                 smtp.starttls()
             if cfg.smtp_user:
                 smtp.login(cfg.smtp_user, password)
             smtp.send_message(msg)
-    except (OSError, smtplib.SMTPException) as e:
+    except (OSError, smtplib.SMTPException, ValueError) as e:
         logger.error(f"Alert send failed (smtp {cfg.smtp_host}:{cfg.smtp_port}): {e}")
         return False
     logger.info(f"Alert emailed to {cfg.recipient} via smtp {cfg.smtp_host}: {subject}")
