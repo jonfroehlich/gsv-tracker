@@ -1,6 +1,7 @@
-/* exported switchRun, toggleYear */
-// (switchRun/toggleYear are invoked from onchange/onclick attributes in the
-// HTML this file generates, so ESLint can't see those string references.)
+/* exported switchRun, toggleYear, setGsvMode */
+// (switchRun/toggleYear/setGsvMode are invoked from onchange/onclick
+// attributes in the HTML this file generates, so ESLint can't see those
+// string references.)
 /**
  * city.js
  * Per-city detail-view logic for Streetscape City Explorer.
@@ -50,6 +51,20 @@ let providerGlobal = "gsv"; // derived from the data filename
 let oldestDateGlobal = null;
 let newestDateGlobal = null;
 
+// GSV imagery display mode. Every run streams BOTH official-Google and
+// contributor (UGC) panos into markers; `showAllGsv` is a pure display
+// switch: false (default) hides the contributor markers, true reveals them.
+// Never set for non-GSV providers (their rows are all provider imagery) or
+// archival GSV runs that recorded no copyright (Google vs UGC unknown).
+let showAllGsv = false;
+
+// Temporal-plot handles, kept at module scope so setGsvMode() can rebuild the
+// plot in place (updating the existing chart/handlers rather than re-creating
+// them and duplicating the keyboard listeners / live region).
+let temporalChartGlobal = null;
+let temporalDataGlobal = [];
+let temporalKeyboardIdx = -1;
+
 // panoDateOrNull() and isGoogleCopyright() are shared helpers from streetscape-utils.js
 // (loaded first), reused here for the info-panel dates and the © Google filter.
 let runsGlobal = [];        // this city's run history from the aggregate
@@ -67,9 +82,36 @@ map.on("click", (e) => {
     m.setRadius(3);
   });
   activeYears.clear();
-  Object.values(markersByYear).flat().forEach((m) => m.addTo(map));
+  showInModeMarkers();
   updateLegend(Object.keys(markersByYear).map(Number));
 });
+
+/**
+ * Whether a marker belongs in the current GSV display mode. Contributor
+ * (non-official-Google) GSV markers are shown only in "All GSV" mode; every
+ * Google marker — and every non-GSV/archival marker, which is tagged
+ * isGoogle:true since the distinction doesn't apply — is always eligible.
+ * Year- and date-filters compose on top of this base visibility.
+ *
+ * @param {L.CircleMarker} m
+ * @returns {boolean}
+ */
+function markerInMode(m) {
+  return m.options.isGoogle || showAllGsv;
+}
+
+/**
+ * Add every in-mode marker to the map and remove every out-of-mode one.
+ * The single place that reconciles the drawn marker set with `showAllGsv`;
+ * callers that clear a year/date filter delegate the "show everything again"
+ * step here so contributor markers stay hidden in Google-only mode.
+ */
+function showInModeMarkers() {
+  Object.values(markersByYear).flat().forEach((m) => {
+    if (markerInMode(m)) m.addTo(map);
+    else m.remove();
+  });
+}
 
 // ── Legend (Leaflet control) ───────────────────────────────────
 const legendControl = L.control({ position: "topright" });
@@ -187,7 +229,33 @@ function updateLegend(years) {
       </p>`;
   }
 
-  // ── Section 3: Interactive year filter ────────────────────
+  // ── Section 3: GSV imagery mode toggle ────────────────────
+  // Only for GSV runs that recorded copyright (so Google vs contributor is
+  // known). Both marker sets are already in memory — this flips which are
+  // drawn without any refetch. Other providers' rows are all provider
+  // imagery, so there is nothing to toggle.
+  if (providerGlobal === "gsv" && copyrightAvailableGlobal) {
+    const allMarkers = Object.values(markersByYear).flat();
+    const allCount = allMarkers.length;
+    const googleCount = allMarkers.filter((m) => m.options.isGoogle).length;
+    html += `
+      <div class="legend-divider"></div>
+      <div class="legend-year-header">Imagery</div>
+      <div class="gsv-mode-toggle" role="radiogroup" aria-label="Google Street View imagery filter">
+        <button type="button" class="gsv-mode-btn ${!showAllGsv ? "active" : ""}"
+                role="radio" aria-checked="${!showAllGsv}"
+                onclick="setGsvMode(false)">
+          Google only <span class="year-count">(${googleCount.toLocaleString()})</span>
+        </button>
+        <button type="button" class="gsv-mode-btn ${showAllGsv ? "active" : ""}"
+                role="radio" aria-checked="${showAllGsv}"
+                onclick="setGsvMode(true)">
+          All GSV <span class="year-count">(${allCount.toLocaleString()})</span>
+        </button>
+      </div>`;
+  }
+
+  // ── Section 4: Interactive year filter ────────────────────
   if (sortedYears.length > 0) {
     html += `
       <div class="legend-divider"></div>
@@ -197,7 +265,10 @@ function updateLegend(years) {
       const age = currentYear - year;
       const color = getColor(age, providerGlobal);
       const isActive = activeYears.has(year);
-      const count = markersByYear[year]?.length || 0;
+      // Count only markers visible in the current mode, so the year rows
+      // never advertise contributor panos that are hidden in Google-only.
+      const count = (markersByYear[year] || []).filter(markerInMode).length;
+      if (count === 0) return; // a year that is all-contributor drops out in Google-only mode
 
       // Real <button>s (native Enter/Space + focus) with aria-pressed
       // toggle state; the color swatch is decorative.
@@ -246,7 +317,7 @@ function switchRun(dataFile) {
 function toggleYear(year) {
   const wasActive = activeYears.has(year);
   activeYears.clear();
-  Object.values(markersByYear).flat().forEach((m) => m.addTo(map));
+  showInModeMarkers();
 
   if (!wasActive) {
     activeYears.add(year);
@@ -255,6 +326,46 @@ function toggleYear(year) {
     });
   }
 
+  updateLegend(Object.keys(markersByYear).map(Number));
+}
+
+/**
+ * Switch the GSV imagery display mode between official-Google-only (default)
+ * and all GSV (Google + contributor/UGC panos).
+ *
+ * A pure display switch: every contributor marker is already streamed into
+ * memory, so this only shows/hides them and recomputes the derived views
+ * (overview stats, dated-pano count, year filter, temporal plot) from the
+ * matching JSON block and the in-memory markers — no network request. Any
+ * active year/date filter is cleared, since its marker set is mode-specific.
+ * No-op for non-GSV providers and archival GSV runs (no toggle is shown).
+ *
+ * @param {boolean} showAll - true = All GSV, false = Google only.
+ */
+function setGsvMode(showAll) {
+  if (providerGlobal !== "gsv" || !copyrightAvailableGlobal) return;
+  if (showAll === showAllGsv) return;
+  showAllGsv = showAll;
+
+  // Swap the stats block that drives the legend overview (age stats,
+  // oldest/newest). Both blocks are present in the run JSON for GSV.
+  panoStatsGlobal = showAllGsv
+    ? statsGlobal.all_panos
+    : (statsGlobal.google_panos ?? statsGlobal.all_panos);
+  oldestDateGlobal = panoDateOrNull(panoStatsGlobal.age_stats.oldest_pano_date);
+  newestDateGlobal = panoDateOrNull(panoStatsGlobal.age_stats.newest_pano_date);
+
+  // Clear the year/date filters and reconcile the drawn marker set with the
+  // new mode. resetMarkerStyles undoes any dimming left by an active date
+  // filter; refreshTemporalPlot rebuilds the plot with fresh (un-dimmed)
+  // colors, so the chart needs no separate reset.
+  activeYears.clear();
+  selectedDate = null;
+  resetMarkerStyles();
+  showInModeMarkers();
+
+  totalPanosGlobal = Object.values(markersByYear).flat().filter(markerInMode).length;
+  refreshTemporalPlot();
   updateLegend(Object.keys(markersByYear).map(Number));
 }
 
@@ -414,13 +525,72 @@ function findBestMatchingCity(parsedQuery, citiesData, maxDistance = 3) {
 // ── Temporal plot ──────────────────────────────────────────────
 
 /**
- * Render a temporal scatter plot with vertical-line stems and
- * click-to-select date filtering.
+ * Aggregate the in-mode markers into per-capture-date counts for the
+ * temporal scatter plot. Reads the markers already on the map (respecting the
+ * GSV Google-only/all mode) rather than a separate pass, so the plot and the
+ * map always describe the same pano set. Keyed by each marker's original
+ * YYYY-MM-DD capture-date string to avoid the UTC/local shift that would move
+ * January/year-precision dates into the previous year.
+ *
+ * @returns {Array<{date: Date, count: number}>} Sorted oldest-first.
+ */
+function buildTemporalData() {
+  const counts = new Map();
+  Object.values(markersByYear).flat().forEach((m) => {
+    if (!markerInMode(m)) return;
+    const key = m.options.captureDateStr;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  return Array.from(counts.entries())
+    .map(([d, c]) => ({ date: panoDateOrNull(d), count: c }))
+    .sort((a, b) => a.date - b.date);
+}
+
+/**
+ * Build the Chart.js dataset for a temporalData array (points colored by
+ * capture-year age on the active provider's scale).
  *
  * @param {Array<{date: Date, count: number}>} temporalData
+ * @returns {Object} A Chart.js scatter dataset.
+ */
+function buildTemporalDataset(temporalData) {
+  const currentYear = new Date().getFullYear();
+  return {
+    label: "Panoramas",
+    data: temporalData.map((d) => ({ x: d.date, y: d.count, opacity: 1 })),
+    backgroundColor: temporalData.map((d) => getColor(currentYear - d.date.getFullYear(), providerGlobal)),
+    pointBackgroundColor: temporalData.map((d) => getColor(currentYear - d.date.getFullYear(), providerGlobal)),
+    pointRadius: 4,
+    pointHoverRadius: 6,
+    pointBorderWidth: 0,
+    pointStyle: "circle",
+  };
+}
+
+/**
+ * Rebuild the temporal plot from the current in-mode markers, updating the
+ * existing chart in place. Used after a GSV mode switch — recreating the
+ * chart would duplicate the canvas click/keyboard listeners and the live
+ * region, so we only swap the dataset and reset the keyboard cursor.
+ */
+function refreshTemporalPlot() {
+  if (!temporalChartGlobal) return;
+  temporalDataGlobal = buildTemporalData();
+  temporalChartGlobal.data.datasets[0] = buildTemporalDataset(temporalDataGlobal);
+  temporalKeyboardIdx = -1;
+  temporalChartGlobal.update();
+}
+
+/**
+ * Render a temporal scatter plot with vertical-line stems and
+ * click-to-select date filtering. Called once per page load; later mode
+ * switches go through refreshTemporalPlot(). The chart handle and its plotted
+ * data live at module scope (temporalChartGlobal/temporalDataGlobal) so the
+ * interaction handlers and refreshTemporalPlot() share them.
+ *
  * @param {HTMLCanvasElement} canvas
  */
-function createTemporalPlot(temporalData, canvas) {
+function createTemporalPlot(canvas) {
   const verticalLinePlugin = {
     id: "verticalLines",
     beforeDraw: (chart) => {
@@ -443,23 +613,11 @@ function createTemporalPlot(temporalData, canvas) {
     },
   };
 
-  const currentYear = new Date().getFullYear();
-  const chartData = {
-    datasets: [{
-      label: "Panoramas",
-      data: temporalData.map((d) => ({ x: d.date, y: d.count, opacity: 1 })),
-      backgroundColor: temporalData.map((d) => getColor(currentYear - d.date.getFullYear(), providerGlobal)),
-      pointBackgroundColor: temporalData.map((d) => getColor(currentYear - d.date.getFullYear(), providerGlobal)),
-      pointRadius: 4,
-      pointHoverRadius: 6,
-      pointBorderWidth: 0,
-      pointStyle: "circle",
-    }],
-  };
+  temporalDataGlobal = buildTemporalData();
 
   const chart = new Chart(canvas, {
     type: "scatter",
-    data: chartData,
+    data: { datasets: [buildTemporalDataset(temporalDataGlobal)] },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -497,6 +655,7 @@ function createTemporalPlot(temporalData, canvas) {
     },
     plugins: [verticalLinePlugin],
   });
+  temporalChartGlobal = chart;
 
   /** Apply (or toggle off) the date filter for one capture date. */
   function selectFilterDate(date) {
@@ -537,26 +696,27 @@ function createTemporalPlot(temporalData, canvas) {
   liveRegion.setAttribute("aria-live", "polite");
   canvas.parentElement.appendChild(liveRegion);
 
-  let keyboardIdx = -1;
-
+  // temporalKeyboardIdx / temporalDataGlobal are module-level so a GSV mode
+  // switch (which reassigns them via refreshTemporalPlot) is reflected here
+  // without re-registering this listener.
   canvas.addEventListener("keydown", (e) => {
-    if (temporalData.length === 0) return;
+    if (temporalDataGlobal.length === 0) return;
 
     if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
       e.preventDefault();
       const delta = e.key === "ArrowRight" ? 1 : -1;
-      keyboardIdx = keyboardIdx === -1
-        ? (delta === 1 ? 0 : temporalData.length - 1)
-        : Math.min(Math.max(keyboardIdx + delta, 0), temporalData.length - 1);
+      temporalKeyboardIdx = temporalKeyboardIdx === -1
+        ? (delta === 1 ? 0 : temporalDataGlobal.length - 1)
+        : Math.min(Math.max(temporalKeyboardIdx + delta, 0), temporalDataGlobal.length - 1);
     } else if (e.key === "Home") {
       e.preventDefault();
-      keyboardIdx = 0;
+      temporalKeyboardIdx = 0;
     } else if (e.key === "End") {
       e.preventDefault();
-      keyboardIdx = temporalData.length - 1;
+      temporalKeyboardIdx = temporalDataGlobal.length - 1;
     } else if (e.key === "Escape") {
       e.preventDefault();
-      keyboardIdx = -1;
+      temporalKeyboardIdx = -1;
       selectFilterDate(null);
       liveRegion.textContent = "Date filter cleared";
       return;
@@ -564,7 +724,7 @@ function createTemporalPlot(temporalData, canvas) {
       return;
     }
 
-    const d = temporalData[keyboardIdx];
+    const d = temporalDataGlobal[temporalKeyboardIdx];
     selectedDate = null; // force re-apply even if the same date is revisited
     selectFilterDate(d.date);
     liveRegion.textContent =
@@ -885,11 +1045,18 @@ async function loadData() {
     const currentYear = new Date().getFullYear();
     const processedPanos = new Set();
     const validPoints = [];
-    const temporalMap = new Map(); // date string → count (replaces processTemporalData pass)
 
     /**
-     * Process a batch of parsed CSV rows, creating map markers and
-     * updating the temporal aggregation map.
+     * Process a batch of parsed CSV rows, creating a map marker per pano.
+     *
+     * GSV runs mix official-Google and contributor (UGC) imagery. Both are
+     * kept and tagged with `isGoogle` so the "GSV imagery" toggle can reveal
+     * or hide the contributor markers with no refetch; only Google markers
+     * are drawn initially (Google-only is the default mode). Other providers'
+     * rows are all provider imagery, and archival runs recorded no copyright,
+     * so those are tagged isGoogle:true (always in-mode). The temporal plot is
+     * built later from the in-mode markers (buildTemporalData), so there is no
+     * incremental temporal pass here.
      *
      * @param {Object[]} rows - PapaParse output rows.
      */
@@ -897,11 +1064,6 @@ async function loadData() {
       for (const row of rows) {
         if (
           row.status !== "OK" ||
-          // GSV runs mix official and third-party imagery; show only
-          // official Google. Other providers' rows are all provider panos.
-          // Archival runs never recorded copyright, so all rows are kept.
-          (providerGlobal === "gsv" && copyrightAvailableGlobal &&
-            !isGoogleCopyright(row.copyright_info)) ||
           !row.capture_date ||
           !row.pano_id ||
           // == null, not falsy: 0.0 is a valid coordinate (equator/meridian)
@@ -926,13 +1088,14 @@ async function loadData() {
           ? `${Math.round(ageInYears * 12)} months`
           : `${ageInYears.toFixed(1)} years`;
 
-        // Incremental temporal aggregation, keyed by the CSV's own
-        // YYYY-MM-DD string (toISOString would shift local dates back to
-        // the previous day east of UTC)
-        const dateStr = String(row.capture_date);
-        temporalMap.set(dateStr, (temporalMap.get(dateStr) || 0) + 1);
+        // Official-Google iff the copyright matches exactly (see
+        // isGoogleCopyright). Non-GSV/archival rows have no such distinction
+        // and are treated as always-visible.
+        const isGoogle = providerGlobal !== "gsv" || !copyrightAvailableGlobal
+          || isGoogleCopyright(row.copyright_info);
 
-        // Map marker
+        // Map marker. captureDateStr keeps the CSV's own YYYY-MM-DD string so
+        // buildTemporalData can re-bucket by local date without a UTC shift.
         const marker = L.circleMarker([row.pano_lat, row.pano_lon], {
           radius: 3,
           fillColor: getColor(age, providerGlobal),
@@ -941,17 +1104,22 @@ async function loadData() {
           opacity: 1,
           fillOpacity: 0.8,
           captureDate,
-        }).addTo(map);
+          captureDateStr: String(row.capture_date),
+          isGoogle,
+        });
+        if (markerInMode(marker)) marker.addTo(map);
 
-        const photographer = providerGlobal === "gsv"
-          ? (copyrightAvailableGlobal ? "Google" : (row.copyright_info || "Unknown"))
-          : (row.copyright_info || PROVIDERS[providerGlobal].label);
+        const photographer = providerGlobal !== "gsv"
+          ? (row.copyright_info || PROVIDERS[providerGlobal].label)
+          : !copyrightAvailableGlobal
+            ? (row.copyright_info || "Unknown")
+            : isGoogle ? "Google" : (row.copyright_info || "Contributor");
         marker.bindPopup(buildPopupHtml(captureDate, ageFormatted, row.pano_id,
                                         photographer));
 
         if (!markersByYear[year]) markersByYear[year] = [];
         markersByYear[year].push(marker);
-        validPoints.push([row.pano_lat, row.pano_lon]);
+        if (markerInMode(marker)) validPoints.push([row.pano_lat, row.pano_lon]);
       }
     }
 
@@ -1032,14 +1200,13 @@ async function loadData() {
     progressFill.setAttribute("aria-valuenow", 100);
     progressContainer.style.display = "none";
 
-    totalPanosGlobal = processedPanos.size;
+    // Dated-pano count reflects the current mode (Google-only by default);
+    // it and the plot are recomputed from the in-mode markers, matching what
+    // is drawn on the map.
+    totalPanosGlobal = Object.values(markersByYear).flat().filter(markerInMode).length;
     updateLegend(Object.keys(markersByYear).map(Number));
 
-    const temporalData = Array.from(temporalMap.entries())
-      .map(([d, c]) => ({ date: panoDateOrNull(d), count: c }))
-      .sort((a, b) => a.date - b.date);
-
-    createTemporalPlot(temporalData, document.getElementById("temporal-plot"));
+    createTemporalPlot(document.getElementById("temporal-plot"));
 
     if (validPoints.length > 0) {
       map.fitBounds(L.latLngBounds(validPoints));
