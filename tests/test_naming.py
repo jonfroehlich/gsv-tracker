@@ -10,6 +10,7 @@ from streetscape_metadata_tracker.naming import (
     parse_filename,
     same_grid_geometry,
     sanitize_city_query_str,
+    streets_filename_for_run,
 )
 
 
@@ -172,3 +173,38 @@ def test_sanitize_city_query_str():
         sanitize_city_query_str("Ann\xa0Arbor Charter Township, Michigan")
         == "ann-arbor-charter-township--michigan"
     )
+
+
+# ── Street-coverage artifacts (issues #24/#103) ─────────────────────────────
+
+
+def test_streets_filename_for_run():
+    assert (
+        streets_filename_for_run("bend--or_width_5000_height_5000_step_20_2026-07-08.csv.gz")
+        == "bend--or_width_5000_height_5000_step_20_2026-07-08_streets.json.gz"
+    )
+    # Provider-tagged run names keep their token in the derived artifact.
+    assert (
+        streets_filename_for_run(
+            "bend--or_width_5000_height_5000_step_20_mapillary_2026-07-08.csv.gz"
+        )
+        == "bend--or_width_5000_height_5000_step_20_mapillary_2026-07-08_streets.json.gz"
+    )
+
+
+def test_streets_filename_for_run_rejects_non_run_names():
+    with pytest.raises(ValueError):
+        streets_filename_for_run("bend--or_width_5000_height_5000_step_20_2026-07-08.json.gz")
+    with pytest.raises(ValueError):
+        streets_filename_for_run("bend--or.csv")
+
+
+def test_parse_filename_rejects_streets_artifacts():
+    """Streets artifacts must never parse as run files — same rejection
+    contract history files rely on (a ValueError means "not a run file")."""
+    with pytest.raises(ValueError):
+        parse_filename("bend--or_width_5000_height_5000_step_20_2026-07-08_streets.json.gz")
+    # Artifact derived from a legacy UNDATED run name: '_streets' lands where a
+    # provider token would, and must be rejected, not misparsed as a provider.
+    with pytest.raises(ValueError):
+        parse_filename("bend--or_width_5000_height_5000_step_20_streets.json.gz")

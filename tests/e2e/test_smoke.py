@@ -40,8 +40,18 @@ ALPHA_LATEST = "alpha-city--alphastate--testland_width_100_height_100_step_20_20
 ZERO_CITY = "zero-city--zerostate--testland_width_100_height_100_step_20_2026-04-15.csv.gz"
 
 # Substrings of expected third-party console noise to ignore (analytics/CDN),
-# so "console clean" tracks OUR code, not the network environment.
-_IGNORABLE_CONSOLE = ("favicon", "googletagmanager", "gtag", "google-analytics", "doubleclick")
+# so "console clean" tracks OUR code, not the network environment. The streets
+# artifact is optional by design (issue #24) — the fixture has none, so the
+# browser logs a 404 console.error for the "_streets.json.gz" fetch that
+# street-coverage.js then handles as a silent no-op.
+_IGNORABLE_CONSOLE = (
+    "favicon",
+    "googletagmanager",
+    "gtag",
+    "google-analytics",
+    "doubleclick",
+    "_streets.json.gz",
+)
 
 
 @pytest.fixture(scope="session")
@@ -95,6 +105,15 @@ def route_fixture_data(page: Page):
     yield
 
 
+def _is_ignorable_console(msg) -> bool:
+    """Match ignorables against the message text AND its source URL: network
+    failures log a generic "Failed to load resource: ... 404" text, so the
+    offending URL (e.g. the optional _streets.json.gz fetch) only appears in
+    msg.location."""
+    url = (msg.location or {}).get("url", "")
+    return any(s in msg.text or s in url for s in _IGNORABLE_CONSOLE)
+
+
 def _capture_errors(page: Page):
     """Attach console-error + pageerror listeners; return the collected list."""
     errors = []
@@ -103,7 +122,7 @@ def _capture_errors(page: Page):
         "console",
         lambda msg: (
             errors.append(f"console.{msg.type}: {msg.text}")
-            if msg.type == "error" and not any(s in msg.text for s in _IGNORABLE_CONSOLE)
+            if msg.type == "error" and not _is_ignorable_console(msg)
             else None
         ),
     )

@@ -60,6 +60,14 @@ def load_config(provider: str = "gsv") -> dict[str, Any]:
     gsv requires GMAPS_API_KEY; mapillary requires MAPILLARY_ACCESS_TOKEN.
     Only the requested provider's credential is required, so a machine can
     run one provider without the other's key.
+
+    'gsv_streets' and 'mapillary_streets' are ISOLATED credential channels for
+    street-coverage collection (issue #99): separate keys so street-sampling
+    experiments can't exhaust the production grid collector's quota, metered
+    under their own api_usage ledger rows. Dormant for now — nothing calls
+    them until the road-walk collector (#99) / --streets pipeline flag (#100)
+    land. These are credential channels, not filename provider tokens
+    (naming.KNOWN_PROVIDERS is unchanged).
     """
     if provider == "gsv":
         config = {
@@ -100,4 +108,39 @@ def load_config(provider: str = "gsv") -> dict[str, Any]:
             )
         return config
 
-    raise ValueError(f"Unknown provider {provider!r} (known: gsv, mapillary)")
+    if provider == "gsv_streets":
+        config = {
+            "api_key": os.environ.get("GMAPS_STREETS_API_KEY"),
+        }
+        if not config["api_key"]:
+            raise ValueError(
+                "GMAPS_STREETS_API_KEY not found in environment variables.\n\n"
+                "Street-coverage collection uses its own Google API key so it "
+                "can't exhaust the production grid collector's quota (issue #99).\n\n"
+                "Add it to the .env file in your project root:\n"
+                "  GMAPS_STREETS_API_KEY=YOUR_API_KEY\n\n"
+                "Create a separate key at "
+                "https://console.cloud.google.com/apis/credentials\n"
+                "You will need to enable the Street View Static API for the key."
+            )
+        return config
+
+    if provider == "mapillary_streets":
+        config = {
+            "access_token": os.environ.get("MAPILLARY_STREETS_ACCESS_TOKEN"),
+        }
+        if not config["access_token"]:
+            raise ValueError(
+                "MAPILLARY_STREETS_ACCESS_TOKEN not found in environment variables.\n\n"
+                "Street-coverage work uses its own Mapillary token for rate-limit "
+                "hygiene, separate from the tile-census collector (issue #99).\n\n"
+                "Add it to the .env file in your project root:\n"
+                "  MAPILLARY_STREETS_ACCESS_TOKEN=MLY|YOUR|TOKEN\n\n"
+                "Create a (free) client token by registering an application at "
+                "https://www.mapillary.com/dashboard/developers"
+            )
+        return config
+
+    raise ValueError(
+        f"Unknown provider {provider!r} (known: gsv, mapillary, gsv_streets, mapillary_streets)"
+    )

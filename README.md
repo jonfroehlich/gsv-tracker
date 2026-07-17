@@ -95,6 +95,7 @@ The repository includes several scripts divided into core data collection tools 
 
 ### Data Utilities & Analysis
 
+* **`python -m streetscape_street_analyzer.analyze`**: OSM street-coverage analysis for an existing run — overlays the city's frozen OpenStreetMap street network on the run's panos and writes a `{base}_streets.json.gz` GeoJSON (per-segment covered/uncovered plus a by-street-type summary) that the city page renders as an optional overlay. Example: `python -m streetscape_street_analyzer.analyze "Seattle, WA" --provider gsv`. The network is fetched once per city and frozen (`data/osm_cache/`, cataloged in `street_networks`); `--refresh` re-fetches it. Uses no imagery-provider API. (Street-coverage *collection* is planned separately and will use its own isolated credentials, `GMAPS_STREETS_API_KEY` / `MAPILLARY_STREETS_ACCESS_TOKEN` — see issue #99.)
 * **`streetscape_compare_data.py`**: Compares two run metadata files for the same city and reports panos added/removed, capture-date changes, and coverage transitions.
 * **`generate_json.py`**: Generates missing JSON metadata summary files for existing run data directories.
 * **`check_status_codes.py`**: Analyzes API status-code distributions across data files.
@@ -172,6 +173,7 @@ Each run generates the following files in your designated `--download-dir` (defa
 * **`{base}.json.gz`**: A JSON summary (schema v2) with coverage/age statistics, temporal histograms, and the change-vs-previous-run block.
 * **`{base}_failed_points.csv`**: A log of coordinates that failed to download after all retry attempts (GSV runs only).
 * **`{city_id}_diff_{FROM}_to_{TO}.csv.gz`**: Per-pano change detail between two runs of the same provider (written when changes exist; Mapillary diffs insert a `mapillary` token after `_diff`).
+* **`{base}_streets.json.gz`**: Optional OSM street-coverage GeoJSON for the run (written by `streetscape_street_analyzer.analyze`, not by the run itself); the city page shows a street overlay + breakdown panel when present.
 * **`cities.json.gz`**: The aggregate consumed by the web frontend (schema v3) — one entry per city, grouped by provider, with each provider's latest stats, run history, and change summary.
 * **`streetscape_tracker.db`**: The SQLite catalog (cities, runs, diffs, schedule state). Local only; never published.
 * **`vis/{base}.html`**: An interactive map visualization of the run (unless `--no-visual` is passed).

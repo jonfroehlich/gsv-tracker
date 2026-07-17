@@ -84,6 +84,26 @@ module.exports = [
     rules: browserRules,
   },
   {
+    // Street-coverage overlay (issue #24): consumes streetscape-utils.js
+    // globals and defines renderStreetCoverage for city.js. Like
+    // streetscape-utils.js, it carries a Node export shim (`module`).
+    files: ["js/street-coverage.js"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "script",
+      globals: { ...globals.browser, ...vendorGlobals, ...sharedGlobals, module: "readonly" },
+    },
+    rules: browserRules,
+  },
+  {
+    // Only city.html loads street-coverage.js, so only city.js may consume
+    // its global (flat config merges this into city.js's entry above).
+    files: ["js/city.js"],
+    languageOptions: {
+      globals: { renderStreetCoverage: "readonly" },
+    },
+  },
+  {
     // Offline unit tests, run under Node's built-in test runner (CommonJS).
     files: ["js/__tests__/**/*.js"],
     languageOptions: {

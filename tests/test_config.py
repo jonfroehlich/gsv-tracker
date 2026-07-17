@@ -17,9 +17,33 @@ def test_load_config_mapillary_requires_only_its_own_token(monkeypatch):
     assert load_config("mapillary") == {"access_token": "MLY|test|token"}
 
 
+def test_load_config_streets_channels_are_isolated(monkeypatch):
+    """The dormant street-collection channels (issue #99) read their OWN env
+    vars — the production keys must never satisfy a street channel."""
+    monkeypatch.setenv("GMAPS_API_KEY", "prod-key")
+    monkeypatch.setenv("MAPILLARY_ACCESS_TOKEN", "MLY|prod|token")
+    monkeypatch.setenv("GMAPS_STREETS_API_KEY", "streets-key")
+    monkeypatch.setenv("MAPILLARY_STREETS_ACCESS_TOKEN", "MLY|streets|token")
+    assert load_config("gsv_streets") == {"api_key": "streets-key"}
+    assert load_config("mapillary_streets") == {"access_token": "MLY|streets|token"}
+
+    # With only production keys set, the street channels still fail fast.
+    monkeypatch.delenv("GMAPS_STREETS_API_KEY")
+    monkeypatch.delenv("MAPILLARY_STREETS_ACCESS_TOKEN")
+    with pytest.raises(ValueError, match="GMAPS_STREETS_API_KEY"):
+        load_config("gsv_streets")
+    with pytest.raises(ValueError, match="MAPILLARY_STREETS_ACCESS_TOKEN"):
+        load_config("mapillary_streets")
+
+
 @pytest.mark.parametrize(
     "provider,env_var",
-    [("gsv", "GMAPS_API_KEY"), ("mapillary", "MAPILLARY_ACCESS_TOKEN")],
+    [
+        ("gsv", "GMAPS_API_KEY"),
+        ("mapillary", "MAPILLARY_ACCESS_TOKEN"),
+        ("gsv_streets", "GMAPS_STREETS_API_KEY"),
+        ("mapillary_streets", "MAPILLARY_STREETS_ACCESS_TOKEN"),
+    ],
 )
 def test_load_config_missing_credential_raises_with_var_name(monkeypatch, provider, env_var):
     monkeypatch.delenv(env_var, raising=False)

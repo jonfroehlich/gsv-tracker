@@ -244,3 +244,169 @@
   width: 400px;
   height: 200px;
 }
+
+/* ── OSM street-coverage panel (top-left, below back link) ─────
+   Dark surface (dataviz #1b1f24): the covered green and uncovered slate both
+   clear 3:1 against it, fixing the old gray-on-gray legibility problem. */
+#street-coverage-container {
+  position: absolute;
+  top: 56px;
+  left: 10px;
+  width: 300px;
+  background: #1b1f24;
+  color: #e6e6e6;
+  border-radius: 4px;
+  padding: 10px;
+  box-shadow: 0 0 15px rgba(0, 0, 0, 0.35);
+  z-index: 1000;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  display: none;
+}
+
+#street-coverage-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 14px;
+}
+
+.street-toggle {
+  font-size: 12px;
+  color: #c3c2b7;
+  cursor: pointer;
+}
+
+.street-toggle input {
+  vertical-align: middle;
+  margin-right: 3px;
+}
+
+#street-coverage-headline {
+  margin: 6px 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #d6d6d0;
+}
+
+.street-headline-pct {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.street-headline-sub {
+  display: block;
+  color: #a9a9a4;
+  font-size: 11px;
+}
+
+/* View-mode segmented control + pano-dot toggle */
+.street-controls {
+  margin: 8px 0 6px;
+}
+
+.street-mode {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.street-mode-label {
+  font-size: 11px;
+  color: #a9a9a4;
+  margin-right: 2px;
+}
+
+.street-mode-btn {
+  flex: 1;
+  font: inherit;
+  font-size: 11px;
+  color: #d6d6d0;
+  background: #2b3138;
+  border: 1px solid #3a4149;
+  border-radius: 3px;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.street-mode-btn:hover {
+  background: #333a42;
+}
+
+.street-mode-btn.is-active {
+  color: #fff;
+  background: #3987e5;
+  border-color: #3987e5;
+}
+
+.street-mode-btn:focus-visible {
+  outline: 2px solid #7fb0f0;
+  outline-offset: 1px;
+}
+
+.street-dots-toggle {
+  display: block;
+}
+
+.street-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-size: 11px;
+  color: #c3c2b7;
+  margin-bottom: 6px;
+}
+
+.street-legend i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  vertical-align: middle;
+  border-radius: 2px;
+}
+
+/* Uncovered swatch is drawn dashed to match the map lines. */
+.street-legend i.dashed {
+  background-image: repeating-linear-gradient(
+    90deg,
+    currentColor 0 3px,
+    transparent 3px 6px
+  );
+  background-color: transparent !important;
+  border: 1px solid #767c85;
+  color: #767c85;
+}
+
+#street-chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+#street-chart-title {
+  font-size: 11px;
+  color: #a9a9a4;
+}
+
+#street-clear-selection {
+  font: inherit;
+  font-size: 11px;
+  color: #d6d6d0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+#street-clear-selection:hover {
+  color: #fff;
+}
+
+#street-chart-wrap {
+  position: relative;
+  height: 180px;
+}

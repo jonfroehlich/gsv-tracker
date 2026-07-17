@@ -15,7 +15,10 @@ branca==0.8.2
     #   -r requirements.txt
     #   folium
 certifi==2026.6.17
-    # via requests
+    # via
+    #   pyogrio
+    #   pyproj
+    #   requests
 charset-normalizer==3.4.9
     # via requests
 colorama==0.4.6 ; sys_platform == 'win32'
@@ -40,6 +43,10 @@ frozenlist==1.8.0
     #   aiosignal
 geographiclib==2.1
     # via geopy
+geopandas==1.1.4
+    # via
+    #   -r requirements.txt
+    #   osmnx
 geopy==2.4.1
     # via -r requirements.txt
 idna==3.18
@@ -68,13 +75,20 @@ multidict==6.7.1
     # via
     #   aiohttp
     #   yarl
+networkx==3.6.1
+    # via
+    #   -r requirements.txt
+    #   osmnx
 numpy==2.4.6 ; python_full_version < '3.12'
     # via
     #   -r requirements.txt
     #   contourpy
     #   folium
+    #   geopandas
     #   matplotlib
+    #   osmnx
     #   pandas
+    #   pyogrio
     #   seaborn
     #   shapely
 numpy==2.5.1 ; python_full_version >= '3.12'
@@ -82,19 +96,28 @@ numpy==2.5.1 ; python_full_version >= '3.12'
     #   -r requirements.txt
     #   contourpy
     #   folium
+    #   geopandas
     #   matplotlib
+    #   osmnx
     #   pandas
+    #   pyogrio
     #   seaborn
     #   shapely
 openpyxl==3.1.5
     # via -r requirements.txt
+osmnx==2.1.0
+    # via -r requirements.txt
 packaging==26.2
     # via
+    #   geopandas
     #   matplotlib
+    #   pyogrio
     #   pytest
 pandas==3.0.3
     # via
     #   -r requirements.txt
+    #   geopandas
+    #   osmnx
     #   seaborn
 pillow==12.3.0
     # via matplotlib
@@ -114,8 +137,12 @@ pycountry==26.2.16
     # via -r requirements.txt
 pygments==2.20.0
     # via pytest
+pyogrio==0.13.0
+    # via geopandas
 pyparsing==3.3.2
     # via matplotlib
+pyproj==3.7.2
+    # via geopandas
 pytest==9.1.1
     # via -r requirements.txt
 python-dateutil==2.9.0.post0
@@ -128,13 +155,22 @@ requests==2.34.2
     # via
     #   -r requirements.txt
     #   folium
+    #   osmnx
+rtree==1.4.1
+    # via -r requirements.txt
 seaborn==0.13.2
     # via -r requirements.txt
 shapely==2.1.2
-    # via mapbox-vector-tile
+    # via
+    #   -r requirements.txt
+    #   geopandas
+    #   mapbox-vector-tile
+    #   osmnx
 six==1.17.0
     # via python-dateutil
 tabulate==0.10.0
+    # via -r requirements.txt
+tenacity==9.1.4
     # via -r requirements.txt
 tqdm==4.68.4
     # via -r requirements.txt

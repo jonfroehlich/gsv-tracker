@@ -19,3 +19,14 @@ us>=3.1.1
 pycountry>=22.3.5
 tabulate>=0.9.0
 openpyxl>=3.1.5
+
+# OSM street-coverage analysis (streetscape_street_analyzer, issues #24/#103).
+# osmnx floor is 2.0, not 1.9: the code passes bbox=(min_lon, min_lat, max_lon,
+# max_lat), the 2.x convention; 1.x expects (north, south, east, west) and
+# would silently transpose coordinates.
+osmnx>=2.0
+geopandas>=0.14
+shapely>=2.0
+networkx>=3.0
+rtree>=1.0
+tenacity>=8.0

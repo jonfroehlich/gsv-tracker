@@ -374,6 +374,8 @@ def test_migrate_v1_to_v2(tmp_path):
     # v4 added status_no_date; a migrated legacy run has it as NULL (unknown)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
     assert "status_no_date" in cols
+    # v5 added the street_networks table (empty on a migrated catalog)
+    assert conn.execute("SELECT COUNT(*) FROM street_networks").fetchone()[0] == 0
 
     run = db.get_latest_run(conn, "bend--or")
     assert run.run_id == 7 and run.provider == "gsv"
@@ -426,3 +428,96 @@ def test_connect_migrates_legacy_gsv_tracker_db(tmp_path):
         == "bend--oregon--united-states"
     )
     conn2.close()
+
+
+# ── Frozen OSM street networks (issue #103, schema v5) ──────────────────────
+
+
+def test_migrate_v4_to_v5(tmp_path):
+    """A v4 catalog gains the street_networks table on connect.
+
+    A v4 catalog is exactly the current schema minus street_networks, so the
+    fixture is built from db._SCHEMA with that table dropped (keeping the
+    fixture in sync with the code) and stamped user_version = 4.
+    """
+    db_path = str(tmp_path / "v4.db")
+    raw = sqlite3.connect(db_path)
+    raw.executescript(db._SCHEMA)
+    raw.execute("DROP TABLE street_networks")
+    raw.execute(
+        """INSERT INTO cities (city_id, display_name, city_name, center_lat,
+           center_lon, grid_width_m, grid_height_m, step_m, created_at)
+           VALUES ('bend--or', 'Bend, OR', 'Bend', 44.05, -121.31,
+                   5000, 5000, 20, '2026-01-01T00:00:00+00:00')"""
+    )
+    raw.execute("PRAGMA user_version = 4")
+    raw.commit()
+    raw.close()
+
+    conn = db.connect(db_path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert conn.execute("SELECT COUNT(*) FROM street_networks").fetchone()[0] == 0
+    # Existing data is untouched by the additive migration.
+    assert db.resolve_city(conn, "bend--or").city_id == "bend--or"
+
+    # Idempotent: reopening must not error or re-migrate.
+    conn.close()
+    conn2 = db.connect(db_path)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == 5
+    conn2.close()
+
+
+def test_street_network_register_and_get(conn, city):
+    network_id = db.register_street_network(
+        conn,
+        city_id=city,
+        graphml_filename=f"{city}_streets_network.graphml",
+        node_count=1200,
+        edge_count=3400,
+        osmnx_version="2.1.0",
+    )
+    row = db.get_street_network(conn, city)
+    assert row["network_id"] == network_id
+    assert row["network_type"] == "drive"
+    assert row["graphml_filename"] == f"{city}_streets_network.graphml"
+    assert (row["node_count"], row["edge_count"]) == (1200, 3400)
+    assert row["osmnx_version"] == "2.1.0"
+    assert row["fetched_at"]  # stamped by register
+
+    assert db.get_street_network(conn, city, network_type="walk") is None
+    assert db.get_street_network(conn, "nowhere--xx") is None
+
+
+def test_street_network_refresh_replaces_row(conn, city):
+    first_id = db.register_street_network(
+        conn, city_id=city, graphml_filename=f"{city}_streets_network.graphml", node_count=10
+    )
+    first = db.get_street_network(conn, city)
+    # A --refresh re-fetch upserts: same (city, network_type) row, new stats.
+    second_id = db.register_street_network(
+        conn, city_id=city, graphml_filename=f"{city}_streets_network.graphml", node_count=11
+    )
+    second = db.get_street_network(conn, city)
+    assert second_id == first_id
+    assert second["node_count"] == 11
+    assert second["fetched_at"] >= first["fetched_at"]
+    assert conn.execute("SELECT COUNT(*) FROM street_networks").fetchone()[0] == 1
+
+
+def test_street_network_types_coexist(conn, city):
+    db.register_street_network(
+        conn, city_id=city, graphml_filename=f"{city}_streets_network.graphml"
+    )
+    db.register_street_network(
+        conn,
+        city_id=city,
+        graphml_filename=f"{city}_streets_network_walk.graphml",
+        network_type="walk",
+    )
+    assert conn.execute("SELECT COUNT(*) FROM street_networks").fetchone()[0] == 2
+    assert db.get_street_network(conn, city, network_type="walk")["network_type"] == "walk"
+
+
+def test_street_network_unknown_city_rejected(conn):
+    with pytest.raises(sqlite3.IntegrityError):
+        db.register_street_network(conn, city_id="nowhere--xx", graphml_filename="nowhere.graphml")

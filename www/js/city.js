@@ -1212,6 +1212,18 @@ async function loadData() {
       map.fitBounds(L.latLngBounds(validPoints));
     }
 
+    // Optional OSM street-coverage overlay (issue #24); a no-op when the
+    // run has no "_streets.json.gz" artifact. The setPanoDotsVisible hook lets
+    // its panel show/hide the pano markers (a coarse show-all/hide-all, like
+    // the map-background reset) so the streets can be read on their own.
+    renderStreetCoverage(map, targetFile, providerGlobal, {
+      setPanoDotsVisible: (visible) => {
+        Object.values(markersByYear)
+          .flat()
+          .forEach((m) => (visible ? m.addTo(map) : m.remove()));
+      },
+    });
+
   } catch (error) {
     console.error("Error loading or parsing city data:", error);
     showLoadError(`Failed to load city data: ${error.message}`);

@@ -320,6 +320,33 @@ def parse_history_filename(filename: str) -> ParsedHistoryFilename:
     )
 
 
+# ── Street-coverage artifacts (issues #24/#103) ────────────────────────────
+
+STREETS_SUFFIX = "_streets"
+
+
+def streets_filename_for_run(csv_filename: str) -> str:
+    """
+    Name of the street-coverage artifact derived from a run's csv.gz.
+
+    The artifact is a sibling '{run stem}_streets.json.gz' GeoJSON written by
+    streetscape_street_analyzer; the trailing '_streets' token guarantees
+    parse_filename() rejects it (a ValueError callers already treat as "not a
+    run file"), same contract as history files. There is deliberately no
+    parse_streets_filename yet — nothing needs to recognize the artifact on
+    disk until the aggregate surfaces street coverage (issue #102). The web
+    frontend derives the same name in street-coverage.js (streetsUrlForDataFile);
+    keep the two in sync.
+
+    Example:
+        >>> streets_filename_for_run("bend--or_width_5000_height_5000_step_20_2026-07-08.csv.gz")
+        'bend--or_width_5000_height_5000_step_20_2026-07-08_streets.json.gz'
+    """
+    if not csv_filename.endswith(".csv.gz"):
+        raise ValueError(f"Not a run csv.gz filename: {csv_filename}")
+    return csv_filename[: -len(".csv.gz")] + STREETS_SUFFIX + ".json.gz"
+
+
 def same_grid_geometry(filename_a: str, filename_b: str) -> bool:
     """
     True when both filenames parse and encode the same grid geometry

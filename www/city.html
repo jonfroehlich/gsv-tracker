@@ -29,6 +29,11 @@
     <canvas id="temporal-plot"></canvas>
   </div>
 
+  <!-- OSM street-coverage panel (populated by street-coverage.js; stays
+       hidden until a run has a "_streets.json.gz" artifact) -->
+  <div id="street-coverage-container" role="region"
+       aria-label="OSM street coverage"></div>
+
   <a href="index.html" id="back-link">← Back to Overview Map</a>
 
   <div id="progress-container" role="status" aria-live="polite">
@@ -59,6 +64,7 @@
           integrity="sha512-dfX5uYVXzyU8+KHqj8bjo7UkOdg18PaOtpa48djpNbZHwExddghZ+ZmzWT06R5v6NSk3ZUfsH6FNEDepLx9hPQ=="
           crossorigin="anonymous"></script>
   <script src="js/streetscape-utils.js"></script>
+  <script src="js/street-coverage.js"></script>
   <script src="js/city.js"></script>
 </body>
 </html>
