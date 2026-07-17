@@ -12,8 +12,16 @@ global.getColor = (age, provider) => `color(${age},${provider})`;
 const {
   streetsUrlForDataFile,
   styleStreetFeature,
+  styleStreetByCoverage,
+  styleStreetByType,
+  styleForMode,
+  streetTypeColor,
+  streetTypeOrder,
+  withStreetAlpha,
   STREET_UNCOVERED_COLOR,
+  STREET_COVERED_COLOR,
   STREET_COVERED_NODATE_COLOR,
+  STREET_TYPE_MINOR_COLOR,
 } = require("../street-coverage.js");
 
 test("streetsUrlForDataFile swaps .csv.gz for _streets.json.gz under the data base URL", () => {
@@ -50,4 +58,47 @@ test("styleStreetFeature: covered segment with an age uses the provider age scal
     "mapillary"
   );
   assert.equal(style.color, "color(3.2,mapillary)");
+});
+
+test("styleStreetByCoverage: binary covered green vs uncovered slate (dashed)", () => {
+  assert.equal(
+    styleStreetByCoverage({ properties: { covered: true } }).color,
+    STREET_COVERED_COLOR
+  );
+  const uncovered = styleStreetByCoverage({ properties: { covered: false } });
+  assert.equal(uncovered.color, STREET_UNCOVERED_COLOR);
+  assert.equal(uncovered.dashArray, "4 4");
+});
+
+test("styleStreetByType: colors by highway class; uncovered is faded + dashed", () => {
+  const covered = styleStreetByType({ properties: { covered: true, highway: "residential" } });
+  assert.equal(covered.color, streetTypeColor("residential"));
+  assert.equal(covered.dashArray, undefined);
+
+  const uncovered = styleStreetByType({ properties: { covered: false, highway: "residential" } });
+  assert.equal(uncovered.color, streetTypeColor("residential")); // keeps its type hue
+  assert.equal(uncovered.dashArray, "4 4");
+  assert.ok(uncovered.opacity < covered.opacity); // but faded
+});
+
+test("streetTypeColor: unlisted classes fold into the neutral minor color", () => {
+  assert.equal(streetTypeColor("motorway"), "#3987e5");
+  assert.equal(streetTypeColor("living_street"), STREET_TYPE_MINOR_COLOR);
+  assert.equal(streetTypeColor("other"), STREET_TYPE_MINOR_COLOR);
+});
+
+test("streetTypeOrder: importance rank, unlisted classes sort last", () => {
+  assert.ok(streetTypeOrder("motorway") < streetTypeOrder("residential"));
+  assert.ok(streetTypeOrder("residential") < streetTypeOrder("other"));
+});
+
+test("styleForMode: dispatches to the right per-mode styler", () => {
+  const feat = { properties: { covered: true, highway: "primary", nearest_pano_age_years: 1 } };
+  assert.equal(styleForMode(feat, "coverage", "gsv").color, STREET_COVERED_COLOR);
+  assert.equal(styleForMode(feat, "type", "gsv").color, streetTypeColor("primary"));
+  assert.equal(styleForMode(feat, "age", "gsv").color, "color(1,gsv)"); // stubbed getColor
+});
+
+test("withStreetAlpha: hex to rgba() with the given alpha", () => {
+  assert.equal(withStreetAlpha("#2fb974", 0.22), "rgba(47, 185, 116, 0.22)");
 });
