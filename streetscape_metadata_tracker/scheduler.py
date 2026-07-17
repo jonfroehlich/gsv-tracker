@@ -177,6 +177,12 @@ def load_scheduler_config(path: str | None = None) -> SchedulerConfig:
             command=al.get("command", ""),
             failure_threshold=al.get("failure_threshold", 1),
             subject_prefix=al.get("subject_prefix", "[streetscape-tracker]"),
+            smtp_host=al.get("smtp_host", ""),
+            smtp_port=al.get("smtp_port", 25),
+            smtp_from=al.get("smtp_from", ""),
+            smtp_starttls=al.get("smtp_starttls", False),
+            smtp_user=al.get("smtp_user", ""),
+            smtp_password=al.get("smtp_password", ""),
         ),
         resource_guard=ResourceGuardConfig(
             enabled=rg.get("enabled", True),

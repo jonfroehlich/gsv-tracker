@@ -209,13 +209,39 @@ Data lives on NFS, so IO is network (not block-device) — CPU/memory caps and
 
 ### Failure alerts (email)
 
-Enabled in `config/scheduler.makelab1.toml` (`transport = "mail"`, which
-delivers on makelab1 with no relay setup). Test end-to-end without waiting for
-a failure:
+Enabled in `config/scheduler.makelab1.toml`. Test end-to-end without waiting
+for a failure:
 
 ```bash
 .venv/bin/python -m streetscape_metadata_tracker.scheduler --config config/scheduler.makelab1.toml notify-failure
 ```
+
+**Transport under the sandbox (issue #144).** `transport = "mail"` delivers via
+the local mailer, but that goes through a setgid `postdrop` binary that the
+unit's `NoNewPrivileges=yes` blocks — so alerts are *silently lost* from the
+hardened unit even though the failure was detected. Use **`transport =
+"smtp"`** (now the default in `scheduler.makelab1.toml`): it uses stdlib
+`smtplib` to talk to a relay directly, touching no setgid path and no
+read-only `$HOME`, so it works unchanged inside the sandbox (and identically
+on makelab1 or makelab2).
+
+Confirmed working relay (verified from makelab2, 2026-07-17):
+
+```toml
+transport  = "smtp"
+smtp_host  = "smtp.cs.washington.edu"   # UW CSE relay, no auth for on-campus hosts, plain port 25
+smtp_port  = 25
+smtp_from  = "jonf@cs.washington.edu"   # MUST be a real mailbox — see below
+```
+
+Gotchas that already bit us: (1) the relay **rejects a non-deliverable
+envelope sender** (`550 <streetscape-tracker@makelab2…> Address unknown`), so
+`smtp_from` must be a real address — the code's `streetscape-tracker@<hostname>`
+default won't work here. (2) `localmail.cs.washington.edu` (the box's own
+sendmail smarthost) does **not** resolve for a direct connect; use
+`smtp.cs.washington.edu`. For a relay that needs auth, set `smtp_user` +
+`smtp_starttls` and keep the password in `$STREETSCAPE_ALERT_SMTP_PASSWORD`
+(not the toml). Test end-to-end with the `notify-failure` command above.
 
 **Optional systemd safety net** — for an email even when the process dies
 before it can send its own (OOM, kill): install the notify unit and uncomment

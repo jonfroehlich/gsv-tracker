@@ -247,7 +247,10 @@ def test_makelab1_production_config_is_wired():
     assert cfg.enabled_providers() == ["gsv", "mapillary"]
     assert cfg.publish_enabled
     assert cfg.publish_script.endswith("sync_data_to_server.sh")
-    assert cfg.alerts.enabled and cfg.alerts.transport == "mail" and cfg.alerts.recipient
+    # smtp transport (not "mail"): the local mailer is blocked by the systemd
+    # sandbox, so alerts go straight to the campus relay (issue #144).
+    assert cfg.alerts.enabled and cfg.alerts.transport == "smtp" and cfg.alerts.recipient
+    assert cfg.alerts.smtp_host and cfg.alerts.smtp_from
     # Data/DB live on lab storage (makelab2), not in the web docroot.
     assert "/projects/makeabilitylab/streetscape-tracker" in cfg.db_path
     assert "/cse/web/" not in cfg.db_path and "/cse/web/" not in cfg.data_dir

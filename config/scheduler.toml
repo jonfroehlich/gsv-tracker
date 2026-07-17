@@ -85,12 +85,28 @@ enabled = false
 # optional systemd OnFailure= hook — see deploy/README.md.
 enabled = false
 #recipient = "jonf@cs.uw.edu"
-# Transport: "mail" (uses a local relay), "msmtp"/"sendmail" (SMTP), or
-# "command" (an arbitrary shell command; body on stdin, subject/recipient in
+# Transport: "smtp" (stdlib smtplib straight to a relay — the sandbox-safe
+# choice, see below), "mail" (uses a local relay), "msmtp"/"sendmail" (SMTP),
+# or "command" (an arbitrary shell command; body on stdin, subject/recipient in
 # $STREETSCAPE_ALERT_SUBJECT/$STREETSCAPE_ALERT_TO — e.g. a Slack webhook curl). Confirm which
 # works on the box first:  echo test | mail -s test jonf@cs.uw.edu
 transport = "mail"
 #command = ""
+# --- transport = "smtp" settings (issue #144) ---
+# Prefer this under systemd: it never touches the local setgid mailer, so a
+# hardened unit (NoNewPrivileges / ProtectSystem=strict) can't break the send.
+# smtp_host is the only required field; the rest are opt-in for the relay.
+#smtp_host = "smtp.cs.washington.edu"   # UW CSE relay: no-auth for on-campus hosts
+#smtp_port = 25                          # 587 for a submission port
+# smtp_from defaults to streetscape-tracker@<hostname>, but many relays (incl.
+# smtp.cs.washington.edu) reject a non-deliverable sender with "550 Address
+# unknown" — set a real mailbox there.
+#smtp_from = "you@cs.washington.edu"
+#smtp_starttls = false                   # true on a submission/TLS port
+#smtp_user = ""                          # set with a password to authenticate
+# Password for smtp_user. Prefer the env var over the toml so no secret is
+# committed: STREETSCAPE_ALERT_SMTP_PASSWORD (env wins if both are set).
+#smtp_password = ""
 # Alert when at least this many (city, provider) collections failed. Raise it
 # to avoid paging on the occasional flaky single city.
 failure_threshold = 1
