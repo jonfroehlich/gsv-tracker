@@ -62,6 +62,26 @@ def test_resume_point_key_absorbs_ulp_noise_but_separates_neighbors():
     assert resume_point_key(47.6, lon) != resume_point_key(47.6, lon + 0.00027)
 
 
+def test_processed_points_skips_non_terminal_rows(tmp_path):
+    """A checkpoint row carrying a still-retryable / failed status is NOT
+    treated as done, so a resume re-requests it — this also disarms a pre-fix
+    checkpoint whose throttled points were baked in as OVER_QUERY_LIMIT rows."""
+    points = generate_grid_points(SEATTLE, width_steps=4, height_steps=4, step_length=20)
+    df = _checkpoint_df(points)
+    # Mark a few rows with non-terminal statuses.
+    df.loc[df.index[0], "status"] = "OVER_QUERY_LIMIT"
+    df.loc[df.index[1], "status"] = "UNKNOWN_ERROR"
+    df.loc[df.index[2], "status"] = "REQUEST_FAILED"
+    path = tmp_path / "city.csv.downloading"
+    df.to_csv(path, index=False)
+
+    processed = get_processed_points(str(path))
+    for lat, lon, _i, _j in points[:3]:
+        assert resume_point_key(lat, lon) not in processed  # must be re-requested
+    for lat, lon, _i, _j in points[3:]:
+        assert resume_point_key(lat, lon) in processed  # terminal ZERO_RESULTS kept
+
+
 def test_processed_points_missing_file_is_empty(tmp_path):
     assert get_processed_points(str(tmp_path / "never-written.csv.downloading")) == set()
 

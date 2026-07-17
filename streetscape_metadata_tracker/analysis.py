@@ -32,6 +32,21 @@ GOOGLE_COPYRIGHT = "© Google"
 # an error, not an absence.
 PRESENT_STATUSES = ("OK", "NO_DATE")
 
+# Statuses that reflect a transient problem with the *request*, not a real
+# answer about the grid point — so the downloader retries them, and only if
+# they survive every retry does it write them back as a failure row (never as
+# "no imagery"). OVER_QUERY_LIMIT is quota throttling (a normal HTTP 200 with
+# this body status); UNKNOWN_ERROR is Google-documented as transient. Kept here
+# next to the other status classifications so the downloader (retry decision)
+# and scripts/purge_tainted_runs.py (taint scan) share one definition.
+RETRYABLE_STATUSES = ("OVER_QUERY_LIMIT", "UNKNOWN_ERROR")
+
+# Synthetic status for a grid point whose request never returned a body status
+# at all (network/timeout errors, exhausted after every retry). It is written
+# as a failure row so the grid stays complete (run-to-run diffs require exact
+# grid-key equality), but it is neither "present" nor a provider-side denial.
+REQUEST_FAILED = "REQUEST_FAILED"
+
 
 def is_google_copyright(copyright_info: pd.Series) -> pd.Series:
     """
@@ -658,9 +673,13 @@ def calculate_run_stats(df: pd.DataFrame, run_date, provider: str = "gsv") -> di
     }
 
 
-# Response statuses meaning the request itself was rejected
-# (credentials/quota), as opposed to "no imagery here" (ZERO_RESULTS)
-SYSTEMIC_FAILURE_STATUSES = ("REQUEST_DENIED", "OVER_QUERY_LIMIT")
+# Response statuses meaning the request itself failed (credentials, quota, or
+# an unrecoverable network error), as opposed to "no imagery here"
+# (ZERO_RESULTS). A run dominated by these carries no information about the
+# city, so detect_systemic_failure rejects it before it can become a diff
+# baseline. REQUEST_FAILED is included so a night of pervasive network failure
+# is caught the same way a quota/credential failure is.
+SYSTEMIC_FAILURE_STATUSES = ("REQUEST_DENIED", "OVER_QUERY_LIMIT", REQUEST_FAILED)
 
 
 def detect_systemic_failure(df: pd.DataFrame, threshold: float = 0.95) -> str | None:

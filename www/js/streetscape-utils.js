@@ -90,6 +90,148 @@ function getColor(age, provider = "gsv") {
 }
 
 /**
+ * Return a CSS `rgb()` color for a grid-coverage percentage using a
+ * three-stop single-hue teal interpolation, dark → bright:
+ *
+ * Stop 0 (0% coverage):    rgb(21,  86,  97)   — dark teal (recessive)
+ * Stop 1 (50% coverage):   rgb(69, 170, 176)   — mid teal
+ * Stop 2 (100% coverage):  rgb(127, 244, 227)  — bright aqua
+ *
+ * On the dark basemap, well-covered cities glow the way imagery lines glow
+ * in the detail view, while sparse cities recede (but stay ≥2:1 against the
+ * basemap). Deliberately a different hue family from the YlOrRd age scale
+ * (getColor) so the two "color by" modes are never confusable. Ramp
+ * validated for monotone lightness and dark-surface contrast.
+ *
+ * @param {number} pct - Coverage percentage; clamped to [0, 100].
+ * @returns {string} CSS color string, e.g. `"rgb(69, 170, 176)"`.
+ *
+ * @example
+ *   coverageColor(0);    // "rgb(21, 86, 97)"  — no coverage
+ *   coverageColor(100);  // "rgb(127, 244, 227)" — full grid coverage
+ */
+function coverageColor(pct) {
+  const ratio = Math.min(Math.max(pct / 100, 0), 1);
+
+  let r, g, b;
+  if (ratio < 0.5) {
+    const t = ratio * 2;
+    r = 21 + t * (69 - 21);
+    g = 86 + t * (170 - 86);
+    b = 97 + t * (176 - 97);
+  } else {
+    const t = (ratio - 0.5) * 2;
+    r = 69 + t * (127 - 69);
+    g = 170 + t * (244 - 170);
+    b = 176 + t * (227 - 176);
+  }
+  return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+}
+
+/**
+ * "Color by" metric registry for the overview map. Each metric supplies
+ * everything the UI needs to render one scalar per city consistently
+ * across the map rectangles, legend buckets, and scatter plots — so adding
+ * a metric (e.g. street coverage, #102) is one new entry here.
+ *
+ * Contract per metric:
+ *   valueOf(city)  → the adapted city record's value, or null when absent
+ *                    (null renders as the no-data gray and joins the
+ *                    "No data" legend row)
+ *   color(value, provider) → fill color for a value
+ *   bucketOf(value) → integer legend-bucket id for a (non-null) value
+ *   bucketLabel/bucketColor(bucket[, provider]) → legend row text/swatch
+ *   legendBuckets(values) → bucket ids in display order (given the
+ *                    non-null values present, for data-driven ranges)
+ *   rangeLabel(minBucket, maxBucket) → filter-readout text for an inclusive
+ *                    bucket range, e.g. "2–5 years" / "30–80%"
+ *   sliderLabel    → metric noun for the range-slider thumbs' aria-labels,
+ *                    e.g. "Minimum median age (years)"
+ *   formatValue(value) → tooltip text, e.g. "4.2 years" / "51.2%"
+ *   yMax           → scatter y-axis cap (null = auto)
+ */
+const METRICS = {
+  age: {
+    label: "Median age",
+    legendTitle: "Median Age (years)",
+    titleNoun: "Median Age",
+    axisTitle: "Median Age (years)",
+    yMax: null,
+    valueOf: (city) => city.pano_age_stats?.median_pano_age_years ?? null,
+    color: (value, provider) => getColor(value, provider),
+    bucketOf: (value) => Math.floor(value),
+    bucketLabel: (bucket) => `${bucket} year${bucket !== 1 ? "s" : ""}`,
+    bucketColor: (bucket, provider) => getColor(bucket, provider),
+    // 0..ceil(max median) ascending — newest (best) first, as before
+    legendBuckets: (values) => {
+      const maxYears = Math.ceil(Math.max(0, ...values));
+      return Array.from({ length: maxYears + 1 }, (_, i) => i);
+    },
+    rangeLabel: (min, max) => min === max
+      ? `${min} year${min !== 1 ? "s" : ""}`
+      : `${min}–${max} years`,
+    sliderLabel: "median age (years)",
+    formatValue: (v) => `${v.toFixed(1)} years`,
+  },
+  coverage: {
+    label: "Coverage",
+    legendTitle: "Grid Coverage (%)",
+    titleNoun: "Coverage %",
+    axisTitle: "Grid Coverage (%)",
+    yMax: 100,
+    valueOf: (city) => city.coverage_rate_percent ?? null,
+    // Coverage is cross-provider comparable (same frozen grid), so its
+    // color scale is provider-independent — unlike the age scale, which
+    // anchors to each provider's launch date.
+    color: (value) => coverageColor(value),
+    // Deciles: 0–10% … 90–100%; 100% folds into the top bucket (9)
+    bucketOf: (value) => Math.min(Math.floor(value / 10), 9),
+    bucketLabel: (bucket) => `${bucket * 10}–${bucket * 10 + 10}%`,
+    bucketColor: (bucket) => coverageColor(bucket * 10 + 5),
+    // 90–100% first — best-coverage top, mirroring newest-first for age
+    legendBuckets: () => Array.from({ length: 10 }, (_, i) => 9 - i),
+    // Decile bucket b spans [10b, 10b+10), so the upper edge is (max+1)*10
+    rangeLabel: (min, max) => `${min * 10}–${(max + 1) * 10}%`,
+    sliderLabel: "grid coverage (%)",
+    formatValue: (v) => `${v.toFixed(1)}%`,
+  },
+};
+
+/**
+ * True iff `key` is a real "color by" metric key ("age"/"coverage").
+ * Object.hasOwn for the same reason as isKnownProvider: a URL-supplied
+ * ?metric=constructor must never pass.
+ *
+ * @param {*} key - Candidate metric key (e.g. from a URL parameter).
+ * @returns {boolean}
+ */
+function isKnownMetric(key) {
+  return typeof key === "string" && Object.hasOwn(METRICS, key);
+}
+
+/**
+ * Parse a URL-supplied `?filter=MIN-MAX` value (inclusive bucket ids for
+ * the active metric) into a validated range. Like isKnownMetric, this
+ * treats the input as hostile: anything malformed, inverted, or outside
+ * [minBucket, maxBucket] is rejected rather than clamped, so a stale or
+ * hand-edited URL can't produce a half-applied filter.
+ *
+ * @param {*} str - Raw parameter value, e.g. "2-5".
+ * @param {number} minBucket - Lowest valid bucket id for the metric.
+ * @param {number} maxBucket - Highest valid bucket id for the metric.
+ * @returns {?{min: number, max: number}} The range, or null if invalid.
+ */
+function parseFilterParam(str, minBucket, maxBucket) {
+  if (typeof str !== "string") return null;
+  const match = /^(\d+)-(\d+)$/.exec(str);
+  if (!match) return null;
+  const min = parseInt(match[1], 10);
+  const max = parseInt(match[2], 10);
+  if (min > max || min < minBucket || max > maxBucket) return null;
+  return { min, max };
+}
+
+/**
  * True iff `key` is a real provider key ("gsv"/"mapillary").
  *
  * Uses Object.hasOwn rather than a truthy `PROVIDERS[key]` lookup so
@@ -436,8 +578,12 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     STREETSCAPE_DATA_BASE_URL,
     PROVIDERS,
+    METRICS,
     isKnownProvider,
+    isKnownMetric,
+    parseFilterParam,
     getColor,
+    coverageColor,
     escapeHtml,
     isValidRunFilename,
     getProviderFromFilename,

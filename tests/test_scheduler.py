@@ -5,10 +5,13 @@ from datetime import date
 
 from streetscape_metadata_tracker import db
 from streetscape_metadata_tracker.scheduler import (
+    ResourceGuardConfig,
     SchedulerConfig,
+    SystemPressure,
     build_parser,
     estimate_requests,
     load_scheduler_config,
+    plan_connection_limit,
 )
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -60,6 +63,9 @@ def test_run_one_city_command_defers_skip_policy_to_scheduler(conn, monkeypatch)
     cmd = captured["cmd"]
     i = cmd.index("--min-days-since-last-run")
     assert cmd[i + 1] == "0"
+    # Client-side quota pacing must reach every subprocess.
+    i = cmd.index("--max-requests-per-minute")
+    assert cmd[i + 1] == "24000"
     assert cmd[cmd.index("--") + 1] == city.display_name
     assert cmd[-1] == city.display_name
 
@@ -80,9 +86,38 @@ def test_estimate_requests_mapillary_counts_tiles(conn):
     assert tiles < estimate_requests(city) / 100
 
 
+def test_city_timeout_scales_with_grid_size(conn):
+    """A huge GSV grid gets a timeout derived from points ÷ rate (so it is not
+    SIGKILLed mid-run by the flat floor); a small city keeps the floor."""
+    from streetscape_metadata_tracker.scheduler import city_timeout_seconds
+
+    cfg = SchedulerConfig(city_timeout_minutes=180, max_requests_per_minute=24_000)
+    floor = 180 * 60
+
+    small = db.resolve_city(conn, _register(conn, "Bend", width=1000, height=1000, step=20))
+    assert city_timeout_seconds(cfg, small, "gsv") == floor  # 2601 pts, well under floor
+
+    big = db.resolve_city(conn, _register(conn, "Metropolis", width=40000, height=40000, step=20))
+    # ~4M points at 24k/min ≈ 167 min of paced requests; with headroom this
+    # must exceed the flat floor rather than clamp to it.
+    assert city_timeout_seconds(cfg, big, "gsv") > floor
+
+
+def test_city_timeout_floor_for_mapillary_and_disabled_pacing(conn):
+    from streetscape_metadata_tracker.scheduler import city_timeout_seconds
+
+    big = db.resolve_city(conn, _register(conn, "Metropolis", width=40000, height=40000, step=20))
+    floor = 180 * 60
+    # Mapillary is fast bulk metadata — keep the flat floor regardless of grid.
+    assert city_timeout_seconds(SchedulerConfig(), big, "mapillary") == floor
+    # No client-side pacing -> no basis to scale, keep the floor.
+    assert city_timeout_seconds(SchedulerConfig(max_requests_per_minute=0), big, "gsv") == floor
+
+
 def test_config_defaults_when_file_missing(tmp_path):
     cfg = load_scheduler_config(str(tmp_path / "nope.toml"))
     assert cfg.cycle_days == 90 and cfg.batch_size == 100
+    assert cfg.max_requests_per_minute == 24_000
     assert cfg.db_path.endswith("streetscape_tracker.db")
     # No [providers] config → gsv-only with the legacy budget
     assert cfg.enabled_providers() == ["gsv"]
@@ -97,6 +132,7 @@ cycle_days = 30
 daily_request_budget = 1000
 [download]
 batch_size = 7
+max_requests_per_minute = 48000
 [publish]
 enabled = true
 """)
@@ -104,6 +140,7 @@ enabled = true
     assert cfg.cycle_days == 30
     assert cfg.daily_request_budget == 1000
     assert cfg.batch_size == 7
+    assert cfg.max_requests_per_minute == 48000
     assert cfg.publish_enabled
     # v1-style toml (no [providers]): gsv-only, legacy budget honored
     assert cfg.enabled_providers() == ["gsv"]
@@ -210,10 +247,120 @@ def test_makelab1_production_config_is_wired():
     assert cfg.enabled_providers() == ["gsv", "mapillary"]
     assert cfg.publish_enabled
     assert cfg.publish_script.endswith("sync_data_to_server.sh")
-    assert cfg.alerts.enabled and cfg.alerts.transport == "mail" and cfg.alerts.recipient
+    # smtp transport (not "mail"): the local mailer is blocked by the systemd
+    # sandbox, so alerts go straight to the campus relay (issue #144).
+    assert cfg.alerts.enabled and cfg.alerts.transport == "smtp" and cfg.alerts.recipient
+    assert cfg.alerts.smtp_host and cfg.alerts.smtp_from
     # Data/DB live on lab storage (makelab2), not in the web docroot.
     assert "/projects/makeabilitylab/streetscape-tracker" in cfg.db_path
     assert "/cse/web/" not in cfg.db_path and "/cse/web/" not in cfg.data_dir
+    # Shared-host resource guard is active in production.
+    assert cfg.resource_guard.enabled
+
+
+def test_run_one_city_honors_connection_limit_override(conn, monkeypatch):
+    """The resource guard lowers concurrency by passing a connection_limit
+    override, which must reach the subprocess as --connection-limit."""
+    from streetscape_metadata_tracker import scheduler as sched
+
+    cid = _register(conn, "Bend")
+    city = db.resolve_city(conn, cid)
+    captured = {}
+
+    def fake_run(cmd, timeout=None, cwd=None):
+        captured["cmd"] = cmd
+
+        class R:
+            returncode = 0
+
+        return R()
+
+    monkeypatch.setattr(sched.subprocess, "run", fake_run)
+    assert sched._run_one_city(SchedulerConfig(), city, date(2026, 7, 1), "gsv", connection_limit=7)
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--connection-limit") + 1] == "7"
+
+
+def test_plan_connection_limit_no_pressure_keeps_base():
+    # No /proc data (non-Linux, read failure) → never throttle.
+    assert plan_connection_limit(50, None, ResourceGuardConfig()) == (50, None)
+
+
+def test_plan_connection_limit_disabled_is_noop():
+    cfg = ResourceGuardConfig(enabled=False)
+    starved = SystemPressure(load5=999.0, ncpu=8, mem_available_gb=0.1)
+    assert plan_connection_limit(50, starved, cfg) == (50, None)
+
+
+def test_plan_connection_limit_healthy_box_keeps_base():
+    cfg = ResourceGuardConfig()
+    healthy = SystemPressure(load5=1.0, ncpu=48, mem_available_gb=100.0)
+    assert plan_connection_limit(50, healthy, cfg) == (50, None)
+
+
+def test_plan_connection_limit_low_memory_drops_to_floor():
+    cfg = ResourceGuardConfig(min_available_memory_gb=8.0, min_connection_limit=5)
+    tight = SystemPressure(load5=0.0, ncpu=48, mem_available_gb=2.0)
+    limit, reason = plan_connection_limit(50, tight, cfg)
+    assert limit == 5
+    assert "low memory" in reason
+
+
+def test_plan_connection_limit_high_load_scales_proportionally():
+    # ceiling = 0.9 * 10 = 9; load 18 is 2× over → half the base.
+    cfg = ResourceGuardConfig(max_load_per_core=0.9, min_connection_limit=5)
+    busy = SystemPressure(load5=18.0, ncpu=10, mem_available_gb=64.0)
+    limit, reason = plan_connection_limit(50, busy, cfg)
+    assert limit == 25  # int(50 * 9 / 18)
+    assert "high load" in reason
+
+
+def test_plan_connection_limit_never_below_floor():
+    cfg = ResourceGuardConfig(min_connection_limit=5)
+    extreme = SystemPressure(load5=10_000.0, ncpu=8, mem_available_gb=100.0)
+    limit, _ = plan_connection_limit(50, extreme, cfg)
+    assert limit == 5
+
+
+def test_plan_connection_limit_no_reason_when_limit_unchanged():
+    # base already <= floor: "throttling" can't lower it, so no reason/no-op log.
+    cfg = ResourceGuardConfig(min_connection_limit=5)
+    starved = SystemPressure(load5=9999.0, ncpu=8, mem_available_gb=0.1)
+    assert plan_connection_limit(3, starved, cfg) == (3, None)
+
+
+def test_read_system_pressure_returns_none_when_proc_unavailable(monkeypatch):
+    import builtins
+
+    from streetscape_metadata_tracker import scheduler as sched
+
+    def boom(*a, **k):
+        raise OSError("no /proc here")
+
+    monkeypatch.setattr(builtins, "open", boom)
+    assert sched.read_system_pressure() is None
+
+
+def test_config_parses_resource_guard(tmp_path):
+    p = tmp_path / "s.toml"
+    p.write_text(
+        "[resource_guard]\n"
+        "enabled = true\n"
+        "min_available_memory_gb = 12.0\n"
+        "max_load_per_core = 0.5\n"
+        "min_connection_limit = 3\n"
+    )
+    cfg = load_scheduler_config(str(p))
+    assert cfg.resource_guard.enabled
+    assert cfg.resource_guard.min_available_memory_gb == 12.0
+    assert cfg.resource_guard.max_load_per_core == 0.5
+    assert cfg.resource_guard.min_connection_limit == 3
+
+
+def test_config_resource_guard_defaults_on(tmp_path):
+    cfg = load_scheduler_config(str(tmp_path / "nope.toml"))
+    assert cfg.resource_guard.enabled is True
+    assert cfg.resource_guard.min_connection_limit == 5
 
 
 def test_due_cities_stalest_first(conn):
@@ -281,7 +428,7 @@ def test_budget_ledger_defers_second_city_when_first_consumes_budget(conn, monke
 
     ran = []
 
-    def fake_run(cfg, city, run_today, provider="gsv"):
+    def fake_run(cfg, city, run_today, provider="gsv", connection_limit=None):
         # Simulate the real pipeline's ledger write for the requests spent
         db.add_api_usage(conn, run_today, sched.estimate_requests(city, provider), provider)
         ran.append(city.city_id)
@@ -327,7 +474,9 @@ def test_oversized_city_does_not_starve_queue(conn, monkeypatch):
     monkeypatch.setattr(
         sched,
         "_run_one_city",
-        lambda cfg, city, today, provider="gsv": ran.append(city.city_id) or True,
+        lambda cfg, city, today, provider="gsv", connection_limit=None: (
+            ran.append(city.city_id) or True
+        ),
     )
     monkeypatch.setattr(sched.db, "connect", lambda path: conn)
     monkeypatch.setattr(sched.time, "sleep", lambda s: None)
@@ -353,7 +502,7 @@ def test_run_due_pairs_providers_per_city(conn, monkeypatch):
     monkeypatch.setattr(
         sched,
         "_run_one_city",
-        lambda cfg, city, today, provider="gsv": (
+        lambda cfg, city, today, provider="gsv", connection_limit=None: (
             ran.append((city.city_id, provider)) or (provider == "gsv")
         ),
     )
@@ -402,7 +551,9 @@ def test_run_due_provider_budgets_are_independent(conn, monkeypatch):
     monkeypatch.setattr(
         sched,
         "_run_one_city",
-        lambda cfg, city, today, provider="gsv": ran.append((city.city_id, provider)) or True,
+        lambda cfg, city, today, provider="gsv", connection_limit=None: (
+            ran.append((city.city_id, provider)) or True
+        ),
     )
     monkeypatch.setattr(sched.db, "connect", lambda path: conn)
     monkeypatch.setattr(sched.time, "sleep", lambda s: None)

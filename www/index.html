@@ -36,6 +36,19 @@
     </label>
   </fieldset>
 
+  <fieldset id="metric-toggle" class="provider-toggle metric-toggle"
+            aria-label="Color cities by">
+    <legend class="visually-hidden">Color cities by</legend>
+    <label>
+      <input type="radio" name="metric" value="age" checked>
+      <span>Median age</span>
+    </label>
+    <label>
+      <input type="radio" name="metric" value="coverage">
+      <span>Coverage</span>
+    </label>
+  </fieldset>
+
   <div id="city-search" class="city-search" role="search" aria-label="Search cities">
     <input id="city-search-input" type="text"
            placeholder="Search for a city…"

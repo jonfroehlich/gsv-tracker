@@ -9,6 +9,7 @@ import geopy.distance
 import pytest
 
 from streetscape_metadata_tracker.download_common import (
+    AsyncRateLimiter,
     DownloadError,
     generate_grid_points,
     standardize_capture_date,
@@ -116,3 +117,95 @@ def test_download_error_is_an_exception():
     assert issubclass(DownloadError, Exception)
     with pytest.raises(DownloadError, match="boom"):
         raise DownloadError("boom")
+
+
+# ── AsyncRateLimiter ────────────────────────────────────────────────────────
+#
+# Deterministic: the limiter takes an injectable clock (time_func) and its
+# only sleep call is monkeypatched to advance that fake clock, so no test
+# here waits on real time.
+
+
+def _make_clock():
+    clock = {"t": 0.0}
+    return clock, (lambda: clock["t"])
+
+
+def _patch_sleep(monkeypatch, clock, sleeps):
+    import asyncio as aio
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+        clock["t"] += seconds
+
+    monkeypatch.setattr(aio, "sleep", fake_sleep)
+
+
+def _run(coro):
+    import asyncio as aio
+
+    return aio.run(coro)
+
+
+def test_rate_limiter_paces_to_configured_rate(monkeypatch):
+    clock, now = _make_clock()
+    sleeps = []
+    _patch_sleep(monkeypatch, clock, sleeps)
+    limiter = AsyncRateLimiter(60, time_func=now)  # 1 token/s, burst 1
+
+    async def scenario():
+        for _ in range(3):
+            await limiter.acquire()
+
+    _run(scenario())
+    # First acquisition spends the initial token; each subsequent one must
+    # wait a full second for the next token to accrue.
+    assert sleeps == [pytest.approx(1.0), pytest.approx(1.0)]
+
+
+def test_rate_limiter_allows_one_second_burst(monkeypatch):
+    clock, now = _make_clock()
+    sleeps = []
+    _patch_sleep(monkeypatch, clock, sleeps)
+    limiter = AsyncRateLimiter(600, time_func=now)  # 10 tokens/s, burst 10
+
+    async def scenario():
+        for _ in range(10):
+            await limiter.acquire()  # burst capacity: no waiting
+        await limiter.acquire()  # 11th must wait one token interval
+
+    _run(scenario())
+    assert sleeps == [pytest.approx(0.1)]
+
+
+def test_rate_limiter_refills_while_idle_but_caps_at_capacity(monkeypatch):
+    clock, now = _make_clock()
+    sleeps = []
+    _patch_sleep(monkeypatch, clock, sleeps)
+    limiter = AsyncRateLimiter(600, time_func=now)  # 10 tokens/s, burst 10
+
+    async def scenario():
+        for _ in range(10):
+            await limiter.acquire()  # drain the bucket
+        clock["t"] += 3600.0  # a long idle refills at most to capacity
+        for _ in range(10):
+            await limiter.acquire()  # burst again without waiting
+        await limiter.acquire()  # ...but the 11th still waits
+
+    _run(scenario())
+    assert sleeps == [pytest.approx(0.1)]
+
+
+def test_rate_limiter_zero_or_negative_disables(monkeypatch):
+    clock, now = _make_clock()
+    sleeps = []
+    _patch_sleep(monkeypatch, clock, sleeps)
+
+    async def scenario():
+        for max_per_minute in (0, -5):
+            limiter = AsyncRateLimiter(max_per_minute, time_func=now)
+            for _ in range(100):
+                await limiter.acquire()
+
+    _run(scenario())
+    assert sleeps == []

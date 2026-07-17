@@ -15,8 +15,10 @@ import pandas as pd
 from filelock import FileLock, Timeout
 from tqdm import tqdm
 
+from .analysis import REQUEST_FAILED, RETRYABLE_STATUSES
 from .config import METADATA_DTYPES
 from .download_common import (
+    AsyncRateLimiter,
     DownloadError,
     generate_grid_points,
     redact_credentials,
@@ -27,6 +29,10 @@ from .fileutils import load_city_csv_file
 logger = logging.getLogger(__name__)
 
 __all__ = ["download_gsv_metadata_async", "fetch_gsv_pano_metadata_async"]
+
+# A run whose permanently-failed points exceed this fraction of the grid is
+# aborted (checkpoint kept) instead of finalized as an immutable snapshot.
+MAX_FAILED_POINT_FRACTION = 0.01
 
 
 def create_helpful_permission_error(path: str) -> str:
@@ -55,6 +61,7 @@ async def fetch_gsv_pano_metadata_async(
     api_key: str,
     session: aiohttp.ClientSession,
     timeout: aiohttp.ClientTimeout,
+    limiter: AsyncRateLimiter | None = None,
 ) -> dict[str, Any]:
     """
     Get the closest pano data from Google Street View API using aiohttp with retry logic.
@@ -65,6 +72,8 @@ async def fetch_gsv_pano_metadata_async(
         api_key: Google Street View API key
         session: aiohttp ClientSession for making requests
         timeout: Request timeout settings
+        limiter: Optional rate limiter; acquired before every attempt
+            (including backoff retries) so retried requests are paced too
 
     Returns:
         Dict containing the API response
@@ -76,6 +85,8 @@ async def fetch_gsv_pano_metadata_async(
     # text touching this URL must be scrubbed with redact_credentials()
     # before it is logged or re-raised.
     url = f"https://maps.googleapis.com/maps/api/streetview/metadata?location={lat},{lon}&key={api_key}"
+    if limiter is not None:
+        await limiter.acquire()
     try:
         async with session.get(url, timeout=timeout) as response:
             if response.status != 200:
@@ -108,9 +119,21 @@ def resume_point_key(lat: float, lon: float) -> tuple[float, float]:
     return (round(lat, 9), round(lon, 9))
 
 
+# Checkpoint rows carrying one of these statuses are NOT terminal answers —
+# a resume must re-request them, never treat them as done. This also disarms
+# checkpoints written by the pre-rate-limit code (throttled points baked in as
+# OVER_QUERY_LIMIT rows) so a same-date re-collect can't inherit that taint.
+_NON_TERMINAL_STATUSES = frozenset(RETRYABLE_STATUSES) | {REQUEST_FAILED}
+
+
 def get_processed_points(file_path: str) -> set:
     """
     Get set of already processed points from existing download file.
+
+    Rows whose status is non-terminal (still-retryable throttling/transient
+    statuses, or a REQUEST_FAILED hole) are excluded, so resuming a partial
+    download always re-requests those points instead of accepting a failure
+    row as a final answer.
 
     Args:
         file_path: Path to the intermediate download file
@@ -124,6 +147,7 @@ def get_processed_points(file_path: str) -> set:
 
     try:
         df = pd.read_csv(file_path, dtype=METADATA_DTYPES)
+        df = df[~df["status"].isin(_NON_TERMINAL_STATUSES)]
         return {resume_point_key(row["query_lat"], row["query_lon"]) for _, row in df.iterrows()}
     except Exception as e:
         logger.error(f"Error reading existing file: {str(e)}")
@@ -138,6 +162,7 @@ async def process_batch_async(
     timeout: aiohttp.ClientTimeout,
     connection_limit: int,
     failed_points_queue: asyncio.Queue,
+    limiter: AsyncRateLimiter | None = None,
 ) -> list[dict]:
     """
     Process a batch of points asynchronously and append results to the
@@ -153,7 +178,7 @@ async def process_batch_async(
         async with aiohttp.ClientSession(connector=connector) as session:
             tasks = []
             for lat, lon, _i, _j in points:
-                task = fetch_gsv_pano_metadata_async(lat, lon, api_key, session, timeout)
+                task = fetch_gsv_pano_metadata_async(lat, lon, api_key, session, timeout, limiter)
                 tasks.append(task)
 
             responses = await asyncio.gather(*tasks, return_exceptions=True)
@@ -164,7 +189,10 @@ async def process_batch_async(
                     logger.error(
                         f"Error processing point ({lat}, {lon}): {redact_credentials(response)}"
                     )
-                    await failed_points_queue.put((lat, lon, i, j))
+                    # No body status came back (network/timeout). Carry the
+                    # synthetic REQUEST_FAILED reason so a permanently-failed
+                    # point can be written back as a failure row.
+                    await failed_points_queue.put((lat, lon, i, j, REQUEST_FAILED))
                     continue
 
                 # Get the current UTC datetime
@@ -174,6 +202,20 @@ async def process_batch_async(
                 query_timestamp = now_utc.isoformat()
 
                 status = response["status"]
+
+                # Retryable statuses (quota throttling as a normal HTTP 200
+                # OVER_QUERY_LIMIT, or a transient UNKNOWN_ERROR) say nothing
+                # about the grid point itself, so route them to the retry
+                # queue rather than writing them as a final row now — a
+                # throttle row written immediately reads as "no imagery" and
+                # corrupts coverage stats and future diffs. If a point is
+                # still retryable after every pass, it is written back as a
+                # failure row at finalize time (grid stays complete) with its
+                # true status preserved here.
+                if status in RETRYABLE_STATUSES:
+                    await failed_points_queue.put((lat, lon, i, j, status))
+                    continue
+
                 result = {
                     "query_lat": lat,
                     "query_lon": lon,
@@ -243,6 +285,46 @@ async def process_batch_async(
     return results
 
 
+def _append_failure_rows(downloading_path: str, failed_points: list[tuple], lock_file: str) -> None:
+    """
+    Append one failure row per permanently-failed grid point to the in-progress
+    CSV, so the finalized snapshot has a row for every grid point (run-to-run
+    diff alignment depends on this — see download_gsv_metadata_async). Each row
+    carries the point's true failure status (REQUEST_FAILED, OVER_QUERY_LIMIT,
+    …) with all pano fields null, so it is excluded from coverage/pano stats
+    but keeps the grid complete.
+
+    Args:
+        downloading_path: the in-progress .downloading CSV to append to
+        failed_points: (lat, lon, i, j, status) tuples still failing after all
+            retries
+        lock_file: the same FileLock path process_batch_async writes under
+    """
+    now_utc = datetime.now(UTC).isoformat()
+    rows = [
+        {
+            "query_lat": lat,
+            "query_lon": lon,
+            "query_timestamp": now_utc,
+            "pano_lat": None,
+            "pano_lon": None,
+            "pano_id": None,
+            "capture_date": None,
+            "copyright_info": None,
+            "status": reason,
+        }
+        for (lat, lon, _i, _j, reason) in failed_points
+    ]
+    df_fail = pd.DataFrame(rows).astype(METADATA_DTYPES)
+
+    lock = FileLock(lock_file, timeout=10)
+    with lock:
+        if os.path.exists(downloading_path):
+            df_fail.to_csv(downloading_path, mode="a", header=False, index=False)
+        else:
+            df_fail.to_csv(downloading_path, index=False)
+
+
 async def download_gsv_metadata_async(
     city_name: str,
     center_lat: float,
@@ -256,6 +338,7 @@ async def download_gsv_metadata_async(
     connection_limit: int = 50,
     request_timeout: float = 30.0,
     max_retries: int = 3,
+    max_requests_per_minute: int = 24_000,
 ) -> dict[str, Any]:
     """
     Fetch GSV metadata for a city using async/await pattern with safe intermediate file saving.
@@ -277,6 +360,12 @@ async def download_gsv_metadata_async(
         connection_limit: Maximum number of concurrent connections to the API
         request_timeout: Timeout for each request in seconds
         max_retries: Maximum number of retry attempts for failed points
+        max_requests_per_minute: Client-side pacing cap shared by all
+            concurrent requests in this run. Default 24,000 is 80% of the
+            GSV metadata API's default 30,000/min project quota; scale it
+            with your granted quota. <= 0 disables pacing. Exceeding the
+            server-side quota is not just slower — throttled points burn
+            retries and can abort the run via the failed-point guard.
 
     Returns:
         Dict with:
@@ -297,6 +386,13 @@ async def download_gsv_metadata_async(
 
     # Set up timeout
     timeout = aiohttp.ClientTimeout(total=request_timeout)
+
+    # One limiter for the whole run: initial batches and retry passes share
+    # the same token bucket, so the aggregate request rate stays under the
+    # per-minute quota no matter how the work is scheduled.
+    limiter = AsyncRateLimiter(max_requests_per_minute)
+    if max_requests_per_minute > 0:
+        logger.info(f"Client-side rate limit: {max_requests_per_minute} requests/minute")
 
     # Derive working file paths from the requested output path
     if not output_csv_gz_path.endswith(".csv.gz"):
@@ -393,6 +489,7 @@ async def download_gsv_metadata_async(
                     timeout,
                     connection_limit,
                     failed_points_queue,
+                    limiter,
                 )
 
                 # Update progress bar
@@ -400,52 +497,100 @@ async def download_gsv_metadata_async(
                     await progress_queue.get()
                     progress_bar.update(1)
 
-            # Process failed points with retries
+            # Process failed points with retries. A retryable API status
+            # (OVER_QUERY_LIMIT/UNKNOWN_ERROR) means the provider's per-minute
+            # quota window needs to reset before we re-request, so sleep
+            # BEFORE the pass, not after — a retry fired inside the same
+            # exhausted minute just burns an attempt and gets throttled again.
+            # Plain network/timeout stragglers (REQUEST_FAILED) only need a
+            # short backoff.
             retry_count = 0
             while not failed_points_queue.empty() and retry_count < max_retries:
                 retry_count += 1
-                logger.info(f"Starting retry attempt {retry_count} for failed points")
 
-                # Collect all failed points for this retry attempt
+                # Drain the queue for this pass, preserving each point's
+                # failure reason (needed if it stays failed to the very end).
                 failed_points = []
                 while not failed_points_queue.empty():
                     failed_points.append(await failed_points_queue.get())
 
-                if failed_points:
-                    logger.info(f"Retrying {len(failed_points)} failed points")
-                    for i in range(0, len(failed_points), batch_size):
-                        batch_points = failed_points[i : i + batch_size]
-                        api_requests += len(batch_points)
-                        await process_batch_async(
-                            batch_points,
-                            api_key,
-                            progress_queue,
-                            file_name_downloading_with_path,
-                            timeout,
-                            connection_limit,
-                            failed_points_queue,
-                        )
+                throttled = any(reason in RETRYABLE_STATUSES for *_coords, reason in failed_points)
+                delay = (20 * retry_count) if throttled else (2 * retry_count)
+                logger.info(
+                    f"Retry attempt {retry_count} for {len(failed_points)} failed points; "
+                    f"waiting {delay}s first "
+                    f"({'quota window reset' if throttled else 'transient backoff'})"
+                )
+                await asyncio.sleep(delay)
 
-                # Wait a bit before next retry
-                if retry_count < max_retries and not failed_points_queue.empty():
-                    await asyncio.sleep(5 * retry_count)  # Increasing delay between retries
+                # process_batch_async takes 4-tuples; strip the reason.
+                retry_batch = [(lat, lon, gi, gj) for (lat, lon, gi, gj, _r) in failed_points]
+                for start in range(0, len(retry_batch), batch_size):
+                    batch_points = retry_batch[start : start + batch_size]
+                    api_requests += len(batch_points)
+                    await process_batch_async(
+                        batch_points,
+                        api_key,
+                        progress_queue,
+                        file_name_downloading_with_path,
+                        timeout,
+                        connection_limit,
+                        failed_points_queue,
+                        limiter,
+                    )
 
-            # Log any permanently failed points
+                while not progress_queue.empty():
+                    await progress_queue.get()
+                    progress_bar.update(1)
+
+            # Collect any permanently failed points (still failing after every
+            # retry pass), preserving each point's reason.
             remaining_failed = []
             while not failed_points_queue.empty():
-                point = await failed_points_queue.get()
-                remaining_failed.append(point)
+                remaining_failed.append(await failed_points_queue.get())
 
             if remaining_failed:
                 logger.error(
                     f"Failed to download data for {len(remaining_failed)} points after all retries"
                 )
                 with open(failed_points_file, "w") as f:
-                    f.write("lat,lon,i,j\n")  # Write header
-                    for lat, lon, i, j in remaining_failed:
-                        f.write(f"{lat},{lon},{i},{j}\n")
+                    f.write("lat,lon,i,j,status\n")  # Write header
+                    for lat, lon, i, j, reason in remaining_failed:
+                        f.write(f"{lat},{lon},{i},{j},{reason}\n")
 
             progress_bar.close()
+
+            # Refuse to finalize a run with too many holes (cf. the history
+            # harvester's same guard). A heavily throttled/failed run would
+            # otherwise register as a clean-looking snapshot that silently
+            # lost coverage — invisible to detect_systemic_failure, poison for
+            # run-to-run diffs. The .downloading checkpoint holds only terminal
+            # rows (failed points are NOT written to it), so a same-date resume
+            # re-requests exactly the points that failed.
+            if len(remaining_failed) > MAX_FAILED_POINT_FRACTION * len(all_points):
+                raise DownloadError(
+                    f"{len(remaining_failed)} of {len(all_points)} grid points "
+                    f"({len(remaining_failed) / len(all_points):.1%}) still failed after "
+                    f"{max_retries} retries (> {MAX_FAILED_POINT_FRACTION:.0%} threshold); "
+                    f"refusing to finalize an incomplete snapshot. Partial progress is "
+                    f"checkpointed at {file_name_downloading_with_path}; re-running with the "
+                    f"SAME --run-date resumes it (a new run date starts fresh — nothing "
+                    f"resumes and the full request budget is re-spent)."
+                )
+
+            # Under the threshold: write the residual failures back as rows so
+            # every grid point is present in the finalized snapshot. Diffs
+            # require exact grid-key equality (diff.compute_run_diff); a missing
+            # point flips grid_aligned to False and misreports panos sampled
+            # only there as removed. Rows carry their true failure status, so
+            # they stay out of coverage/pano stats and are findable by
+            # scripts/purge_tainted_runs.py.
+            if remaining_failed:
+                _append_failure_rows(
+                    file_name_downloading_with_path,
+                    remaining_failed,
+                    f"{file_name_downloading_with_path}.lock",
+                )
 
             # Rename the downloading file to final csv
             os.rename(file_name_downloading_with_path, file_name_with_path)

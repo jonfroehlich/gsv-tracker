@@ -168,6 +168,84 @@ def test_provider_toggle_persists_via_query_param(page: Page, base_url):
     expect(page.locator("path.leaflet-interactive")).to_have_count(1)
 
 
+def test_metric_toggle_recolors_and_persists_via_query_param(page: Page, base_url):
+    errors = _capture_errors(page)
+    page.goto(f"{base_url}/index.html")
+    expect(page.locator("path.leaflet-interactive")).to_have_count(2)
+    expect(page.locator("#legend h4")).to_have_text("Median Age (years)")  # default
+
+    page.locator('input[name="metric"][value="coverage"]').check()
+    page.wait_for_url("**metric=coverage**")
+    # Same cities, recolored: legend switches to coverage deciles, and the
+    # popup's always-on coverage line renders a percentage (no NaN/Infinity).
+    expect(page.locator("path.leaflet-interactive")).to_have_count(2)
+    expect(page.locator("#legend h4")).to_have_text("Grid Coverage (%)")
+    page.locator("path.leaflet-interactive").first.click(force=True)
+    popup = page.locator(".leaflet-popup-content")
+    expect(popup).to_have_count(1)
+    assert "Grid Coverage:" in popup.inner_text()
+    page.keyboard.press("Escape")
+
+    # The choice survives a reload (persisted in the URL, re-read on load).
+    page.reload()
+    expect(page.locator('input[name="metric"][value="coverage"]')).to_be_checked()
+    expect(page.locator("#legend h4")).to_have_text("Grid Coverage (%)")
+
+    assert errors == []
+
+
+def test_legend_range_filter_slider(page: Page, base_url):
+    """The legend's min-max range slider filters (dims) out-of-range buckets,
+    persists via ?filter=, and legend rows snap the range to one bucket."""
+    errors = _capture_errors(page)
+    # Coverage metric: the slider span is always the full 10 deciles.
+    page.goto(f"{base_url}/index.html?metric=coverage")
+    expect(page.locator("path.leaflet-interactive")).to_have_count(2)
+
+    # Keyboard on the max thumb: 9 -> 8 activates a 0-8 decile filter.
+    hi = page.locator("#legend-slider-hi")
+    expect(hi).to_be_visible()
+    hi.focus()
+    page.keyboard.press("ArrowLeft")
+    page.wait_for_url("**filter=0-8**")
+    expect(page.locator("#legend-filter-label")).to_have_text("0–90%")
+    # Exactly the 90-100% row falls outside the range and dims.
+    expect(page.locator("button.legend-item.dimmed")).to_have_count(1)
+
+    # A row click snaps the filter to that single bucket...
+    page.locator('button.legend-item[data-bucket="0"]').click()
+    page.wait_for_url("**filter=0-0**")
+    expect(page.locator("#legend-filter-label")).to_have_text("0–10%")
+    expect(page.locator("button.legend-item.dimmed")).to_have_count(9)
+    # ...and a second click on the sole-selected row clears the filter.
+    page.locator('button.legend-item[data-bucket="0"]').click()
+    expect(page.locator("button.legend-item.dimmed")).to_have_count(0)
+    assert "filter=" not in page.url
+    expect(page.locator("#legend-filter-label")).to_have_text("all cities")
+
+    # A URL-supplied filter is pre-applied on load.
+    page.goto(f"{base_url}/index.html?metric=coverage&filter=3-7")
+    expect(page.locator("#legend-filter-label")).to_have_text("30–80%")
+    expect(page.locator("button.legend-item.dimmed")).to_have_count(5)
+
+    # Dragging the filled window itself slides it, width preserved:
+    # 3-7 dragged two deciles right becomes 5-9.
+    slider_box = page.locator("#legend .legend-slider").bounding_box()
+    fill_box = page.locator("#legend-slider-fill").bounding_box()
+    per_decile = slider_box["width"] / 9
+    x = fill_box["x"] + fill_box["width"] / 2
+    y = fill_box["y"] + fill_box["height"] / 2
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x + 2 * per_decile, y, steps=8)
+    page.mouse.up()
+    page.wait_for_url("**filter=5-9**")
+    expect(page.locator("#legend-filter-label")).to_have_text("50–100%")
+    expect(page.locator("button.legend-item.dimmed")).to_have_count(5)
+
+    assert errors == []
+
+
 def test_city_page_multirun_gsv_renders_chart_and_snapshot_select(page: Page, base_url):
     errors = _capture_errors(page)
     page.goto(f"{base_url}/city.html?file={ALPHA_LATEST}")
