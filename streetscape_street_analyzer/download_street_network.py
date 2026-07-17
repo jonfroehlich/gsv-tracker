@@ -21,6 +21,7 @@ import sqlite3
 import geopandas as gpd
 import networkx as nx
 import osmnx as ox
+import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from streetscape_metadata_tracker import db
@@ -152,17 +153,26 @@ def graph_to_edges(graph: nx.MultiDiGraph) -> gpd.GeoDataFrame:
     """
     Flatten a street graph to a WGS84 edge GeoDataFrame for coverage matching.
 
-    Keeps one row per undirected edge (osmnx returns both directions of a
-    two-way street; they share geometry, so we drop duplicates) with ``highway``,
-    ``length`` (metres), and LineString ``geometry``.
+    Keeps one row per *undirected* edge with ``highway``, ``length`` (metres),
+    and LineString ``geometry``. osmnx emits both directions of a two-way
+    street as two directed edges; we collapse them by their unordered (u, v)
+    node pair. We deliberately do NOT dedup on geometry WKB: osmnx orients each
+    directed edge's geometry in its own travel direction, so the reciprocal
+    edge's LineString is coordinate-reversed and its WKB differs — a WKB compare
+    would keep both and double-count every two-way segment.
     """
     edges = ox.graph_to_gdfs(graph, nodes=False)
-    keep = [c for c in ("highway", "length", "geometry") if c in edges.columns]
-    edges = edges[keep].reset_index(drop=True)
+    # graph_to_gdfs indexes edges by (u, v, key); collapse reciprocal directed
+    # edges (v, u) onto (u, v) via an order-independent node-pair key.
+    u = edges.index.get_level_values("u")
+    v = edges.index.get_level_values("v")
+    undirected_key = pd.Series(
+        [frozenset((a, b)) for a, b in zip(u, v, strict=True)], index=edges.index
+    )
 
-    # Collapse reciprocal directed edges (identical geometry) to avoid
-    # double-counting segments in the coverage stats.
-    edges = edges.loc[~edges.geometry.apply(lambda g: g.wkb).duplicated()].reset_index(drop=True)
+    keep = [c for c in ("highway", "length", "geometry") if c in edges.columns]
+    edges = edges[keep]
+    edges = edges.loc[~undirected_key.duplicated()].reset_index(drop=True)
     return edges
 
 

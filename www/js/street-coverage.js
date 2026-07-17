@@ -50,6 +50,12 @@ const STREET_PANEL_BG = "#1b1f24";
  * to OSM highway classes in importance order. Any class outside this set
  * (living_street, other, unknown) folds into a neutral "minor" gray rather than
  * cycling a hue — per the dataviz rule that a 9th category is never a new color.
+ *
+ * This is DELIBERATELY narrower than the Python side's `_HIGHWAY_BUCKETS`
+ * (street_coverage.py), which recognizes `living_street` as its own bucket.
+ * Don't "sync" them by adding a 9th color here: the analyzer may emit a
+ * `living_street` bucket, and it is meant to render as the minor gray. Only
+ * these eight get a dedicated hue.
  */
 const STREET_TYPE_COLORS = {
   motorway: "#3987e5",
