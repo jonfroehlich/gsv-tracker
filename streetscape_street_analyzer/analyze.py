@@ -37,6 +37,37 @@ from .street_coverage import (
 logger = logging.getLogger(__name__)
 
 
+def _warn_no_panos(df, provider: str) -> None:
+    """
+    Explain why a run yielded zero located panos so the resulting all-uncovered
+    (0% coverage) artifact isn't mistaken for a real coverage gap.
+
+    The common GSV cause is a legacy pre-copyright baseline CSV: ``copyright_info``
+    is entirely empty, so nothing matches the official ``© Google`` filter. This
+    reflects missing metadata, not missing imagery. Otherwise the run genuinely
+    carries no imagery this provider counts (e.g. only third-party GSV panos).
+    """
+    legacy_no_copyright = (
+        provider == "gsv"
+        and "copyright_info" in df.columns
+        and df["copyright_info"].notna().sum() == 0
+    )
+    if legacy_no_copyright:
+        logger.warning(
+            "0 panos selected: this run's CSV has no copyright_info at all (a "
+            "legacy pre-copyright baseline), so nothing matches the official "
+            "'© Google' filter. The artifact will show 0% coverage — that is "
+            "missing metadata, NOT missing imagery. Consider re-collecting this "
+            "city before publishing a streets artifact for it."
+        )
+    else:
+        logger.warning(
+            "0 panos selected; the coverage artifact will be entirely uncovered "
+            "(0% coverage). For GSV this means the run has no official "
+            "'© Google' imagery (e.g. only third-party contributor panos)."
+        )
+
+
 def _select_run(conn, city_id: str, provider: str, run_date: str | None) -> RunRow | None:
     """Latest run for the (city, provider), or the one on an explicit run_date."""
     if run_date is None:
@@ -80,6 +111,8 @@ def run_analysis(args: argparse.Namespace) -> int:
         df = load_city_csv_file(csv_path)
         panos = select_pano_points(df, args.provider)
         logger.info("Selected %d located panos", len(panos))
+        if len(panos) == 0:
+            _warn_no_panos(df, args.provider)
 
         edges = fetch_street_edges(city, data_dir, refresh=args.refresh, conn=conn)
         logger.info("Fetched %d street segments", len(edges))

@@ -9,6 +9,7 @@ only real I/O is the tmp catalog and a tiny csv.gz run file.
 
 import gzip
 import json
+import logging
 import os
 
 import geopandas as gpd
@@ -127,6 +128,56 @@ def test_analyze_explicit_run_date_and_refresh_flag(data_dir, fake_edges):
     assert _run(data_dir, "Bend, Oregon, United States", "--run-date", "2026-04-01") == 1
     assert _run(data_dir, "Bend, Oregon, United States", "--refresh") == 0
     assert fake_edges["refresh"] is True
+
+
+def _overwrite_run_csv(data_dir, copyright_values):
+    """Rewrite the latest run's csv.gz with two on-street OK panos whose only
+    difference is their copyright_info column."""
+    df = pd.DataFrame(
+        {
+            "query_lat": [44.0500, 44.0500],
+            "query_lon": [-121.3100, -121.3095],
+            "query_timestamp": ["2026-07-02T00:00:00+00:00"] * 2,
+            "pano_lat": [44.0500, 44.0500],
+            "pano_lon": [-121.3100, -121.3095],
+            "pano_id": ["a", "b"],
+            "capture_date": ["2024-07-01", "2025-07-01"],
+            "copyright_info": copyright_values,
+            "status": ["OK", "OK"],
+        }
+    )
+    df.to_csv(os.path.join(data_dir, RUN_CSV), index=False, compression="gzip")
+
+
+def _covered_count(data_dir):
+    out_path = os.path.join(
+        data_dir,
+        "bend--oregon--united-states_width_5000_height_5000_step_20_2026-07-02_streets.json.gz",
+    )
+    with gzip.open(out_path, "rt") as fh:
+        return json.load(fh)["properties"]["metadata"]["totals"]["covered"]
+
+
+def test_analyze_warns_on_legacy_no_copyright(data_dir, fake_edges, caplog):
+    # A legacy pre-copyright baseline: copyright_info entirely empty. Nothing
+    # matches the © Google filter, so the artifact is all-uncovered — and the
+    # analyzer must say so rather than let it read as a real coverage gap.
+    _overwrite_run_csv(data_dir, [None, None])
+    with caplog.at_level(logging.WARNING):
+        assert _run(data_dir, "Bend, Oregon, United States") == 0
+    assert "legacy pre-copyright baseline" in caplog.text
+    assert _covered_count(data_dir) == 0
+
+
+def test_analyze_warns_on_third_party_only(data_dir, fake_edges, caplog):
+    # Modern CSV, but every pano is third-party (no official Google imagery):
+    # correctly 0 covered, and the warning must NOT blame legacy metadata.
+    _overwrite_run_csv(data_dir, ["© Joel Cohen", "© Morty Globus"])
+    with caplog.at_level(logging.WARNING):
+        assert _run(data_dir, "Bend, Oregon, United States") == 0
+    assert "no official" in caplog.text
+    assert "legacy pre-copyright baseline" not in caplog.text
+    assert _covered_count(data_dir) == 0
 
 
 def test_analyze_error_exits(data_dir, fake_edges, tmp_path_factory):
