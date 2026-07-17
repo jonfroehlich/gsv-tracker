@@ -52,10 +52,20 @@ publish_script = "/projects/makeabilitylab/streetscape-tracker/sync_data_to_serv
 
 [alerts]
 # Email on an unhealthy night (>= failure_threshold failed collections) or crash.
-# makelab1's /usr/bin/mail delivers to cs.uw.edu with no relay setup.
+# transport = "smtp" (not "mail"): the local mailer is silently BLOCKED under
+# the systemd sandbox — its setgid postdrop path trips NoNewPrivileges, so the
+# alert never sends even though the failure is detected (#144). The stdlib
+# smtplib path talks to the campus relay directly and works in the sandbox.
 enabled = true
 recipient = "jonf@cs.uw.edu"
-transport = "mail"
+transport = "smtp"
+# Campus relay: reachable from makelab2, unauthenticated for on-campus hosts,
+# plain port 25 (verified 2026-07-17). smtp_from MUST be a real deliverable
+# address — the relay rejects streetscape-tracker@<hostname> as "Address
+# unknown", so alerts appear to come from jonf@ (Reply-To not needed).
+smtp_host = "smtp.cs.washington.edu"
+smtp_port = 25
+smtp_from = "jonf@cs.washington.edu"
 failure_threshold = 1
 subject_prefix = "[streetscape-tracker]"
 

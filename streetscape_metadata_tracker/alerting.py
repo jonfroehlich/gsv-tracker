@@ -15,16 +15,25 @@ logs its own errors and always returns a bool.
 """
 
 import logging
+import os
+import smtplib
 import socket
 import subprocess
 from dataclasses import dataclass
+from email.message import EmailMessage
 
 logger = logging.getLogger(__name__)
 
 # Known transports. "command" is the escape hatch: an arbitrary shell command
 # that receives the body on stdin and the subject/recipient via the
 # STREETSCAPE_ALERT_SUBJECT / STREETSCAPE_ALERT_TO environment variables.
-TRANSPORTS = ("mail", "msmtp", "sendmail", "command")
+# "smtp" talks to a relay directly via stdlib smtplib — no local mailer,
+# so it survives a hardened systemd sandbox (NoNewPrivileges blocks the
+# setgid postdrop path that "mail"/sendmail need). See issue #144.
+TRANSPORTS = ("mail", "msmtp", "sendmail", "command", "smtp")
+
+# Env var an SMTP password may be read from, so the toml can stay secret-free.
+SMTP_PASSWORD_ENV = "STREETSCAPE_ALERT_SMTP_PASSWORD"
 
 
 @dataclass
@@ -40,11 +49,40 @@ class AlertConfig:
     # occasional flaky single city.
     failure_threshold: int = 1
     subject_prefix: str = "[streetscape-tracker]"
+    # --- transport == "smtp" only (all optional but smtp_host) ---
+    smtp_host: str = ""
+    smtp_port: int = 25
+    smtp_from: str = ""  # defaults to streetscape-tracker@<hostname>
+    smtp_starttls: bool = False
+    smtp_user: str = ""  # set together with a password to authenticate
+    # Password for smtp_user. Prefer the SMTP_PASSWORD_ENV env var over the
+    # toml; the env value wins when both are set.
+    smtp_password: str = ""
 
 
 def _message_with_headers(recipient: str, subject: str, body: str) -> str:
     """An RFC-822-ish message for SMTP-style transports (msmtp/sendmail)."""
     return f"To: {recipient}\nSubject: {subject}\nFrom: streetscape-tracker@{socket.gethostname()}\n\n{body}\n"
+
+
+def _default_smtp_from() -> str:
+    """Sender used when [alerts] smtp_from is unset."""
+    return f"streetscape-tracker@{socket.gethostname()}"
+
+
+def build_smtp_message(sender: str, recipient: str, subject: str, body: str) -> EmailMessage:
+    """
+    Build the EmailMessage sent by the ``smtp`` transport.
+
+    Side-effect-free (no network) so tests can assert the headers/body without
+    a relay. ``sender`` empty falls back to ``streetscape-tracker@<hostname>``.
+    """
+    msg = EmailMessage()
+    msg["From"] = sender or _default_smtp_from()
+    msg["To"] = recipient
+    msg["Subject"] = subject
+    msg.set_content(body)
+    return msg
 
 
 def build_send_plan(
@@ -79,6 +117,30 @@ def should_alert(failures: int, threshold: int) -> bool:
     return failures >= max(1, threshold)
 
 
+def _send_smtp(cfg: AlertConfig, subject: str, full_subject: str, body: str) -> bool:
+    """
+    Send via stdlib smtplib straight to a relay — no local mailer, so a
+    hardened systemd sandbox can't break it (issue #144). Never raises.
+    """
+    if not cfg.smtp_host:
+        logger.error('Alert not sent — transport "smtp" requires [alerts] smtp_host')
+        return False
+    password = os.environ.get(SMTP_PASSWORD_ENV) or cfg.smtp_password
+    msg = build_smtp_message(cfg.smtp_from, cfg.recipient, full_subject, body)
+    try:
+        with smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=30) as smtp:
+            if cfg.smtp_starttls:
+                smtp.starttls()
+            if cfg.smtp_user:
+                smtp.login(cfg.smtp_user, password)
+            smtp.send_message(msg)
+    except (OSError, smtplib.SMTPException) as e:
+        logger.error(f"Alert send failed (smtp {cfg.smtp_host}:{cfg.smtp_port}): {e}")
+        return False
+    logger.info(f"Alert emailed to {cfg.recipient} via smtp {cfg.smtp_host}: {subject}")
+    return True
+
+
 def send_alert(cfg: AlertConfig, subject: str, body: str) -> bool:
     """
     Best-effort send. Returns True only if the transport command exited 0.
@@ -91,6 +153,10 @@ def send_alert(cfg: AlertConfig, subject: str, body: str) -> bool:
         return False
 
     full_subject = f"{cfg.subject_prefix} {subject}".strip()
+
+    if cfg.transport == "smtp":
+        return _send_smtp(cfg, subject, full_subject, body)
+
     try:
         cmd, stdin_text, use_shell = build_send_plan(
             cfg.transport, cfg.recipient, full_subject, body, cfg.command
@@ -101,8 +167,6 @@ def send_alert(cfg: AlertConfig, subject: str, body: str) -> bool:
 
     env = None
     if use_shell:
-        import os
-
         env = {
             **os.environ,
             "STREETSCAPE_ALERT_SUBJECT": full_subject,
