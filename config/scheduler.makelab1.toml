@@ -16,7 +16,7 @@ daily_request_budget = 10000000   # legacy fallback; superseded by [providers.*]
 # Per-provider daily request budgets (own run series, ledger, failure tracking).
 [providers.gsv]
 enabled = true
-# GSV metadata is free and quota-less; the real ceiling is the 30k/min rate cap.
+# GSV metadata is free; the real ceiling is the per-minute rate cap (see [download]).
 # 10M/day covers cycling ~1,144 cities on the 90-day schedule with headroom.
 daily_request_budget = 10000000
 
@@ -30,6 +30,10 @@ batch_size = 100
 connection_limit = 50
 request_timeout_s = 30.0
 sleep_between_cities_s = 60
+# Client-side GSV metadata rate cap. Google approved 60,000 req/min for this
+# project (2026-07-16); we pace at 80% to stay clear of the quota alert and
+# never write OVER_QUERY_LIMIT rows. Repo default is a conservative 24,000.
+max_requests_per_minute = 48000
 
 [paths]
 # The checkout + data live on lab storage, NFS-mounted on the compute host.
