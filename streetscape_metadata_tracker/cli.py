@@ -223,6 +223,18 @@ def parse_args():
              the network or API.""",
     )
 
+    concurrency_group.add_argument(
+        "--max-requests-per-minute",
+        type=int,
+        default=24_000,
+        help="""Client-side cap on GSV metadata requests per minute (gsv
+             provider only). Default 24,000 is 80%% of the API's default
+             30,000/min project quota; scale with your granted quota.
+             0 disables pacing. Exceeding the server-side quota returns
+             OVER_QUERY_LIMIT responses, which burn retries and can abort
+             the run.""",
+    )
+
     parser.add_argument(
         "--timeout",
         type=float,
@@ -545,7 +557,8 @@ async def _collect_one_run(conn, args, city_row, run_date, provider, config, vis
             )
         else:
             logging.info(
-                f"Using batch_size={args.batch_size}, connection_limit={args.connection_limit}"
+                f"Using batch_size={args.batch_size}, connection_limit={args.connection_limit}, "
+                f"max_requests_per_minute={args.max_requests_per_minute}"
             )
             dict_results = await download_gsv_metadata_async(
                 city_name=city_row.display_name,
@@ -559,6 +572,7 @@ async def _collect_one_run(conn, args, city_row, run_date, provider, config, vis
                 batch_size=args.batch_size,
                 connection_limit=args.connection_limit,
                 request_timeout=args.timeout,
+                max_requests_per_minute=args.max_requests_per_minute,
             )
     except DownloadError as e:
         # Failed downloads still spent real (budgeted, possibly billable)

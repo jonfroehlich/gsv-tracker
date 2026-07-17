@@ -60,6 +60,9 @@ def test_run_one_city_command_defers_skip_policy_to_scheduler(conn, monkeypatch)
     cmd = captured["cmd"]
     i = cmd.index("--min-days-since-last-run")
     assert cmd[i + 1] == "0"
+    # Client-side quota pacing must reach every subprocess.
+    i = cmd.index("--max-requests-per-minute")
+    assert cmd[i + 1] == "24000"
     assert cmd[cmd.index("--") + 1] == city.display_name
     assert cmd[-1] == city.display_name
 
@@ -80,9 +83,38 @@ def test_estimate_requests_mapillary_counts_tiles(conn):
     assert tiles < estimate_requests(city) / 100
 
 
+def test_city_timeout_scales_with_grid_size(conn):
+    """A huge GSV grid gets a timeout derived from points ÷ rate (so it is not
+    SIGKILLed mid-run by the flat floor); a small city keeps the floor."""
+    from streetscape_metadata_tracker.scheduler import city_timeout_seconds
+
+    cfg = SchedulerConfig(city_timeout_minutes=180, max_requests_per_minute=24_000)
+    floor = 180 * 60
+
+    small = db.resolve_city(conn, _register(conn, "Bend", width=1000, height=1000, step=20))
+    assert city_timeout_seconds(cfg, small, "gsv") == floor  # 2601 pts, well under floor
+
+    big = db.resolve_city(conn, _register(conn, "Metropolis", width=40000, height=40000, step=20))
+    # ~4M points at 24k/min ≈ 167 min of paced requests; with headroom this
+    # must exceed the flat floor rather than clamp to it.
+    assert city_timeout_seconds(cfg, big, "gsv") > floor
+
+
+def test_city_timeout_floor_for_mapillary_and_disabled_pacing(conn):
+    from streetscape_metadata_tracker.scheduler import city_timeout_seconds
+
+    big = db.resolve_city(conn, _register(conn, "Metropolis", width=40000, height=40000, step=20))
+    floor = 180 * 60
+    # Mapillary is fast bulk metadata — keep the flat floor regardless of grid.
+    assert city_timeout_seconds(SchedulerConfig(), big, "mapillary") == floor
+    # No client-side pacing -> no basis to scale, keep the floor.
+    assert city_timeout_seconds(SchedulerConfig(max_requests_per_minute=0), big, "gsv") == floor
+
+
 def test_config_defaults_when_file_missing(tmp_path):
     cfg = load_scheduler_config(str(tmp_path / "nope.toml"))
     assert cfg.cycle_days == 90 and cfg.batch_size == 100
+    assert cfg.max_requests_per_minute == 24_000
     assert cfg.db_path.endswith("streetscape_tracker.db")
     # No [providers] config → gsv-only with the legacy budget
     assert cfg.enabled_providers() == ["gsv"]
@@ -97,6 +129,7 @@ cycle_days = 30
 daily_request_budget = 1000
 [download]
 batch_size = 7
+max_requests_per_minute = 48000
 [publish]
 enabled = true
 """)
@@ -104,6 +137,7 @@ enabled = true
     assert cfg.cycle_days == 30
     assert cfg.daily_request_budget == 1000
     assert cfg.batch_size == 7
+    assert cfg.max_requests_per_minute == 48000
     assert cfg.publish_enabled
     # v1-style toml (no [providers]): gsv-only, legacy budget honored
     assert cfg.enabled_providers() == ["gsv"]

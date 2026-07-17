@@ -31,9 +31,19 @@ TimeoutStartSec=12h
 # unavailable to user units without it (they fail with EPERM).
 # Verify after the first sandboxed night:
 #   journalctl --user -u streetscape-tracker.service | grep -i -m1 'permission\|read-only'
+#
+# RestrictSUIDSGID= must stay OFF: the publish step runs rsync with
+# --chmod=D2755 (setgid dirs, so docroot files inherit the web group), and
+# RestrictSUIDSGID EPERMs any chmod that sets the SGID bit — files still
+# transfer but rsync exits 23, so every nightly publish reports failure
+# (observed on the first live night, 2026-07-16).
+#
+# Known limitation: local sendmail submission is setgid and thus
+# incompatible with NoNewPrivileges (which several options here imply
+# anyway), so the [alerts] 'mail' transport cannot work under this
+# sandbox — s-nail must be configured to speak SMTP directly instead.
 PrivateUsers=true
 NoNewPrivileges=true
-RestrictSUIDSGID=true
 PrivateTmp=true
 ProtectSystem=strict
 # Real paths, not the %h symlink — mount namespacing resolves symlinks.

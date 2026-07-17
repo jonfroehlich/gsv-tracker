@@ -147,6 +147,26 @@ def test_force_overrides_skip(monkeypatch, catalog):
     assert db.get_api_usage(conn, RUN_DATE) == 25
 
 
+def test_max_requests_per_minute_threads_to_downloader(monkeypatch, catalog):
+    conn, city_id, data_dir = catalog
+    calls = []
+    gsv_configs(monkeypatch)
+    monkeypatch.setattr(cli, "download_gsv_metadata_async", stub_downloader(calls))
+
+    assert run_cli(monkeypatch, city_id, data_dir, "--max-requests-per-minute", "5000") == 0
+    assert calls[0]["max_requests_per_minute"] == 5000
+
+
+def test_max_requests_per_minute_defaults_to_80pct_of_default_quota(monkeypatch, catalog):
+    conn, city_id, data_dir = catalog
+    calls = []
+    gsv_configs(monkeypatch)
+    monkeypatch.setattr(cli, "download_gsv_metadata_async", stub_downloader(calls))
+
+    assert run_cli(monkeypatch, city_id, data_dir) == 0
+    assert calls[0]["max_requests_per_minute"] == 24_000
+
+
 def test_same_run_date_is_noop(monkeypatch, catalog):
     conn, city_id, data_dir = catalog
     db.register_run(conn, city_id=city_id, run_date=RUN_DATE, csv_filename=run_filename(city_id))

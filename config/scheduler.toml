@@ -17,6 +17,10 @@ max_cities_per_day = 20
 # A (city, provider) pair is skipped after this many consecutive failures
 # until re-enabled.
 max_consecutive_failures = 5
+# Floor for the per-city subprocess timeout. For GSV the effective timeout is
+# derived from the grid's estimated request count and max_requests_per_minute
+# (with headroom), so large cities are not SIGKILLed mid-run; this floor still
+# applies to small cities and to the fast Mapillary provider.
 city_timeout_minutes = 180
 
 # Legacy fallback: when no [providers.*] sections exist below, this is the
@@ -30,14 +34,16 @@ daily_request_budget = 10000000
 enabled = true
 # Daily ceiling on GSV metadata API requests across all cities. This is a
 # nightly-runtime knob, NOT a cost/quota limit: metadata requests are free
-# and consume no quota (developers.google.com/maps/documentation/streetview/
-# metadata); the only hard limit is the API's 30,000 queries/minute rate cap.
-# The downloader sustains ~300 req/s (~18k/min, ~60% of the cap) empirically.
+# of charge (developers.google.com/maps/documentation/streetview/metadata);
+# the hard limit is the project's queries/minute quota (default 30,000),
+# enforced client-side by [download].max_requests_per_minute below — a fast
+# host can otherwise exceed the quota (makelab1 sustained ~470 req/s
+# unpaced on 2026-07-16 and got throttled).
 # Cycling ~1,144 cities every 90 days needs ~6.7M/day (median city ~54k pts,
 # not the ~15-25k first assumed). 10M/day covers that with headroom and runs
 # ~9 h on a full-budget night; only ~5 giant cities (Juneau, Anchorage, …)
-# exceed it and are collected manually. Raise for faster cycling; the rate
-# cap (not this number) is the real ceiling.
+# exceed it and are collected manually. Raise for faster cycling; the
+# per-minute pacing (not this number) is the real ceiling.
 daily_request_budget = 10000000
 
 [providers.mapillary]
@@ -52,6 +58,11 @@ daily_request_budget = 40000
 batch_size = 100
 connection_limit = 50
 request_timeout_s = 30.0
+# Client-side cap on gsv metadata requests/minute, applied per city run.
+# Keep this at ~80% of the project's granted per-minute quota (default
+# quota 30,000 -> 24000 here); server-side throttling (OVER_QUERY_LIMIT)
+# burns retries and can abort a run. 0 disables pacing.
+max_requests_per_minute = 24000
 # Pause between cities to spread load.
 sleep_between_cities_s = 60
 

@@ -68,6 +68,9 @@ class SchedulerConfig:
     connection_limit: int = 50
     request_timeout_s: float = 30.0
     sleep_between_cities_s: int = 60
+    # Client-side gsv pacing; 80% of the API's default 30k/min quota. Scale
+    # with the project's granted quota. 0 disables.
+    max_requests_per_minute: int = 24_000
     # [paths]
     data_dir: str = str(_PROJECT_ROOT / "data")
     db_path: str = ""
@@ -136,6 +139,7 @@ def load_scheduler_config(path: str | None = None) -> SchedulerConfig:
         connection_limit=dl.get("connection_limit", 50),
         request_timeout_s=dl.get("request_timeout_s", 30.0),
         sleep_between_cities_s=dl.get("sleep_between_cities_s", 60),
+        max_requests_per_minute=dl.get("max_requests_per_minute", 24_000),
         data_dir=paths.get("data_dir", str(_PROJECT_ROOT / "data")),
         db_path=paths.get("db_path", ""),
         log_dir=paths.get("log_dir", str(_PROJECT_ROOT / "logs")),
@@ -163,6 +167,33 @@ def estimate_requests(city: db.CityRow, provider: str = "gsv") -> int:
             city.center_lat, city.center_lon, city.grid_width_m, city.grid_height_m, city.step_m
         )
     return (city.grid_width_m // city.step_m + 1) * (city.grid_height_m // city.step_m + 1)
+
+
+# Wall-clock headroom over the paced-request estimate: covers retry passes,
+# per-request overhead, and the rate limiter's real-world undershoot.
+_TIMEOUT_HEADROOM = 1.5
+# Fixed slack (seconds) for process startup, geocode reuse, compression, and
+# the inter-pass retry sleeps that are not part of the paced request time.
+_TIMEOUT_FIXED_SLACK_S = 600
+
+
+def city_timeout_seconds(cfg: SchedulerConfig, city: db.CityRow, provider: str) -> int:
+    """
+    Per-city subprocess timeout, derived from the estimated request count and
+    the configured pacing rate rather than a single flat cap.
+
+    A GSV run is paced at ``max_requests_per_minute``, so its wall-clock scales
+    with grid size; a flat ``city_timeout_minutes`` SIGKILLs large cities
+    mid-run (Houston/NYC/Tulsa …), and a killed child records no api_usage, so
+    its already-spent requests vanish from the budget ledger. The derived value
+    never drops below the configured floor, so small cities and the (fast,
+    bulk-metadata) Mapillary provider keep the flat timeout.
+    """
+    floor = cfg.city_timeout_minutes * 60
+    if provider != "gsv" or cfg.max_requests_per_minute <= 0:
+        return floor
+    paced_seconds = estimate_requests(city, provider) / cfg.max_requests_per_minute * 60.0
+    return int(max(floor, paced_seconds * _TIMEOUT_HEADROOM + _TIMEOUT_FIXED_SLACK_S))
 
 
 def setup_logging(cfg: SchedulerConfig, verbose: bool = False) -> None:
@@ -356,6 +387,8 @@ def _run_one_city(
         str(cfg.batch_size),
         "--connection-limit",
         str(cfg.connection_limit),
+        "--max-requests-per-minute",
+        str(cfg.max_requests_per_minute),
         "--timeout",
         str(cfg.request_timeout_s),
         # The scheduler already decided this city is due (cycle − grace),
@@ -378,13 +411,12 @@ def _run_one_city(
         f"(~{estimate_requests(city, provider):,} requests estimated)"
     )
     logger.debug(f"Command: {' '.join(cmd)}")
+    timeout_s = city_timeout_seconds(cfg, city, provider)
     try:
-        result = subprocess.run(cmd, timeout=cfg.city_timeout_minutes * 60, cwd=str(_PROJECT_ROOT))
+        result = subprocess.run(cmd, timeout=timeout_s, cwd=str(_PROJECT_ROOT))
         return result.returncode == 0
     except subprocess.TimeoutExpired:
-        logger.error(
-            f"{city.city_id} [{provider}]: timed out after {cfg.city_timeout_minutes} minutes"
-        )
+        logger.error(f"{city.city_id} [{provider}]: timed out after {timeout_s // 60} minutes")
         return False
 
 

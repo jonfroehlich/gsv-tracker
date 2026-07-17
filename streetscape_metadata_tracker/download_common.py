@@ -7,7 +7,9 @@ live here so provider-specific downloaders (`download_gsv.py`,
 provider importing from another's module.
 """
 
+import asyncio
 import re
+from collections.abc import Callable
 from datetime import datetime
 
 import geopy.distance
@@ -18,6 +20,68 @@ class DownloadError(Exception):
     """Custom exception for download-related errors."""
 
     pass
+
+
+class AsyncRateLimiter:
+    """
+    Token-bucket rate limiter for provider APIs with a per-minute quota
+    (e.g. GSV metadata's 30,000 requests/minute project cap).
+
+    Tokens refill continuously at ``max_per_minute / 60`` per second with a
+    burst capacity of ~1 second's worth, so short spikes are smoothed rather
+    than letting a fast host blow through the provider's minute window.
+    ``max_per_minute <= 0`` disables limiting entirely.
+
+    Waiters queue on an internal lock, so acquisition order is FIFO and the
+    aggregate rate holds no matter how many tasks call ``acquire()``
+    concurrently.
+
+    Usage:
+        limiter = AsyncRateLimiter(24_000)  # 80% of the 30k/min quota
+        await limiter.acquire()             # before each request
+    """
+
+    def __init__(self, max_per_minute: int, time_func: Callable[[], float] | None = None):
+        """
+        Args:
+            max_per_minute: Maximum acquisitions per minute; <= 0 disables.
+            time_func: Monotonic clock returning seconds (defaults to the
+                running event loop's clock). Injectable for tests.
+        """
+        self._enabled = max_per_minute > 0
+        self._rate = max_per_minute / 60.0  # tokens per second
+        self._capacity = max(self._rate, 1.0)  # ~1 second of burst
+        self._tokens = self._capacity
+        self._time_func = time_func
+        self._last_refill: float | None = None
+        self._lock = asyncio.Lock()
+
+    def _now(self) -> float:
+        if self._time_func is not None:
+            return self._time_func()
+        return asyncio.get_running_loop().time()
+
+    async def acquire(self) -> None:
+        """Block until a request token is available (no-op when disabled)."""
+        if not self._enabled:
+            return
+        async with self._lock:
+            now = self._now()
+            if self._last_refill is None:
+                self._last_refill = now
+            self._tokens = min(
+                self._capacity, self._tokens + (now - self._last_refill) * self._rate
+            )
+            self._last_refill = now
+            if self._tokens >= 1.0:
+                self._tokens -= 1.0
+                return
+            # Sleep while holding the lock: later waiters must queue behind
+            # this one anyway, and releasing would let them busy-cycle.
+            wait = (1.0 - self._tokens) / self._rate
+            await asyncio.sleep(wait)
+            self._last_refill = self._now()
+            self._tokens = 0.0
 
 
 # Credential-bearing query parameters (GSV's key=, Mapillary's
