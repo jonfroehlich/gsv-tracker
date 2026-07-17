@@ -1,9 +1,20 @@
 # Streetscape Tracker daily collection service (user unit).
 # Install: see deploy/README.md
+#
+# HOST MODEL (important): jonf's $HOME is shared NFS across makelab1 AND
+# makelab2, so THIS unit file, its enablement, and timers.target.wants are
+# identical on both boxes — only `loginctl` linger is per-host. The scheduler
+# must run on exactly ONE box (both share the same SQLite catalog on ZFS), so
+# the active host is pinned two ways: ConditionHost below + linger only on the
+# active box. Cutover to a different host = flip ConditionHost + move linger.
+# Current active host: makelab2 (data-local on its ZFS pool; see issue #148).
 [Unit]
 Description=Streetscape Tracker: collect today's due cities
 Wants=network-online.target
 After=network-online.target
+# Only ever collect on the designated host, regardless of the shared-home
+# enablement above. Glob matches both the short and FQDN forms.
+ConditionHost=makelab2*
 # Opt-in raw safety net: email whenever this unit exits nonzero. run-due
 # returns nonzero on ANY failed city, so the scheduler's own threshold email
 # ([alerts] in scheduler.toml) is usually the better signal; enable this too
@@ -19,8 +30,13 @@ WorkingDirectory=%h/streetscape-tracker
 EnvironmentFile=%h/streetscape-tracker/.env
 # Publish straight to the NFS-mounted docroot (no SSH) — see sync_data_to_server.sh
 Environment=STREETSCAPE_PUBLISH_LOCAL=1
-# NB: --config is a global arg and MUST precede the subcommand (argparse).
-ExecStart=%h/streetscape-tracker/.venv/bin/python -m streetscape_metadata_tracker.scheduler --config %h/streetscape-tracker/config/scheduler.makelab1.toml run-due
+# .venv-makelab2 is a uv-managed venv whose base CPython lives on the shared ZFS
+# checkout (.tooling/), so it runs on BOTH boxes — unlike the old %h/.../.venv,
+# whose base /usr/bin/python3.11 exists only on makelab1. See deploy/README.md.
+# NB: --config is a global arg and MUST precede the subcommand (argparse). The
+# config file is named makelab1 for historical reasons but is the single shared
+# production config (paths are identical on both boxes via the shared ZFS).
+ExecStart=%h/streetscape-tracker/.venv-makelab2/bin/python -m streetscape_metadata_tracker.scheduler --config %h/streetscape-tracker/config/scheduler.makelab1.toml run-due
 # A full day of cities can legitimately take hours
 TimeoutStartSec=12h
 
@@ -51,10 +67,11 @@ ReadWritePaths=/projects/makeabilitylab/streetscape-tracker
 ReadWritePaths=/cse/web/research/makelab/public/streetscape-tracker
 
 # ── Resource guardrails ────────────────────────────────────────────────
-# This host is shared with other lab services (and storage is on a shared NFS
-# array). These STATIC caps keep nightly collection from starving co-tenants;
-# the scheduler's [resource_guard] adds a DYNAMIC pre-flight backoff on top
-# (lowers --connection-limit when load/RAM are already tight — issue #146).
+# This host (makelab2) is shared with other lab services AND is the lab
+# fileserver (its ZFS pool is NFS-exported to other boxes), so a heavy nightly
+# run could degrade NFS serving too. These STATIC caps keep it from starving
+# co-tenants; the scheduler's [resource_guard] adds a DYNAMIC pre-flight backoff
+# on top (lowers --connection-limit when load/RAM are already tight — issue #146).
 # The workload is I/O-bound async HTTP + pandas, so real peaks are modest;
 # validate after a live night and tune:
 #   systemctl --user show streetscape-tracker.service -p MemoryPeak -p CPUUsageNSec
@@ -69,5 +86,6 @@ CPUQuota=400%
 # co-tenant WHEN the CPU is contended, but still use the full CPUQuota when the
 # box is otherwise idle (as it usually is at 02:00). Cooperative, not a hard cap.
 CPUWeight=50
-# Note: data lives on NFS, so IO is network, not block-device —
-# IOWeight would not govern it; CPU/Memory caps + Nice are the real levers.
+# Note: on makelab2 our data is on a LOCAL ZFS pool, so disk IO IS block-device
+# here — add IOWeight= if a night is ever found to compete with NFS serving;
+# for now CPU/Memory caps + Nice + CPUWeight are the real levers.

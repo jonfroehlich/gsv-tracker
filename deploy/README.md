@@ -140,9 +140,48 @@ loginctl enable-linger $USER       # user services must survive logout
 ```
 
 The service ships with resource caps (`MemoryMax=8G`, `CPUQuota=400%`,
-`Nice=10`) so nightly collection can't starve the other lab services that
-share the box and the storage array. If `enable-linger` is disallowed by policy,
-ask CSE IT to enable lingering for your account.
+`Nice=10`, `CPUWeight=50`) so nightly collection can't starve the other lab
+services that share the box and the storage array. If `enable-linger` is
+disallowed by policy, ask CSE IT to enable lingering for your account.
+
+### Host = makelab2, and the shared-home cutover model
+
+The collection job runs on **makelab2** (its ZFS pool holds `data/` + the
+catalog, so compute is data-local — no NFS hop). Two facts drive how the host
+is selected:
+
+- `$HOME` (`~/.config/systemd/user/`, `~/streetscape-tracker`, `.env`) is
+  **shared NFS across makelab1 and makelab2** — so the unit files, their
+  enablement, and `timers.target.wants` are identical on both boxes. Only
+  `loginctl` **linger** is per-host.
+- The scheduler must run on **exactly one** box (both share one SQLite catalog).
+
+So the active host is pinned two ways: `ConditionHost=makelab2*` in the service
+unit (collection is a no-op on any other host) **and** linger only on makelab2:
+
+```bash
+# on makelab2 (make it the active host):
+loginctl enable-linger jonf
+systemctl --user daemon-reload && systemctl --user start streetscape-tracker.timer
+# on makelab1 (stand it down; leave the timer enabled — it's the shared symlink):
+loginctl disable-linger jonf
+systemctl --user daemon-reload
+systemd-analyze condition 'ConditionHost=makelab2*'   # verify: fails on makelab1, passes on makelab2
+```
+
+The venv is **`.venv-makelab2/`**, a `uv`-managed CPython whose base interpreter
+lives on the shared ZFS checkout (`.tooling/`), so it runs on **both** boxes —
+unlike a stock `python3.11 -m venv .venv`, whose base `/usr/bin/python3.11`
+exists only on makelab1. Provision it with:
+
+```bash
+export UV_INSTALL_DIR=$PWD/.tooling/bin UV_PYTHON_INSTALL_DIR=$PWD/.tooling/python UV_CACHE_DIR=$PWD/.tooling/cache
+curl -LsSf https://astral.sh/uv/install.sh | sh
+.tooling/bin/uv venv .venv-makelab2 --python 3.11
+.tooling/bin/uv pip sync --python .venv-makelab2/bin/python requirements.lock
+```
+
+To fail back to makelab1: flip `ConditionHost` and move linger the other way.
 
 ## 6. Operate
 
