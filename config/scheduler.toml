@@ -95,3 +95,17 @@ transport = "mail"
 # to avoid paging on the occasional flaky single city.
 failure_threshold = 1
 #subject_prefix = "[streetscape-tracker]"
+
+[resource_guard]
+# Be a good tenant on a shared host: before each city, check load + free RAM
+# and lower this run's own concurrency (--connection-limit) when the box is
+# already busy. Best-effort and Linux-only (reads /proc); a no-op elsewhere.
+# The systemd unit's CPU/RAM caps are the static floor; this is the dynamic
+# courtesy on top. Set enabled = false to disable.
+enabled = true
+# Throttle to min_connection_limit when MemAvailable drops below this.
+min_available_memory_gb = 8.0
+# Throttle when the 5-minute load average exceeds this * CPU count.
+max_load_per_core = 0.9
+# Never throttle concurrency below this floor.
+min_connection_limit = 5

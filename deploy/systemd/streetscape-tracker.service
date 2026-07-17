@@ -52,15 +52,22 @@ ReadWritePaths=/cse/web/research/makelab/public/streetscape-tracker
 
 # ── Resource guardrails ────────────────────────────────────────────────
 # This host is shared with other lab services (and storage is on a shared NFS
-# array). These caps keep nightly collection from starving co-tenants.
+# array). These STATIC caps keep nightly collection from starving co-tenants;
+# the scheduler's [resource_guard] adds a DYNAMIC pre-flight backoff on top
+# (lowers --connection-limit when load/RAM are already tight — issue #146).
 # The workload is I/O-bound async HTTP + pandas, so real peaks are modest;
-# validate after the first live night and tune:
+# validate after a live night and tune:
 #   systemctl --user show streetscape-tracker.service -p MemoryPeak -p CPUUsageNSec
 Nice=10
 MemoryAccounting=true
 MemoryHigh=4G
 MemoryMax=8G
 CPUAccounting=true
+# Hard ceiling: never use more than 4 of the host's cores.
 CPUQuota=400%
+# Relative cgroup weight (default 100). At 50 we yield ~2:1 to a default-weight
+# co-tenant WHEN the CPU is contended, but still use the full CPUQuota when the
+# box is otherwise idle (as it usually is at 02:00). Cooperative, not a hard cap.
+CPUWeight=50
 # Note: data lives on NFS, so IO is network, not block-device —
 # IOWeight would not govern it; CPU/Memory caps + Nice are the real levers.

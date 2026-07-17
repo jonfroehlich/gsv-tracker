@@ -55,6 +55,27 @@ class ProviderConfig:
 
 
 @dataclass
+class ResourceGuardConfig:
+    """[resource_guard] — back off when the shared host is already busy.
+
+    makelab1 is shared with other Makeability Lab services. The systemd unit
+    already caps our absolute CPU/RAM, but those caps are static. This guard
+    lets a nightly run *react* to co-tenant load: when the box is under real
+    pressure it reduces its own concurrency (the child's ``--connection-limit``)
+    instead of piling on. All checks read Linux ``/proc`` and are best-effort —
+    on any other platform, or if the reads fail, the guard is a silent no-op.
+    """
+
+    enabled: bool = True
+    # Throttle to min_connection_limit when MemAvailable drops below this.
+    min_available_memory_gb: float = 8.0
+    # Throttle when the 5-minute load average exceeds this * CPU count.
+    max_load_per_core: float = 0.9
+    # Floor for the scaled-down connection limit (never throttle below this).
+    min_connection_limit: int = 5
+
+
+@dataclass
 class SchedulerConfig:
     # [schedule]
     cycle_days: int = 90
@@ -83,6 +104,8 @@ class SchedulerConfig:
     providers: dict[str, ProviderConfig] | None = None
     # [alerts] — operator email on unhealthy runs (off by default)
     alerts: AlertConfig = field(default_factory=AlertConfig)
+    # [resource_guard] — load/RAM-aware concurrency backoff on shared hosts
+    resource_guard: ResourceGuardConfig = field(default_factory=ResourceGuardConfig)
 
     def __post_init__(self):
         if not self.db_path:
@@ -112,6 +135,7 @@ def load_scheduler_config(path: str | None = None) -> SchedulerConfig:
     paths = raw.get("paths", {})
     pub = raw.get("publish", {})
     al = raw.get("alerts", {})
+    rg = raw.get("resource_guard", {})
 
     providers = None
     if "providers" in raw:
@@ -154,7 +178,88 @@ def load_scheduler_config(path: str | None = None) -> SchedulerConfig:
             failure_threshold=al.get("failure_threshold", 1),
             subject_prefix=al.get("subject_prefix", "[streetscape-tracker]"),
         ),
+        resource_guard=ResourceGuardConfig(
+            enabled=rg.get("enabled", True),
+            min_available_memory_gb=rg.get("min_available_memory_gb", 8.0),
+            max_load_per_core=rg.get("max_load_per_core", 0.9),
+            min_connection_limit=rg.get("min_connection_limit", 5),
+        ),
     )
+
+
+@dataclass
+class SystemPressure:
+    """A point-in-time read of host pressure (from Linux /proc)."""
+
+    load5: float  # 5-minute load average
+    ncpu: int  # logical CPUs
+    mem_available_gb: float  # MemAvailable, in GiB
+
+
+def read_system_pressure() -> "SystemPressure | None":
+    """Best-effort read of 5-min load and available memory from ``/proc``.
+
+    Returns None when the data can't be read (non-Linux host, missing /proc,
+    or a malformed line), which callers treat as "no info" → no throttling.
+    """
+    try:
+        with open("/proc/loadavg") as f:
+            load5 = float(f.read().split()[1])
+        mem_available_kb = None
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    mem_available_kb = int(line.split()[1])
+                    break
+        if mem_available_kb is None:
+            return None
+        return SystemPressure(
+            load5=load5,
+            ncpu=os.cpu_count() or 1,
+            mem_available_gb=mem_available_kb / 1024 / 1024,
+        )
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def plan_connection_limit(
+    base_limit: int,
+    pressure: "SystemPressure | None",
+    cfg: ResourceGuardConfig,
+) -> tuple[int, str | None]:
+    """Choose an effective ``--connection-limit`` given current host pressure.
+
+    Pure/deterministic (pressure is passed in, not read here) so it is unit
+    testable without touching ``/proc``. Returns ``(limit, reason)`` where
+    ``reason`` is None when the base limit is left unchanged. The result is
+    always clamped to ``[floor, base_limit]`` — the guard only ever *lowers*
+    concurrency, never raises it.
+    """
+    if not cfg.enabled or pressure is None:
+        return base_limit, None
+
+    floor = min(cfg.min_connection_limit, base_limit)
+    limit = base_limit
+    reasons = []
+
+    # Each condition contributes a reason only if it actually LOWERS the limit,
+    # so the caller never logs a no-op throttle (e.g. base already at the floor).
+    if pressure.mem_available_gb < cfg.min_available_memory_gb and floor < limit:
+        limit = floor
+        reasons.append(
+            f"low memory ({pressure.mem_available_gb:.1f}G available "
+            f"< {cfg.min_available_memory_gb:.0f}G)"
+        )
+
+    load_ceiling = cfg.max_load_per_core * pressure.ncpu
+    if load_ceiling > 0 and pressure.load5 > load_ceiling:
+        # Scale down in proportion to how far load exceeds the ceiling.
+        scaled = max(floor, int(base_limit * load_ceiling / pressure.load5))
+        if scaled < limit:
+            limit = scaled
+            reasons.append(f"high load ({pressure.load5:.1f} > {load_ceiling:.0f})")
+
+    return limit, ("; ".join(reasons) if reasons else None)
 
 
 def estimate_requests(city: db.CityRow, provider: str = "gsv") -> int:
@@ -369,9 +474,19 @@ def cmd_regenerate(cfg: SchedulerConfig, publish: bool = False) -> int:
 
 
 def _run_one_city(
-    cfg: SchedulerConfig, city: db.CityRow, today: date, provider: str = "gsv"
+    cfg: SchedulerConfig,
+    city: db.CityRow,
+    today: date,
+    provider: str = "gsv",
+    connection_limit: int | None = None,
 ) -> bool:
-    """Collect one (city, provider) via a streetscape_tracker.py subprocess."""
+    """Collect one (city, provider) via a streetscape_tracker.py subprocess.
+
+    ``connection_limit`` overrides ``cfg.connection_limit`` for this run (the
+    resource guard lowers it when the shared host is under pressure); None uses
+    the configured default.
+    """
+    conn_limit = cfg.connection_limit if connection_limit is None else connection_limit
     cmd = [
         sys.executable,
         str(_PROJECT_ROOT / "streetscape_tracker.py"),
@@ -386,7 +501,7 @@ def _run_one_city(
         "--batch-size",
         str(cfg.batch_size),
         "--connection-limit",
-        str(cfg.connection_limit),
+        str(conn_limit),
         "--max-requests-per-minute",
         str(cfg.max_requests_per_minute),
         "--timeout",
@@ -533,7 +648,15 @@ def cmd_run_due(
                 skipped_budget += 1
                 continue
 
-            ok = _run_one_city(cfg, city, today, provider)
+            conn_limit, throttle_reason = plan_connection_limit(
+                cfg.connection_limit, read_system_pressure(), cfg.resource_guard
+            )
+            if throttle_reason:
+                logger.info(
+                    f"Resource guard: {throttle_reason}; connection limit "
+                    f"{cfg.connection_limit} → {conn_limit} for {city.city_id} [{provider}]"
+                )
+            ok = _run_one_city(cfg, city, today, provider, connection_limit=conn_limit)
             ran_any = True
             attempted += 1
             if ok:
