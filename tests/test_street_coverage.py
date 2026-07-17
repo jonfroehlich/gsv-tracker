@@ -190,6 +190,20 @@ def test_select_pano_points_gsv_google_only():
     assert len(pts) == 1
 
 
+def test_select_pano_points_gsv_missing_copyright_column():
+    """A legacy pre-copyright baseline CSV may lack the copyright_info column
+    entirely. GSV selection must treat that as 'no official Google imagery'
+    (empty result) rather than raising KeyError."""
+    df = _run_df(
+        [
+            ("OK", LAT0, LON0, "2024-01-01", "© Google"),
+            ("OK", LAT0, LON0, "2024-01-01", "© Google"),
+        ]
+    ).drop(columns=["copyright_info"])
+    pts = select_pano_points(df, "gsv")
+    assert len(pts) == 0
+
+
 def test_select_pano_points_mapillary_keeps_all_located():
     df = _run_df(
         [
@@ -407,8 +421,11 @@ def test_network_cache_filename_types():
 
 
 def test_graph_to_edges_collapses_reciprocal_edges():
-    """osmnx returns both directions of a two-way street; identical geometry
-    must be collapsed to one row so segments aren't double-counted."""
+    """osmnx returns both directions of a two-way street, and orients each
+    directed edge's geometry in its own travel direction — so the reciprocal
+    edge's LineString is coordinate-REVERSED. graph_to_edges must still collapse
+    the pair to one row (by unordered node pair, not geometry WKB) so segments
+    aren't double-counted."""
     import networkx as nx
 
     from streetscape_street_analyzer.download_street_network import graph_to_edges
@@ -417,9 +434,10 @@ def test_graph_to_edges_collapses_reciprocal_edges():
     g.add_node(1, x=-121.310, y=44.050)
     g.add_node(2, x=-121.309, y=44.050)
     g.add_node(3, x=-121.308, y=44.050)
-    two_way = LineString([(-121.310, 44.050), (-121.309, 44.050)])
-    g.add_edge(1, 2, highway="residential", length=80.0, geometry=two_way)
-    g.add_edge(2, 1, highway="residential", length=80.0, geometry=two_way)  # reciprocal
+    forward = LineString([(-121.310, 44.050), (-121.309, 44.050)])
+    reverse = LineString([(-121.309, 44.050), (-121.310, 44.050)])  # osmnx reverses it
+    g.add_edge(1, 2, highway="residential", length=80.0, geometry=forward)
+    g.add_edge(2, 1, highway="residential", length=80.0, geometry=reverse)  # reciprocal
     g.add_edge(
         2,
         3,

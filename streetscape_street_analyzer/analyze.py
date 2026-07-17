@@ -43,14 +43,13 @@ def _warn_no_panos(df, provider: str) -> None:
     (0% coverage) artifact isn't mistaken for a real coverage gap.
 
     The common GSV cause is a legacy pre-copyright baseline CSV: ``copyright_info``
-    is entirely empty, so nothing matches the official ``© Google`` filter. This
-    reflects missing metadata, not missing imagery. Otherwise the run genuinely
-    carries no imagery this provider counts (e.g. only third-party GSV panos).
+    is missing (either absent as a column or entirely empty), so nothing matches
+    the official ``© Google`` filter. This reflects missing metadata, not missing
+    imagery. Otherwise the run genuinely carries no imagery this provider counts
+    (e.g. only third-party GSV panos).
     """
-    legacy_no_copyright = (
-        provider == "gsv"
-        and "copyright_info" in df.columns
-        and df["copyright_info"].notna().sum() == 0
+    legacy_no_copyright = provider == "gsv" and (
+        "copyright_info" not in df.columns or df["copyright_info"].notna().sum() == 0
     )
     if legacy_no_copyright:
         logger.warning(
@@ -60,11 +59,17 @@ def _warn_no_panos(df, provider: str) -> None:
             "missing metadata, NOT missing imagery. Consider re-collecting this "
             "city before publishing a streets artifact for it."
         )
-    else:
+    elif provider == "gsv":
         logger.warning(
             "0 panos selected; the coverage artifact will be entirely uncovered "
             "(0% coverage). For GSV this means the run has no official "
             "'© Google' imagery (e.g. only third-party contributor panos)."
+        )
+    else:
+        logger.warning(
+            "0 panos selected; the coverage artifact will be entirely uncovered "
+            "(0%% coverage). This %s run has no located panos to score against.",
+            provider,
         )
 
 

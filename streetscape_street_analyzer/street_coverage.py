@@ -77,7 +77,14 @@ def select_pano_points(df: pd.DataFrame, provider: str) -> gpd.GeoDataFrame:
     """
     mask = (df["status"] == "OK") & df["pano_lat"].notna() & df["pano_lon"].notna()
     if provider == "gsv":
-        mask = mask & is_google_copyright(df["copyright_info"])
+        # A legacy pre-copyright baseline CSV may lack the column entirely (not
+        # just be all-NaN); treat that as "no official Google imagery" (empty
+        # mask) rather than crashing — analyze._warn_no_panos then explains the
+        # 0% result. When present, the exact '© Google' filter applies as usual.
+        if "copyright_info" in df.columns:
+            mask = mask & is_google_copyright(df["copyright_info"])
+        else:
+            mask = mask & False
 
     panos = df.loc[mask, ["pano_lat", "pano_lon", "capture_date"]].copy()
     if not pd.api.types.is_datetime64_any_dtype(panos["capture_date"]):
