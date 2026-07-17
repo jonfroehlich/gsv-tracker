@@ -83,11 +83,18 @@ function streetTypeColor(highway) {
 
 /**
  * Derive the streets artifact URL from a run's CSV filename.
- * Mirrors naming.streets_filename_for_run on the Python side — keep in sync.
+ * Mirrors naming.streets_filename_for_run on the Python side — keep in sync,
+ * including its suffix validation: a name that isn't a run csv.gz has no
+ * sibling artifact, so throw rather than silently return a bogus URL (the
+ * regex replace would be a no-op and we'd fetch the CSV itself).
  * @param {string} dataFile - e.g. "city_..._2026-07-06.csv.gz"
  * @returns {string} Full URL to the sibling "_streets.json.gz".
+ * @throws {Error} If dataFile does not end in ".csv.gz".
  */
 function streetsUrlForDataFile(dataFile) {
+  if (!/\.csv\.gz$/.test(dataFile)) {
+    throw new Error(`Not a run csv.gz filename: ${dataFile}`);
+  }
   return STREETSCAPE_DATA_BASE_URL + dataFile.replace(/\.csv\.gz$/, "_streets.json.gz");
 }
 
@@ -99,7 +106,7 @@ function streetsUrlForDataFile(dataFile) {
  * @returns {Object} Leaflet path style.
  */
 function styleStreetFeature(feature, provider) {
-  const p = feature.properties;
+  const p = feature.properties || {};
   if (!p.covered) {
     return { color: STREET_UNCOVERED_COLOR, weight: 2, opacity: 0.75, dashArray: "4 4" };
   }
@@ -115,7 +122,7 @@ function styleStreetFeature(feature, provider) {
  * @returns {Object} Leaflet path style.
  */
 function styleStreetByCoverage(feature) {
-  if (!feature.properties.covered) {
+  if (!(feature.properties && feature.properties.covered)) {
     return { color: STREET_UNCOVERED_COLOR, weight: 2, opacity: 0.75, dashArray: "4 4" };
   }
   return { color: STREET_COVERED_COLOR, weight: 3, opacity: 0.9 };
@@ -129,7 +136,7 @@ function styleStreetByCoverage(feature) {
  * @returns {Object} Leaflet path style.
  */
 function styleStreetByType(feature) {
-  const p = feature.properties;
+  const p = feature.properties || {};
   const color = streetTypeColor(p.highway);
   if (!p.covered) {
     return { color, weight: 2, opacity: 0.5, dashArray: "4 4" };
@@ -192,6 +199,16 @@ async function renderStreetCoverage(map, dataFile, provider, options = {}) {
   }
   if (!fc || !fc.features || !fc.features.length) return;
 
+  // Guard against a malformed artifact (partial upload, schema mismatch): the
+  // panel is driven entirely by properties.metadata.{totals,coverage_by_highway},
+  // so bail out of the whole overlay if that block is absent rather than throw
+  // an unhandled rejection from this un-awaited call.
+  const meta = fc.properties && fc.properties.metadata;
+  if (!meta || !meta.totals || !meta.coverage_by_highway) {
+    console.warn("Street-coverage artifact missing its metadata block (skipping overlay).");
+    return;
+  }
+
   // Dedicated pane below the pano markers (overlayPane, z-index 400) so the
   // dots always draw on top of the street lines.
   if (!map.getPane("streetCoverage")) {
@@ -203,7 +220,7 @@ async function renderStreetCoverage(map, dataFile, provider, options = {}) {
     pane: "streetCoverage",
     style: (feature) => styleStreetFeature(feature, provider),
     onEachFeature: (feature, lyr) => {
-      const p = feature.properties;
+      const p = feature.properties || {};
       const status = p.covered
         ? `covered${p.nearest_pano_date ? ` · ${p.nearest_pano_date}` : ""}`
         : "no coverage";
@@ -211,7 +228,7 @@ async function renderStreetCoverage(map, dataFile, provider, options = {}) {
     },
   }).addTo(map);
 
-  buildStreetCoveragePanel(map, layer, fc.properties.metadata, provider, options);
+  buildStreetCoveragePanel(map, layer, meta, provider, options);
 }
 
 /**

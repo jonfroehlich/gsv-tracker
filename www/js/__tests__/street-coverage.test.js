@@ -37,6 +37,13 @@ test("streetsUrlForDataFile swaps .csv.gz for _streets.json.gz under the data ba
   );
 });
 
+test("streetsUrlForDataFile throws on a non-.csv.gz filename (mirrors the Python contract)", () => {
+  // Without the suffix guard the regex replace is a no-op and we'd fetch the
+  // wrong URL; match naming.streets_filename_for_run and throw instead.
+  assert.throws(() => streetsUrlForDataFile("bend--or_streets.json.gz"), /Not a run csv\.gz/);
+  assert.throws(() => streetsUrlForDataFile("bend--or.csv"), /Not a run csv\.gz/);
+});
+
 test("styleStreetFeature: uncovered segments are gray and dashed", () => {
   const style = styleStreetFeature({ properties: { covered: false } }, "gsv");
   assert.equal(style.color, STREET_UNCOVERED_COLOR);

@@ -97,6 +97,26 @@ def test_no_panos_all_uncovered():
     assert out["nearest_pano_date"].iloc[0] is None
 
 
+def test_empty_network_yields_zero_segment_summary():
+    # A tiny/invalid bbox (or a network_type that filters every edge) can hand us
+    # zero edges. estimate_utm_crs() raises on empty geometry, so compute_ must
+    # short-circuit to a well-formed 0-edge frame that still summarizes to 0%.
+    edges = gpd.GeoDataFrame({"highway": []}, geometry=[], crs="EPSG:4326")
+    panos = _pano_gdf([(LON0, LAT0, "2024-01-01")])
+    out = compute_street_coverage(edges, panos, RUN_DATE, match_dist_m=25.0)
+    assert len(out) == 0
+    # The columns downstream code reads must exist even with no rows.
+    for col in ("highway_bucket", "length_m", "covered", "nearest_pano_date"):
+        assert col in out.columns
+
+    summary = summarize_coverage(out)
+    assert summary["coverage_by_highway"] == {}
+    assert summary["totals"]["segments"] == 0
+    assert summary["totals"]["covered"] == 0
+    assert summary["totals"]["coverage_pct_by_length"] == 0.0
+    assert summary["totals"]["uncovered_pct_by_length"] == 100.0
+
+
 def test_age_pinned_to_run_date():
     edges = _make_edges([("residential", None)])
     panos = _pano_gdf([(LON0 + 0.0005, LAT0 + _dlat_for_metres(5), "2024-07-01")])

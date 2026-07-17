@@ -132,6 +132,17 @@ def compute_street_coverage(
     out = edges.reset_index(drop=True).copy()
     out["highway_bucket"] = out["highway"].apply(normalize_highway)
 
+    # An empty network (tiny/invalid bbox, or a network_type that filtered every
+    # edge) has no geometry for estimate_utm_crs() to work from — it raises. Return
+    # a well-formed 0-edge frame instead; summarize_coverage/build_streets_geojson
+    # already handle it, yielding a valid 0-segment (0%) artifact.
+    if out.empty:
+        out["length_m"] = pd.Series([], dtype=float)
+        out["covered"] = pd.Series([], dtype=bool)
+        out["nearest_pano_date"] = pd.Series([], dtype=object)
+        out["nearest_pano_age_years"] = pd.Series([], dtype=object)
+        return out
+
     # Work in a local metric CRS so distances and lengths are in metres. All
     # cities here are far smaller than a UTM zone, so a single estimated zone is
     # accurate to well under the match threshold.
