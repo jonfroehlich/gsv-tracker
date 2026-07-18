@@ -489,6 +489,85 @@ def test_migrate_v5_to_v6(tmp_path):
     conn.close()
 
 
+def test_migrate_v6_to_v7(tmp_path):
+    """A v6 catalog gains the issue-#116 imagery-type columns on connect.
+
+    A v6 runs table is the current one minus status_flat_only /
+    any_imagery_coverage_rate_pct / num_flat_images. Build the fixture from
+    db._SCHEMA and DROP those columns (keeping it in sync with the code),
+    seed a pre-v7 run, stamp user_version = 6, then connect.
+    """
+    db_path = str(tmp_path / "v6.db")
+    raw = sqlite3.connect(db_path)
+    raw.executescript(db._SCHEMA)
+    for col in ("status_flat_only", "any_imagery_coverage_rate_pct", "num_flat_images"):
+        raw.execute(f"ALTER TABLE runs DROP COLUMN {col}")
+    raw.execute(
+        """INSERT INTO cities (city_id, display_name, city_name, center_lat,
+           center_lon, grid_width_m, grid_height_m, step_m, created_at)
+           VALUES ('bend--or', 'Bend, OR', 'Bend', 44.05, -121.31,
+                   5000, 5000, 20, '2026-01-01T00:00:00+00:00')"""
+    )
+    raw.execute(
+        """INSERT INTO runs (city_id, provider, run_date, csv_filename, coverage_rate_pct)
+           VALUES ('bend--or', 'mapillary', '2026-05-01', 'old.csv.gz', 42.0)"""
+    )
+    raw.execute("PRAGMA user_version = 6")
+    raw.commit()
+    raw.close()
+
+    conn = db.connect(db_path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
+    assert {"status_flat_only", "any_imagery_coverage_rate_pct", "num_flat_images"} <= cols
+    # Pre-v7 run keeps its data; new columns are NULL (unknown, not zero).
+    run = db.get_latest_run(conn, "bend--or", provider="mapillary")
+    assert run.coverage_rate_pct == 42.0
+    assert run.status_flat_only is None
+    assert run.any_imagery_coverage_rate_pct is None
+    assert run.num_flat_images is None
+
+    # Idempotent: reopening must not error or re-migrate.
+    conn.close()
+    conn2 = db.connect(db_path)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    conn2.close()
+
+
+def test_register_run_round_trips_flat_only_columns(conn, city):
+    rid = db.register_run(
+        conn,
+        city_id=city,
+        provider="mapillary",
+        run_date=date(2026, 4, 1),
+        csv_filename="a.csv.gz",
+        total_points=10,
+        status_ok=4,
+        status_no_date=1,
+        status_zero_results=2,
+        status_flat_only=3,
+        status_other=0,
+        unique_panos=5,
+        coverage_rate_pct=50.0,
+        any_imagery_coverage_rate_pct=80.0,
+        num_flat_images=17,
+    )
+    run = db.get_latest_run(conn, city, provider="mapillary")
+    assert run.run_id == rid
+    assert run.status_flat_only == 3
+    assert abs(run.any_imagery_coverage_rate_pct - 80.0) < 1e-9
+    assert run.num_flat_images == 17
+
+
+def test_register_run_flat_only_columns_default_null(conn, city):
+    # GSV/legacy callers that omit the issue-#116 kwargs store NULL, not 0.
+    db.register_run(conn, city_id=city, run_date=date(2026, 4, 1), csv_filename="a.csv.gz")
+    run = db.get_latest_run(conn, city)
+    assert run.status_flat_only is None
+    assert run.any_imagery_coverage_rate_pct is None
+    assert run.num_flat_images is None
+
+
 def test_street_walk_register_and_get(conn, city):
     walk_id = db.register_street_walk(
         conn,

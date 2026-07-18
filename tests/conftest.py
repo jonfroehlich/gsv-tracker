@@ -73,7 +73,12 @@ def make_city_df(
 
 
 def make_mapillary_city_df(
-    panos, run_date=date(2026, 1, 15), grid_origin=(44.0, -121.0), n_empty=1, panos_per_point=1
+    panos,
+    run_date=date(2026, 1, 15),
+    grid_origin=(44.0, -121.0),
+    n_empty=1,
+    panos_per_point=1,
+    n_flat_only=0,
 ):
     """
     Build a synthetic Mapillary run DataFrame.
@@ -84,6 +89,9 @@ def make_mapillary_city_df(
     Args:
         panos: list of (pano_id, capture_date_str)
         panos_per_point: how many consecutive panos share each grid point
+        n_flat_only: trailing FLAT_ONLY points (issue #116) — flat-imagery
+            presence markers with a representative pano_id/coords but a null
+            capture_date, on grid points distinct from the pano/empty ones
         run_date, grid_origin, n_empty: as in make_city_df
 
     Returns raw (string-typed) DataFrame, like a freshly written CSV.
@@ -108,10 +116,25 @@ def make_mapillary_city_df(
                 "OK",
             )
         )
+    for k in range(n_flat_only):
+        point = n_points_used + k
+        rows.append(
+            (
+                lat0 + point * 0.001,
+                lon0,
+                ts,
+                lat0 + point * 0.001 + 0.0001,
+                lon0 + 0.0001,
+                f"flat{k}",
+                None,  # FLAT_ONLY rows carry no capture date
+                f"© Mapillary contributor {200 + k}",
+                "FLAT_ONLY",
+            )
+        )
     for j in range(n_empty):
         rows.append(
             (
-                lat0 + (n_points_used + j) * 0.001,
+                lat0 + (n_points_used + n_flat_only + j) * 0.001,
                 lon0,
                 ts,
                 None,

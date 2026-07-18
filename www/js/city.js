@@ -1,5 +1,5 @@
-/* exported switchRun, toggleYear, setGsvMode */
-// (switchRun/toggleYear/setGsvMode are invoked from onchange/onclick
+/* exported switchRun, toggleYear, setGsvMode, toggleFlatOnly */
+// (switchRun/toggleYear/setGsvMode/toggleFlatOnly are invoked from onchange/onclick
 // attributes in the HTML this file generates, so ESLint can't see those
 // string references.)
 /**
@@ -57,6 +57,14 @@ let newestDateGlobal = null;
 // Never set for non-GSV providers (their rows are all provider imagery) or
 // archival GSV runs that recorded no copyright (Google vs UGC unknown).
 let showAllGsv = false;
+
+// Flat-only imagery layer (issue #116, Mapillary only). A FLAT_ONLY CSV row
+// marks a grid point covered by flat/perspective imagery but no 360° pano;
+// these render as distinct muted markers, hidden by default (showFlatOnly),
+// so the map can reveal phone-camera coverage that the pano layer omits.
+let flatOnlyMarkers = [];
+let showFlatOnly = false;
+const FLAT_ONLY_COLOR = "#9aa0a6"; // muted gray — visibly not a dated pano
 
 // Temporal-plot handles, kept at module scope so setGsvMode() can rebuild the
 // plot in place (updating the existing chart/handlers rather than re-creating
@@ -255,6 +263,25 @@ function updateLegend(years) {
       </div>`;
   }
 
+  // ── Section 3b: Flat-only imagery toggle (issue #116) ─────
+  // Mapillary runs can cover a grid point with flat imagery but no 360° pano
+  // (a FLAT_ONLY row). Those markers are off by default; this reveals them so
+  // any-imagery coverage is visible alongside the pano layer. Shown only when
+  // the run actually has flat-only points.
+  if (providerGlobal === "mapillary" && flatOnlyMarkers.length > 0) {
+    html += `
+      <div class="legend-divider"></div>
+      <div class="legend-year-header">Any imagery</div>
+      <button type="button" class="year-item ${showFlatOnly ? "active-item" : ""}"
+              aria-pressed="${showFlatOnly}"
+              aria-label="Toggle flat-only imagery markers, ${flatOnlyMarkers.length.toLocaleString()} points"
+              onclick="toggleFlatOnly()">
+        <i style="background:${FLAT_ONLY_COLOR}" class="${showFlatOnly ? "active" : ""}"
+           aria-hidden="true"></i>
+        Flat-only points <span class="year-count">(${flatOnlyMarkers.length.toLocaleString()})</span>
+      </button>`;
+  }
+
   // ── Section 4: Interactive year filter ────────────────────
   if (sortedYears.length > 0) {
     html += `
@@ -294,6 +321,17 @@ function updateLegend(years) {
   if (focusedYear != null) {
     div.querySelector(`.year-item[data-year="${focusedYear}"]`)?.focus();
   }
+}
+
+/**
+ * Show or hide the flat-only imagery layer (issue #116, Mapillary only).
+ * These points carry no capture date, so they sit outside the year/pano
+ * machinery — a simple add/remove of the marker set.
+ */
+function toggleFlatOnly() {
+  showFlatOnly = !showFlatOnly;
+  flatOnlyMarkers.forEach((m) => (showFlatOnly ? m.addTo(map) : m.remove()));
+  updateLegend(Object.keys(markersByYear).map(Number));
 }
 
 /**
@@ -1062,6 +1100,25 @@ async function loadData() {
      */
     function processRows(rows) {
       for (const row of rows) {
+        // Flat-only imagery (issue #116): a grid point with flat/perspective
+        // Mapillary imagery but no 360° pano. Kept in a separate, off-by-
+        // default layer rather than the pano/year machinery (it has no
+        // capture date, so it can't be year-bucketed or age-colored).
+        if (row.status === "FLAT_ONLY") {
+          // == null, not falsy: 0.0 is a valid coordinate (equator/meridian)
+          if (row.pano_lat == null || row.pano_lon == null) continue;
+          const flatMarker = L.circleMarker([row.pano_lat, row.pano_lon], {
+            radius: 2,
+            fillColor: FLAT_ONLY_COLOR,
+            color: "#000",
+            weight: 0,
+            fillOpacity: 0.55,
+          });
+          flatMarker.bindPopup("Flat imagery only — no 360° panorama here");
+          flatOnlyMarkers.push(flatMarker);
+          if (showFlatOnly) flatMarker.addTo(map);
+          continue;
+        }
         if (
           row.status !== "OK" ||
           !row.capture_date ||

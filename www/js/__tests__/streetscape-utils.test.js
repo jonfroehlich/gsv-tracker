@@ -141,6 +141,76 @@ test("adaptCityRecord: v3 per-provider block, null when provider missing", () =>
   assert.equal(adaptCityRecord(v3, "mapillary"), null);
 });
 
+// --- issue #116: any-imagery coverage stratification -----------------------
+
+test("adaptCityRecord: mapillary any-imagery coverage is surfaced and exceeds 360°", () => {
+  const v3 = {
+    city_id: "bend--or",
+    city: { name: "Bend", state: "OR", country: "USA" },
+    providers: {
+      mapillary: {
+        latest: {
+          run_date: "2026-07-05",
+          panorama_counts: { unique_panos: 40 },
+          histogram_of_capture_dates_by_year: { all_panos: { counts: { 2021: 3 } } },
+          all_panos_age_stats: { median_pano_age_years: 5 },
+          coverage_rate_percent: 50,
+          any_imagery_coverage_rate_percent: 75,
+          num_flat_images: 120,
+          search_area_km2: 25,
+          data_file: "c",
+          json_file: "d",
+        },
+        runs: [{ run_date: "2026-07-05", coverage_rate_percent: 50,
+                 any_imagery_coverage_rate_percent: 75 }],
+        change: null,
+      },
+    },
+  };
+  const mly = adaptCityRecord(v3, "mapillary");
+  assert.equal(mly.coverage_rate_percent, 50);
+  assert.equal(mly.any_imagery_coverage_rate_percent, 75);
+  assert.equal(mly.num_flat_images, 120);
+});
+
+test("adaptCityRecord: any-imagery falls back to 360° when absent (GSV / pre-v7)", () => {
+  const v2 = {
+    city_id: "x--y",
+    city: { name: "X", state: null, country: "USA" },
+    latest: {
+      run_date: "2026-07-05",
+      panorama_counts: { unique_panos: 10, unique_google_panos: 8 },
+      histogram_of_capture_dates_by_year: { all_panos: { counts: {} } },
+      all_panos_age_stats: { median_pano_age_years: 2 },
+      coverage_rate_percent: 88,
+      // no any_imagery_coverage_rate_percent, no num_flat_images
+      search_area_km2: 9,
+      data_file: "c",
+      json_file: "d",
+    },
+    runs: [],
+  };
+  const gsv = adaptCityRecord(v2, "gsv");
+  assert.equal(gsv.any_imagery_coverage_rate_percent, 88); // === 360° rate
+  assert.equal(gsv.num_flat_images, null);
+});
+
+test("METRICS.coverage_any: reads any-imagery rate, falls back to 360°", () => {
+  const m = METRICS.coverage_any;
+  assert.equal(isKnownMetric("coverage_any"), true);
+  // Prefers the any-imagery number when present...
+  assert.equal(
+    m.valueOf({ any_imagery_coverage_rate_percent: 75, coverage_rate_percent: 50 }),
+    75
+  );
+  // ...falls back to the 360° rate when it's missing (GSV / old data)...
+  assert.equal(m.valueOf({ coverage_rate_percent: 50 }), 50);
+  // ...and is null when neither exists.
+  assert.equal(m.valueOf({}), null);
+  // Reuses the coverage color scale (provider-independent, like `coverage`).
+  assert.equal(m.color(50), METRICS.coverage.color(50));
+});
+
 // --- escapeHtml: XSS guard for data-derived strings -------------------------
 
 test("escapeHtml: neutralizes markup in third-party strings", () => {

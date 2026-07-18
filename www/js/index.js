@@ -131,6 +131,20 @@ function createTooltip(city) {
     panoLinesHtml += `<li>Google Panoramas: ${panoStats.unique_google_panos.toLocaleString()} (${googlePct}%)</li>`;
   }
 
+  // Any-imagery coverage line (issue #116): shown only for Mapillary, and
+  // only when flat imagery actually widens the footprint beyond the 360°
+  // panos — otherwise it would just repeat the Grid Coverage number.
+  let anyImageryHtml = "";
+  const anyRate = city.any_imagery_coverage_rate_percent;
+  if (
+    city.provider === "mapillary" &&
+    anyRate != null &&
+    city.coverage_rate_percent != null &&
+    anyRate - city.coverage_rate_percent > 0.05
+  ) {
+    anyImageryHtml = `<li>Any Imagery: ${anyRate.toFixed(1)}% (incl. flat)</li>`;
+  }
+
   // Snapshot history line (schema v2): "3 snapshots since 2025-01-17"
   let snapshotsHtml = "";
   if (city.runs && city.runs.length > 0) {
@@ -162,8 +176,9 @@ function createTooltip(city) {
       ${snapshotsHtml}
       <li>Area: ${city.search_area_km2.toFixed(1)} km²</li>
       <li>Grid Coverage: ${city.coverage_rate_percent != null
-        ? `${city.coverage_rate_percent.toFixed(1)}% of search points`
+        ? `${city.coverage_rate_percent.toFixed(1)}% of search points${city.provider === "mapillary" ? " (360°)" : ""}`
         : "No data"}</li>
+      ${anyImageryHtml}
       ${panoLinesHtml}
     </ul>
     <div style="margin-top:12px"><strong>Age Statistics:</strong></div>

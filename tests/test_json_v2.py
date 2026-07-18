@@ -309,6 +309,77 @@ def test_mapillary_run_json(data_dir):
     )
 
 
+def test_mapillary_flat_only_stratifies_coverage_in_json_and_aggregate(conn, data_dir):
+    # Issue #116: a Mapillary run with a flat-only point reports any-imagery
+    # coverage above the 360° rate, both in the per-run JSON coverage block and
+    # in the catalog-driven aggregate.
+    from streetscape_metadata_tracker.analysis import calculate_run_stats
+
+    city_id = db.register_city(
+        conn,
+        city_name="Flatville",
+        state_name=None,
+        state_code=None,
+        country_name="Testland",
+        country_code=None,
+        center_lat=44.0,
+        center_lon=-121.0,
+        grid_width_m=100,
+        grid_height_m=100,
+        step_m=20,
+    )
+    run_date = date(2026, 1, 15)
+    name = f"{city_id}_width_100_height_100_step_20_mapillary_{run_date.isoformat()}.csv.gz"
+    csv_path = os.path.join(data_dir, name)
+    # 2 pano points + 1 flat-only point + 1 empty point = 4 points
+    df = make_mapillary_city_df(
+        [("m1", "2021-03-01"), ("m2", "2022-03-01")],
+        run_date=run_date,
+        n_flat_only=1,
+        n_empty=1,
+    )
+    write_city_csv_gz(df, csv_path)
+    df = load_city_csv_file(csv_path)
+
+    json_path = generate_city_metadata_summary_as_json(
+        csv_path,
+        df,
+        "Flatville",
+        None,
+        "Testland",
+        100,
+        100,
+        20,
+        force_recreate_file=True,
+        run_date=run_date,
+        provider="mapillary",
+    )
+    data = strict_load(json_path)
+    cov = data["coverage"]
+    assert cov["coverage_rate"] == pytest.approx(50.0)  # 2/4 pano points
+    assert cov["any_imagery_coverage_rate"] == pytest.approx(75.0)  # 3/4 any imagery
+    assert cov["num_points_with_any_imagery"] == 3
+
+    stats = calculate_run_stats(df, run_date, provider="mapillary")
+    db.register_run(
+        conn,
+        city_id=city_id,
+        run_date=run_date,
+        csv_filename=name,
+        provider="mapillary",
+        json_filename=os.path.basename(json_path),
+        num_flat_images=9,
+        **stats,
+    )
+
+    summary = generate_aggregate_v2(conn, data_dir)
+    latest = summary["cities"][0]["providers"]["mapillary"]["latest"]
+    assert latest["coverage_rate_percent"] == pytest.approx(50.0)
+    assert latest["any_imagery_coverage_rate_percent"] == pytest.approx(75.0)
+    assert latest["num_flat_images"] == 9
+    strict_load(os.path.join(data_dir, "cities.json.gz"))
+
+
 def test_aggregate_v2_groups_runs_and_reports_change(conn, data_dir):
     city_id = db.register_city(
         conn,

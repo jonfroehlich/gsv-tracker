@@ -27,7 +27,7 @@ from .naming import sanitize_city_query_str
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS cities (
@@ -68,10 +68,13 @@ CREATE TABLE IF NOT EXISTS runs (
     status_ok           INTEGER,
     status_no_date      INTEGER,
     status_zero_results INTEGER,
+    status_flat_only    INTEGER,
     status_other        INTEGER,
     unique_panos        INTEGER,
     unique_google_panos INTEGER,
     coverage_rate_pct   REAL,
+    any_imagery_coverage_rate_pct REAL,
+    num_flat_images     INTEGER,
     oldest_capture_date TEXT,
     newest_capture_date TEXT,
     median_pano_age_years REAL,
@@ -277,6 +280,21 @@ _MIGRATE_V3_TO_V4 = """
 ALTER TABLE runs ADD COLUMN status_no_date INTEGER;
 """
 
+# v6 -> v7: stratify Mapillary coverage by imagery type (issue #116). Flat-only
+# grid points now get a FLAT_ONLY row instead of ZERO_RESULTS, so runs gain a
+# status_flat_only bucket (split out of status_other, like NO_DATE in v3), an
+# any_imagery_coverage_rate_pct (360° + flat footprint), and num_flat_images
+# (flat census magnitude). Purely additive — plain ADD COLUMNs, no rebuild.
+# Existing (pre-v7) runs get NULL: their CSVs carry no FLAT_ONLY rows, so
+# status_flat_only=0 / any_imagery==coverage would be recoverable via
+# scripts/recompute_run_stats.py, but num_flat_images is not (the flat census
+# was never collected), so it stays NULL.
+_MIGRATE_V6_TO_V7 = """
+ALTER TABLE runs ADD COLUMN status_flat_only INTEGER;
+ALTER TABLE runs ADD COLUMN any_imagery_coverage_rate_pct REAL;
+ALTER TABLE runs ADD COLUMN num_flat_images INTEGER;
+"""
+
 
 @dataclass
 class CityRow:
@@ -317,10 +335,13 @@ class RunRow:
     status_ok: int | None
     status_no_date: int | None
     status_zero_results: int | None
+    status_flat_only: int | None
     status_other: int | None
     unique_panos: int | None
     unique_google_panos: int | None
     coverage_rate_pct: float | None
+    any_imagery_coverage_rate_pct: float | None
+    num_flat_images: int | None
     oldest_capture_date: str | None
     newest_capture_date: str | None
     median_pano_age_years: float | None
@@ -393,10 +414,13 @@ def init_schema(conn: sqlite3.Connection) -> None:
         user_version = 3
     if user_version == 3:
         _migrate_v3_to_v4(conn)
+        user_version = 4
     # v4 -> v5 (street_networks) and v5 -> v6 (street_walks, issue #99) are both
     # purely additive, so like v2 -> v3 they need no rebuild migration: the
     # CREATE TABLE IF NOT EXISTS in _SCHEMA creates the new table on any older
     # catalog, and the version stamp below records the upgrade.
+    if user_version in (4, 5, 6):
+        _migrate_v6_to_v7(conn)
     conn.executescript(_SCHEMA)
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -432,6 +456,25 @@ def _migrate_v3_to_v4(conn: sqlite3.Connection) -> None:
         return
     logger.info("Migrating catalog schema v3 -> v4 (adding runs.status_no_date)")
     conn.executescript(_MIGRATE_V3_TO_V4)
+    conn.commit()
+
+
+def _migrate_v6_to_v7(conn: sqlite3.Connection) -> None:
+    """Add the imagery-type stratification columns to runs (issue #116).
+
+    Additive (status_flat_only, any_imagery_coverage_rate_pct,
+    num_flat_images); no table rebuild. Idempotent: skips the ADD COLUMNs if
+    they already exist, so a catalog created fresh at the current schema can
+    still be stamped forward through this step.
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
+    if "status_flat_only" in cols:
+        return
+    logger.info(
+        "Migrating catalog schema v6 -> v7 "
+        "(adding runs.status_flat_only / any_imagery_coverage_rate_pct / num_flat_images)"
+    )
+    conn.executescript(_MIGRATE_V6_TO_V7)
     conn.commit()
 
 
@@ -586,10 +629,13 @@ def register_run(
     status_ok: int | None = None,
     status_no_date: int | None = None,
     status_zero_results: int | None = None,
+    status_flat_only: int | None = None,
     status_other: int | None = None,
     unique_panos: int | None = None,
     unique_google_panos: int | None = None,
     coverage_rate_pct: float | None = None,
+    any_imagery_coverage_rate_pct: float | None = None,
+    num_flat_images: int | None = None,
     oldest_capture_date: str | None = None,
     newest_capture_date: str | None = None,
     median_pano_age_years: float | None = None,
@@ -607,10 +653,11 @@ def register_run(
            (city_id, provider, run_date, csv_filename, json_filename,
             is_baseline, started_at, finished_at, duration_seconds,
             total_points, status_ok, status_no_date, status_zero_results,
-            status_other, unique_panos, unique_google_panos, coverage_rate_pct,
+            status_flat_only, status_other, unique_panos, unique_google_panos,
+            coverage_rate_pct, any_imagery_coverage_rate_pct, num_flat_images,
             oldest_capture_date, newest_capture_date, median_pano_age_years,
             api_requests)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             city_id,
             provider,
@@ -625,10 +672,13 @@ def register_run(
             status_ok,
             status_no_date,
             status_zero_results,
+            status_flat_only,
             status_other,
             unique_panos,
             unique_google_panos,
             coverage_rate_pct,
+            any_imagery_coverage_rate_pct,
+            num_flat_images,
             oldest_capture_date,
             newest_capture_date,
             median_pano_age_years,

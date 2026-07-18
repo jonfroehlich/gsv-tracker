@@ -8,14 +8,22 @@ image metadata as z14 vector tiles: one request returns every image in a
 image id, capture timestamp, position, and an is_pano flag. A whole city is
 typically a few dozen tile requests.
 
-Collection model (decided in issue #89):
-- Only 360-degree panoramas are kept (is_pano true); flat phone photos are
-  dropped at ingest.
-- ALL panos are kept — one CSV row per image, with query_lat/query_lon set
-  to the image's nearest point on the city's frozen sampling grid. Grid
-  points with no pano get a single ZERO_RESULTS row. Coverage rate (% of
-  grid points with >= 1 pano) is therefore directly comparable to GSV,
-  while raw pano counts are a census here vs a grid sample for GSV.
+Collection model (issue #89, extended by issue #116):
+- ALL panos are kept — one CSV row per 360-degree image (is_pano true), with
+  query_lat/query_lon set to the image's nearest point on the city's frozen
+  sampling grid. Coverage rate (% of grid points with >= 1 pano) is therefore
+  directly comparable to GSV, while raw pano counts are a census here vs a
+  grid sample for GSV.
+- Flat/perspective images (is_pano false) are no longer discarded (issue
+  #116). A grid point covered ONLY by flat imagery — no pano — gets a single
+  FLAT_ONLY row (carrying the nearest flat image as a representative, with a
+  null capture_date) instead of ZERO_RESULTS, so any-imagery coverage can be
+  reported alongside the GSV-comparable 360-degree coverage. Flat imagery at a
+  point that also has a pano is not written as a row (the pano already covers
+  it), but every in-grid flat image is tallied into the returned
+  num_flat_images census magnitude.
+- Grid points with neither a pano nor a flat image get a single ZERO_RESULTS
+  row, as before.
 
 The output CSV uses the exact same 9-column schema as the GSV downloader
 (config.METADATA_DTYPES), so analysis, diffing, and the frontend consume
@@ -42,6 +50,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+from .analysis import FLAT_ONLY
 from .config import METADATA_DTYPES
 from .download_common import DownloadError, generate_grid_points, redact_credentials
 from .fileutils import load_city_csv_file
@@ -166,11 +175,15 @@ def decode_image_features(
     tile_bytes: bytes, tile_x: int, tile_y: int, zoom: int = TILE_ZOOM
 ) -> list[dict[str, Any]]:
     """
-    Extract pano image records from one raw vector tile.
+    Extract image records from one raw vector tile.
 
     Returns dicts with: id (str), lon, lat, captured_at_ms (int or None),
-    creator_id. Non-pano images are dropped here (issue #89 scope: only
-    360-degree imagery of GSV-comparable quality).
+    creator_id, is_pano (bool). Both 360-degree panos and flat/perspective
+    images are returned, tagged by is_pano — the caller keeps every pano as a
+    census row (issue #89) but collapses flat-only grid points to a single
+    FLAT_ONLY marker (issue #116). Dropping flats here (as the original #89
+    scope did) is what made a flat-covered point indistinguishable from
+    ZERO_RESULTS.
     """
     decoded = mapbox_vector_tile.decode(tile_bytes)
     layer = decoded.get(IMAGE_LAYER)
@@ -181,8 +194,6 @@ def decode_image_features(
     records = []
     for feature in layer["features"]:
         props = feature.get("properties", {})
-        if not props.get("is_pano"):
-            continue
         geometry = feature.get("geometry", {})
         if geometry.get("type") != "Point":
             continue
@@ -203,6 +214,7 @@ def decode_image_features(
                 "lat": lat,
                 "captured_at_ms": captured_at,
                 "creator_id": props.get("creator_id"),
+                "is_pano": bool(props.get("is_pano")),
             }
         )
     return records
@@ -369,51 +381,86 @@ async def download_mapillary_metadata_async(
         progress_bar.close()
 
     # Tiles are encoded with a buffer, so features near tile edges appear in
-    # two tiles — dedup on image id.
+    # two tiles — dedup on image id (panos and flats share the id space).
     images_by_id = {}
     for records in results:
         for record in records:
             images_by_id[record["id"]] = record
     images = list(images_by_id.values())
+    panos = [img for img in images if img["is_pano"]]
+    flats = [img for img in images if not img["is_pano"]]
     logger.info(
-        f"Decoded {sum(len(r) for r in results)} pano features "
-        f"({len(images)} unique) from {len(tiles)} tiles"
+        f"Decoded {sum(len(r) for r in results)} features "
+        f"({len(images)} unique: {len(panos)} panos, {len(flats)} flat) "
+        f"from {len(tiles)} tiles"
     )
 
-    rows = []
-    covered_points = set()
-    if images:
-        lats = np.array([img["lat"] for img in images])
-        lons = np.array([img["lon"] for img in images])
+    def _assign(imgs: list[dict[str, Any]]) -> list[tuple[dict[str, Any], tuple[int, int]]]:
+        """(image, nearest in-grid (i, j)) pairs; images beyond the grid are dropped."""
+        if not imgs:
+            return []
+        lats = np.array([img["lat"] for img in imgs])
+        lons = np.array([img["lon"] for img in imgs])
         i_idx, j_idx, in_grid = assign_to_grid(
             lats, lons, center_lat, center_lon, width_steps, height_steps, step_length
         )
-        for img, i, j, keep in zip(images, i_idx, j_idx, in_grid, strict=False):
-            if not keep:
-                continue
-            grid_lat, grid_lon = point_by_index[(int(i), int(j))]
-            capture_date = captured_at_to_iso_date(img["captured_at_ms"])
-            creator = img["creator_id"]
-            copyright_info = (
-                f"© Mapillary contributor {creator}" if creator is not None else "© Mapillary"
-            )
-            rows.append(
-                {
-                    "query_lat": grid_lat,
-                    "query_lon": grid_lon,
-                    "query_timestamp": query_timestamp,
-                    "pano_lat": img["lat"],
-                    "pano_lon": img["lon"],
-                    "pano_id": img["id"],
-                    "capture_date": capture_date,
-                    "copyright_info": copyright_info,
-                    # Mirror GSV's convention: an image without a usable
-                    # capture date is present but doesn't count as coverage
-                    "status": "OK" if capture_date else "NO_DATE",
-                }
-            )
-            covered_points.add((int(i), int(j)))
+        return [
+            (img, (int(i), int(j)))
+            for img, i, j, keep in zip(imgs, i_idx, j_idx, in_grid, strict=False)
+            if keep
+        ]
 
+    def _image_row(img, grid_lat, grid_lon, status, capture_date) -> dict[str, Any]:
+        creator = img["creator_id"]
+        copyright_info = (
+            f"© Mapillary contributor {creator}" if creator is not None else "© Mapillary"
+        )
+        return {
+            "query_lat": grid_lat,
+            "query_lon": grid_lon,
+            "query_timestamp": query_timestamp,
+            "pano_lat": img["lat"],
+            "pano_lon": img["lon"],
+            "pano_id": img["id"],
+            "capture_date": capture_date,
+            "copyright_info": copyright_info,
+            "status": status,
+        }
+
+    rows = []
+    pano_covered_points = set()
+    for img, point in _assign(panos):
+        grid_lat, grid_lon = point_by_index[point]
+        capture_date = captured_at_to_iso_date(img["captured_at_ms"])
+        # Mirror GSV's convention: a pano without a usable capture date is
+        # present but doesn't count toward dated stats (NO_DATE).
+        rows.append(
+            _image_row(img, grid_lat, grid_lon, "OK" if capture_date else "NO_DATE", capture_date)
+        )
+        pano_covered_points.add(point)
+
+    # Flat imagery (issue #116): tally every in-grid flat image for the census
+    # magnitude, and keep one representative per grid point so a flat-only
+    # point (a point with flats but no pano) can be written as a single
+    # FLAT_ONLY marker row.
+    in_grid_flats = _assign(flats)
+    num_flat_images = len(in_grid_flats)
+    flat_representative: dict[tuple[int, int], dict[str, Any]] = {}
+    for img, point in in_grid_flats:
+        flat_representative.setdefault(point, img)
+
+    flat_only_points = set()
+    for point, img in flat_representative.items():
+        if point in pano_covered_points:
+            continue  # the pano already covers this grid point
+        grid_lat, grid_lon = point_by_index[point]
+        # capture_date is deliberately null for FLAT_ONLY: this row is a
+        # coverage-presence marker, and a null date keeps flat timestamps out
+        # of every date/age/histogram path (which key on status == 'OK').
+        rows.append(_image_row(img, grid_lat, grid_lon, FLAT_ONLY, None))
+        flat_only_points.add(point)
+
+    covered_points = pano_covered_points | flat_only_points
     for (i, j), (grid_lat, grid_lon) in point_by_index.items():
         if (i, j) not in covered_points:
             rows.append(
@@ -437,9 +484,10 @@ async def download_mapillary_metadata_async(
 
     # Read back through the shared loader so dtypes match GSV runs exactly
     df = load_city_csv_file(output_csv_gz_path)
-    n_panos = int((df["status"] == "OK").sum())
+    n_pano_rows = int(df["status"].isin(("OK", "NO_DATE")).sum())
     logger.info(
-        f"Wrote {len(df)} rows ({n_panos} panos, "
+        f"Wrote {len(df)} rows ({n_pano_rows} pano rows, "
+        f"{len(flat_only_points)} flat-only points, {num_flat_images} flat images, "
         f"{len(point_by_index) - len(covered_points)} empty grid points) "
         f"to {output_csv_gz_path}"
     )
@@ -448,6 +496,11 @@ async def download_mapillary_metadata_async(
         "df": df,
         "filename_with_path": output_csv_gz_path,
         "api_requests": api_requests,
+        # Census magnitude of flat imagery (issue #116): every in-grid flat
+        # image, including those at points that also hold a pano. Not
+        # reconstructable from the CSV (flat-only points collapse to one
+        # FLAT_ONLY row), so it is threaded to the catalog separately.
+        "num_flat_images": num_flat_images,
         "started_at": started_at,
         "finished_at": datetime.now(UTC).isoformat(),
     }
