@@ -456,6 +456,11 @@ def _build_provider_summary(runs, latest_json, data_dir, conn) -> dict[str, Any]
         # (issue #90), while per-run JSONs written before the fix may
         # carry the briefly-used unique-pano rate until regenerated
         "coverage_rate_percent": latest.coverage_rate_pct,
+        # Any-imagery (360° + flat) coverage, Mapillary-only signal (issue
+        # #116). For GSV and pre-v7 runs this equals coverage_rate_percent;
+        # NULL falls back to the 360° rate at read time in the frontend.
+        "any_imagery_coverage_rate_percent": latest.any_imagery_coverage_rate_pct,
+        "num_flat_images": latest.num_flat_images,
         "panorama_counts": panorama_counts,
         "all_panos_age_stats": latest_json["all_panos"]["age_stats"],
         "collection_info": latest_json["download"],
@@ -499,6 +504,7 @@ def _build_provider_summary(runs, latest_json, data_dir, conn) -> dict[str, Any]
                 "unique_panos": r.unique_panos,
                 "unique_google_panos": r.unique_google_panos,
                 "coverage_rate_percent": r.coverage_rate_pct,
+                "any_imagery_coverage_rate_percent": r.any_imagery_coverage_rate_pct,
                 "median_pano_age_years": r.median_pano_age_years,
             }
             for r in runs

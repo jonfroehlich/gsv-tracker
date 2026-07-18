@@ -50,14 +50,20 @@ STAT_COLUMNS = (
     "status_ok",
     "status_no_date",
     "status_zero_results",
+    "status_flat_only",
     "status_other",
     "unique_panos",
     "unique_google_panos",
     "coverage_rate_pct",
+    "any_imagery_coverage_rate_pct",
     "oldest_capture_date",
     "newest_capture_date",
     "median_pano_age_years",
 )
+# num_flat_images (issue #116) is deliberately NOT recomputed here: it is the
+# flat-image census magnitude, a Mapillary-downloader artifact that the CSV
+# doesn't preserve (flat-only points collapse to one FLAT_ONLY row). Reloading
+# the CSV can't reconstruct it, so it is left untouched.
 
 
 def _equalish(a, b) -> bool:
@@ -90,9 +96,10 @@ def main() -> int:
     rows = conn.execute(
         """SELECT run_id, city_id, provider, run_date, csv_filename,
                   total_points, status_ok, status_no_date, status_zero_results,
-                  status_other, unique_panos, unique_google_panos,
-                  coverage_rate_pct, oldest_capture_date, newest_capture_date,
-                  median_pano_age_years
+                  status_flat_only, status_other, unique_panos,
+                  unique_google_panos, coverage_rate_pct,
+                  any_imagery_coverage_rate_pct, oldest_capture_date,
+                  newest_capture_date, median_pano_age_years
            FROM runs ORDER BY city_id, provider, run_date"""
     ).fetchall()
 

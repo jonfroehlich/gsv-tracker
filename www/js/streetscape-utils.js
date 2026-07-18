@@ -197,6 +197,22 @@ const METRICS = {
   },
 };
 
+// Any-imagery coverage (issue #116): Mapillary's full footprint including
+// flat-only points, vs the 360°-only `coverage` metric. Identical color/bucket
+// machinery — only the read differs — so it's derived from `coverage` rather
+// than duplicated. For GSV (and pre-v7 data) the value falls back to the 360°
+// rate, so the two views coincide there.
+METRICS.coverage_any = {
+  ...METRICS.coverage,
+  label: "Any imagery",
+  legendTitle: "Any-Imagery Coverage (%)",
+  titleNoun: "Any-Imagery Coverage %",
+  axisTitle: "Any-Imagery Coverage (%)",
+  valueOf: (city) =>
+    city.any_imagery_coverage_rate_percent ?? city.coverage_rate_percent ?? null,
+  sliderLabel: "any-imagery coverage (%)",
+};
+
 /**
  * True iff `key` is a real "color by" metric key ("age"/"coverage").
  * Object.hasOwn for the same reason as isKnownProvider: a URL-supplied
@@ -362,6 +378,9 @@ function adaptCityRecord(rec, provider = "gsv") {
       change: rec.change || null,
       latest_run_date: rec.latest_run_date ?? null,
       copyright_info_available: rec.copyright_info_available ?? true,
+      // v1 is gsv-only; any-imagery coverage equals the 360° rate there.
+      any_imagery_coverage_rate_percent: rec.coverage_rate_percent ?? null,
+      num_flat_images: null,
       pano_count: v1Counts.unique_google_panos ?? v1Counts.unique_panos,
       pano_age_stats: rec.google_panos_age_stats ?? rec.all_panos_age_stats,
       capture_year_histogram: v1Histograms.google_panos ?? v1Histograms.all_panos,
@@ -393,6 +412,11 @@ function adaptCityRecord(rec, provider = "gsv") {
     json_file: latest.json_file,
     search_area_km2: latest.search_area_km2,
     coverage_rate_percent: latest.coverage_rate_percent,
+    // Any-imagery (360° + flat) coverage, issue #116. Missing (GSV / pre-v7
+    // runs) falls back to the 360° rate so the two views coincide there.
+    any_imagery_coverage_rate_percent:
+      latest.any_imagery_coverage_rate_percent ?? latest.coverage_rate_percent,
+    num_flat_images: latest.num_flat_images ?? null,
     panorama_counts: counts,
     all_panos_age_stats: latest.all_panos_age_stats,
     google_panos_age_stats: latest.google_panos_age_stats,

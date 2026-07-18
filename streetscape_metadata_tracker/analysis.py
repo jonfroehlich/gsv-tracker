@@ -32,6 +32,15 @@ GOOGLE_COPYRIGHT = "© Google"
 # an error, not an absence.
 PRESENT_STATUSES = ("OK", "NO_DATE")
 
+# Statuses that mean "some imagery is present, of any fidelity" — the broader
+# any-imagery footprint (issue #116). FLAT_ONLY marks a grid point covered only
+# by flat/perspective imagery (no 360-degree pano); it is Mapillary-specific
+# (GSV's metadata API only returns panoramas, so GSV never emits it). It is
+# deliberately kept OUT of PRESENT_STATUSES so the 360-degree coverage_rate
+# stays GSV-comparable; any_imagery_coverage_rate is the metric that counts it.
+FLAT_ONLY = "FLAT_ONLY"
+ANY_IMAGERY_STATUSES = ("OK", "NO_DATE", FLAT_ONLY)
+
 # Statuses that reflect a transient problem with the *request*, not a real
 # answer about the grid point — so the downloader retries them, and only if
 # they survive every retry does it write them back as a failure row (never as
@@ -99,14 +108,29 @@ class CoverageStats:
     num_points_with_errors: int
     num_points_without_panos: int
     coverage_rate: float
+    # Any-imagery footprint (issue #116): points covered by a pano OR by
+    # flat-only imagery (status FLAT_ONLY), and the corresponding rate. For
+    # GSV — which never emits FLAT_ONLY — these equal num_points_with_panos /
+    # coverage_rate exactly, so the fields are universal but only widen the
+    # number for Mapillary.
+    num_points_with_any_imagery: int
+    any_imagery_coverage_rate: float
     pano_distance_stats: DistanceStats | None = None
+
+    # A percent-formatted rate field vs a plain count, so to_rows knows to
+    # append '%'. Kept as a set so new rate fields only touch one place.
+    _RATE_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"coverage_rate", "any_imagery_coverage_rate"}
+    )
 
     FIELD_LABELS: ClassVar[dict[str, str]] = {
         "num_points_with_panos": "Points with Panoramas",
         "num_points_with_unique_pano_ids": "Unique Panoramas",
         "num_points_without_panos": "Points without Panoramas",
         "num_points_with_errors": "Points with Errors",
-        "coverage_rate": "Points with Panos / Total Points",
+        "coverage_rate": "Points with Panos / Total Points (360°)",
+        "num_points_with_any_imagery": "Points with Any Imagery",
+        "any_imagery_coverage_rate": "Any-Imagery Coverage",
     }
 
     def to_rows(self) -> list[list[str]]:
@@ -115,7 +139,7 @@ class CoverageStats:
             [
                 self.FIELD_LABELS[field],
                 f"{getattr(self, field):.2f}%"
-                if field == "coverage_rate"
+                if field in self._RATE_FIELDS
                 else str(getattr(self, field)),
             ]
             for field in self.FIELD_LABELS.keys()
@@ -256,13 +280,25 @@ def calculate_coverage_stats(df: pd.DataFrame) -> CoverageStats:
     num_points_with_panos = len(present_rows[point_cols].drop_duplicates())
     logger.debug(f"Grid points with panoramas: {num_points_with_panos}")
 
+    # Any-imagery coverage additionally counts points covered only by flat
+    # imagery (status FLAT_ONLY, issue #116). A FLAT_ONLY row only ever exists
+    # at a point with no pano, so this is a strict superset of the 360-degree
+    # covered points. GSV runs carry no FLAT_ONLY rows, so this collapses to
+    # num_points_with_panos there.
+    any_imagery_rows = df[df["status"].isin(ANY_IMAGERY_STATUSES)]
+    num_points_with_any_imagery = len(any_imagery_rows[point_cols].drop_duplicates())
+
     # ZERO_RESULTS rows exist only at grid points with no pano, so they never
     # overlap the covered points; whatever remains saw only errors
-    # (REQUEST_DENIED, OVER_QUERY_LIMIT, ...)
+    # (REQUEST_DENIED, OVER_QUERY_LIMIT, ...). Subtract the ANY-imagery covered
+    # points (pano + flat-only), not just the pano points — a FLAT_ONLY point
+    # is a real answer, not an error (issue #116).
     num_points_without_panos = len(
         df.loc[df["status"] == "ZERO_RESULTS", point_cols].drop_duplicates()
     )
-    num_points_with_errors = num_total_points - num_points_with_panos - num_points_without_panos
+    num_points_with_errors = (
+        num_total_points - num_points_with_any_imagery - num_points_without_panos
+    )
 
     successful_df_no_duplicates = present_rows.drop_duplicates(subset=["pano_id"]).copy()
     num_unique_panos = len(successful_df_no_duplicates)
@@ -309,6 +345,10 @@ def calculate_coverage_stats(df: pd.DataFrame) -> CoverageStats:
         num_points_without_panos=num_points_without_panos,
         num_points_with_errors=num_points_with_errors,
         coverage_rate=(num_points_with_panos / num_total_points) * 100
+        if num_total_points > 0
+        else 0,
+        num_points_with_any_imagery=num_points_with_any_imagery,
+        any_imagery_coverage_rate=(num_points_with_any_imagery / num_total_points) * 100
         if num_total_points > 0
         else 0,
         pano_distance_stats=distance_stats,
@@ -643,7 +683,11 @@ def calculate_run_stats(df: pd.DataFrame, run_date, provider: str = "gsv") -> di
     status_ok = int((df["status"] == "OK").sum())
     status_no_date = int((df["status"] == "NO_DATE").sum())
     status_zero = int((df["status"] == "ZERO_RESULTS").sum())
-    status_other = int(len(df) - status_ok - status_no_date - status_zero)
+    # FLAT_ONLY (issue #116) is a real answer ("flat imagery here, no pano"),
+    # not an error — so it gets its own bucket and is excluded from the
+    # status_other error catch-all, mirroring how NO_DATE was split out in v3.
+    status_flat_only = int((df["status"] == FLAT_ONLY).sum())
+    status_other = int(len(df) - status_ok - status_no_date - status_zero - status_flat_only)
 
     # Pano totals count every present pano (OK or NO_DATE); age stats use only
     # the dated subset, since NO_DATE panos carry no usable capture date.
@@ -663,10 +707,12 @@ def calculate_run_stats(df: pd.DataFrame, run_date, provider: str = "gsv") -> di
         "status_ok": status_ok,
         "status_no_date": status_no_date,
         "status_zero_results": status_zero,
+        "status_flat_only": status_flat_only,
         "status_other": status_other,
         "unique_panos": len(unique),
         "unique_google_panos": unique_google_panos,
         "coverage_rate_pct": coverage.coverage_rate,
+        "any_imagery_coverage_rate_pct": coverage.any_imagery_coverage_rate,
         "oldest_capture_date": age_stats.oldest_pano_date,
         "newest_capture_date": age_stats.newest_pano_date,
         "median_pano_age_years": age_stats.median_pano_age_years,

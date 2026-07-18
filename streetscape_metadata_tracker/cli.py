@@ -624,6 +624,9 @@ async def _collect_one_run(conn, args, city_row, run_date, provider, config, vis
         finished_at=finished,
         duration_seconds=duration,
         api_requests=dict_results["api_requests"],
+        # Flat-image census (issue #116) is a Mapillary downloader artifact,
+        # not derivable from the CSV — GSV runs omit it (stored NULL).
+        num_flat_images=dict_results.get("num_flat_images"),
         **stats,
     )
 

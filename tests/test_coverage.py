@@ -15,6 +15,7 @@ from streetscape_metadata_tracker.analysis import (
     calculate_coverage_stats,
     calculate_pano_stats,
     calculate_run_stats,
+    detect_systemic_failure,
 )
 from tests.conftest import COLUMNS, make_city_df, make_mapillary_city_df
 
@@ -209,6 +210,57 @@ class TestNoDateCountsAsPresent:
         assert stats["status_no_date"] == 1
         assert stats["unique_google_panos"] is None  # non-GSV
         assert abs(stats["coverage_rate_pct"] - 100.0) < 1e-9
+
+
+class TestImageryTypeStratification:
+    """Issue #116: FLAT_ONLY points widen any-imagery coverage but must not
+    change the GSV-comparable 360° coverage_rate."""
+
+    def test_flat_only_counts_toward_any_imagery_not_360(self):
+        # 2 pano points + 1 flat-only point + 1 empty point = 4 total.
+        # 360° coverage = 2/4 = 50%; any-imagery = 3/4 = 75%.
+        df = make_mapillary_city_df(
+            [("m1", "2021-01-01"), ("m2", "2022-01-01")], n_flat_only=1, n_empty=1
+        )
+        cov = calculate_coverage_stats(df)
+        assert cov.num_points_with_panos == 2
+        assert cov.num_points_with_any_imagery == 3
+        assert cov.coverage_rate == 50.0
+        assert cov.any_imagery_coverage_rate == 75.0
+        # FLAT_ONLY is not an error, so it doesn't inflate the error bucket
+        assert cov.num_points_with_errors == 0
+        # ...and it doesn't count as a "point without panos" (that's ZERO_RESULTS)
+        assert cov.num_points_without_panos == 1
+
+    def test_gsv_any_imagery_equals_360(self):
+        # GSV never emits FLAT_ONLY, so the two rates are identical there.
+        df = make_city_df([("a", "2020-01-01"), ("b", "2021-01-01")], n_empty=2)
+        cov = calculate_coverage_stats(df)
+        assert cov.any_imagery_coverage_rate == cov.coverage_rate
+        assert cov.num_points_with_any_imagery == cov.num_points_with_panos
+
+    def test_run_stats_bucket_flat_only_separately(self):
+        # status_flat_only is its own bucket, split out of status_other (like
+        # NO_DATE in v3); any_imagery_coverage_rate_pct is exposed for the DB.
+        df = make_mapillary_city_df(
+            [("m1", "2021-01-01"), ("m2", "2022-01-01")], n_flat_only=2, n_empty=1
+        )
+        stats = calculate_run_stats(df, date(2026, 1, 15), provider="mapillary")
+        assert stats["status_ok"] == 2
+        assert stats["status_flat_only"] == 2
+        assert stats["status_zero_results"] == 1
+        assert stats["status_other"] == 0  # flat-only NOT folded into errors
+        # 2 pano points / 5 total = 40%; any-imagery 4/5 = 80%
+        assert stats["coverage_rate_pct"] == 40.0
+        assert stats["any_imagery_coverage_rate_pct"] == 80.0
+        # Flat-only rows are not panos: unique_panos counts only OK/NO_DATE
+        assert stats["unique_panos"] == 2
+
+    def test_flat_only_not_treated_as_systemic_failure(self):
+        # A run that is all FLAT_ONLY is a valid "flat imagery everywhere, no
+        # panos" answer, not a credential/quota failure — must not be rejected.
+        df = make_mapillary_city_df([], n_flat_only=5, n_empty=0)
+        assert detect_systemic_failure(df) is None
 
 
 class TestPanoStatsCoverage:

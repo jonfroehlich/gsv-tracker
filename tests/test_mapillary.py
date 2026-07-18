@@ -147,7 +147,9 @@ def make_image(image_id, lon, lat, *, is_pano=True, captured_at=1650000000000, c
 # ── Decoding ───────────────────────────────────────────────────────────────
 
 
-def test_decode_filters_non_pano():
+def test_decode_keeps_pano_and_flat_tagged():
+    # Issue #116: flats are no longer dropped at decode — both kinds are
+    # returned, tagged by is_pano, so the caller can stratify coverage.
     lat, lon = SEATTLE
     fx, fy = dm.lonlat_to_tile_frac(lon, lat, 14)
     x, y = int(fx), int(fy)
@@ -160,7 +162,10 @@ def test_decode_filters_non_pano():
         y,
     )
     records = dm.decode_image_features(tile, x, y)
-    assert [r["id"] for r in records] == ["1"]
+    by_id = {r["id"]: r for r in records}
+    assert set(by_id) == {"1", "2"}
+    assert by_id["1"]["is_pano"] is True
+    assert by_id["2"]["is_pano"] is False
 
 
 def test_decode_coordinates_are_accurate():
@@ -316,8 +321,10 @@ def test_download_end_to_end(monkeypatch, tmp_path, straddling_city):
     assert len(expected_tiles) >= 2  # the straddle worked
 
     # One pano at the center, one ~20m east (a different grid point), one
-    # non-pano to be filtered, one pano with a dead clock (NO_DATE), and the
-    # center pano duplicated into every tile (tile-buffer duplication).
+    # flat photo at the (pano-covered) center — counted in the flat census but
+    # NOT written as a FLAT_ONLY row since a pano already covers that point —
+    # one pano with a dead clock (NO_DATE), and the center pano duplicated into
+    # every tile (tile-buffer duplication).
     east_lon = lon + 20 / (dm._M_PER_DEG_LAT * math.cos(math.radians(lat)))
     center_pano = make_image(101, lon, lat, captured_at=1641206630491)
     east_pano = make_image(102, east_lon, lat, creator_id=7)
@@ -347,6 +354,11 @@ def test_download_end_to_end(monkeypatch, tmp_path, straddling_city):
     ok = df[df["status"] == "OK"]
     assert sorted(ok["pano_id"]) == ["101", "102"]
     assert (df["status"] == "NO_DATE").sum() == 1
+
+    # The flat photo sits on the pano-covered center point, so it yields no
+    # FLAT_ONLY row but is still tallied into the flat census (issue #116).
+    assert (df["status"] == dm.FLAT_ONLY).sum() == 0
+    assert result["num_flat_images"] == 1
 
     # Grid semantics: 100m/20m -> 6x6 grid; every point present exactly once
     # unless covered; total rows = panos + no_date + empty points
@@ -388,6 +400,53 @@ def test_download_city_with_no_imagery(monkeypatch, tmp_path):
     assert (df["status"] == "ZERO_RESULTS").all()
     assert len(df) == 6 * 6
     assert df["pano_id"].isna().all()
+
+
+def test_download_flat_only_points_get_flat_only_row(monkeypatch, tmp_path):
+    # Issue #116: a grid point covered ONLY by flat imagery (no pano) becomes a
+    # single FLAT_ONLY row instead of ZERO_RESULTS; a point with both a pano
+    # and a flat stays a pano row (the flat only bumps the census). All
+    # features sit in the single tile covering the city center.
+    lat, lon = SEATTLE
+    fx, fy = dm.lonlat_to_tile_frac(lon, lat, 14)
+    x, y = int(fx), int(fy)
+    east_lon = lon + 20 / (dm._M_PER_DEG_LAT * math.cos(math.radians(lat)))
+
+    pano = make_image(301, lon, lat, captured_at=1641206630491)  # center point
+    flat_at_pano = make_image(302, lon, lat + 1e-5, is_pano=False)  # center too
+    flat_only = make_image(303, east_lon, lat, is_pano=False, creator_id=99)  # east point
+
+    tiles = {(x, y): encode_tile([pano, flat_at_pano, flat_only], x, y)}
+    result, _ = _run_download(monkeypatch, tmp_path, tiles, lat, lon)
+    df = result["df"]
+
+    # Exactly one pano row (center) and one FLAT_ONLY row (east point)
+    assert sorted(df.loc[df["status"] == "OK", "pano_id"]) == ["301"]
+    flat_rows = df[df["status"] == dm.FLAT_ONLY]
+    assert list(flat_rows["pano_id"]) == ["303"]
+
+    # The FLAT_ONLY row is a presence marker: it carries the representative
+    # flat image's coords/copyright but a NULL capture_date (keeping flat
+    # timestamps out of every dated-stat path).
+    fr = flat_rows.iloc[0]
+    assert pd.isna(fr["capture_date"])
+    assert fr["copyright_info"] == "© Mapillary contributor 99"
+    assert fr["pano_lon"] == pytest.approx(east_lon, abs=5e-5)
+
+    # Flat census counts BOTH flats (incl. the one at the pano-covered point)
+    assert result["num_flat_images"] == 2
+
+    # Two covered points (center pano + east flat-only); the rest ZERO_RESULTS
+    assert (df["status"] == "ZERO_RESULTS").sum() == 6 * 6 - 2
+
+    # Stratified coverage: 360° counts only the pano point, any-imagery counts
+    # both. Feed the run through the analysis layer to confirm.
+    from streetscape_metadata_tracker.analysis import calculate_coverage_stats
+
+    cov = calculate_coverage_stats(df)
+    assert cov.num_points_with_panos == 1
+    assert cov.num_points_with_any_imagery == 2
+    assert cov.any_imagery_coverage_rate > cov.coverage_rate
 
 
 def test_download_rejects_non_csv_gz_path(tmp_path):
