@@ -58,10 +58,11 @@ daily_request_budget = 40000
 # the separate GMAPS_STREETS_API_KEY, so a per-sample-point road crawl can't
 # exhaust the production grid collector's quota. Disabled by default and NOT
 # yet wired into `run-due` — the collector is a manual CLI
-# (`python -m streetscape_street_analyzer.collect`) that reads these values as
-# its pacing/budget defaults. GSV metadata requests are free of charge; the
-# real ceiling is the streets key's own per-minute quota (a fresh key resets to
-# Google's default ~30,000/min), paced client-side at ~80% below.
+# (`python -m streetscape_street_analyzer.collect`) whose built-in defaults
+# MIRROR these values (it does not read this file). GSV metadata requests are
+# free of charge; the real ceiling is the streets key's own per-minute quota
+# (a fresh key resets to Google's default ~30,000/min), paced client-side at
+# ~80% below.
 [providers.gsv_streets]
 enabled = false
 daily_request_budget = 2000000

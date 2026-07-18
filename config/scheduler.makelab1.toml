@@ -27,7 +27,8 @@ daily_request_budget = 40000
 
 # Road-walk street-coverage collection (issue #99). Isolated gsv_streets budget
 # channel (separate GMAPS_STREETS_API_KEY). Disabled + not yet in `run-due`;
-# the collector is a manual CLI that reads these as pacing/budget defaults.
+# the collector is a manual CLI whose built-in defaults mirror these values
+# (it does not read this file).
 [providers.gsv_streets]
 enabled = false
 daily_request_budget = 2000000

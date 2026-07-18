@@ -64,7 +64,7 @@ logger = logging.getLogger(__name__)
 # provider). Budget is metered under the separate 'gsv_streets' ledger channel.
 PROVIDER = "gsv"
 BUDGET_CHANNEL = "gsv_streets"
-DEFAULT_SPACING_M = 15.0
+DEFAULT_SPACING_M = 15
 
 # Defaults mirror config/scheduler.toml's [providers.gsv_streets] / [download]
 # so a manual run paces like the (future) scheduled one. The gsv_streets key
@@ -268,9 +268,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("city", help="City query or catalog slug (e.g. 'Seattle, WA')")
     parser.add_argument(
         "--spacing",
-        type=float,
+        # Integer metres only: the artifact filename encodes spacing as an
+        # integer `sp{N}` token (naming.generate_streetwalk_filename), so a
+        # fractional spacing would silently truncate (12.5 -> "sp12") and
+        # misrepresent the run. Reject it at the CLI instead.
+        type=int,
         default=DEFAULT_SPACING_M,
-        help=f"Along-edge sample spacing in metres (default: {DEFAULT_SPACING_M})",
+        help=f"Along-edge sample spacing in whole metres (default: {DEFAULT_SPACING_M})",
     )
     parser.add_argument(
         "--match-dist",
