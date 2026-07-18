@@ -24,6 +24,8 @@ import pandas as pd
 
 from streetscape_metadata_tracker.analysis import is_google_copyright
 
+from .road_sampling import quantize_coord
+
 logger = logging.getLogger(__name__)
 
 WGS84 = "EPSG:4326"
@@ -272,6 +274,270 @@ def build_streets_geojson(
                 "city_id": city_id,
                 "provider": provider,
                 "run_date": run_date,
+                "match_dist_m": match_dist_m,
+                "source_csv": source_csv,
+                **summary,
+            }
+        },
+        "features": features,
+    }
+
+
+# ── Road-walk fractional coverage (issue #99) ──────────────────────────────
+#
+# Unlike the grid-attribution path above (a boolean per edge from nearest-pano
+# snapping), the road-walk collector queried GSV at on-street points sampled
+# along each edge, so association is by construction and coverage is FRACTIONAL:
+# an edge's coverage is the fraction of its sample points that returned a
+# qualifying nearby pano.
+
+
+def compute_streetwalk_coverage(
+    edges: gpd.GeoDataFrame,
+    samples: pd.DataFrame,
+    collected: pd.DataFrame,
+    run_date: str,
+    provider: str = "gsv",
+    match_dist_m: float = DEFAULT_MATCH_DIST_M,
+) -> gpd.GeoDataFrame:
+    """
+    Score fractional per-edge coverage from road-walk collection results.
+
+    Each on-street sample point is "covered" when its collected metadata row is
+    ``status == 'OK'``, official (for GSV, exact ``© Google``; other providers
+    accept any OK pano), and the returned pano lies within ``match_dist_m`` of
+    the sample point — the distance guard rejects a pano that snapped to a
+    parallel/neighbouring road. An edge's ``coverage_fraction`` is its covered
+    samples over its total samples.
+
+    Args:
+        edges: WGS84 LineString GeoDataFrame with ``edge_id`` (+ optional
+            ``highway``/``length``), from ``graph_to_edges``.
+        samples: the deterministic sample list from
+            ``road_sampling.generate_samples`` (``edge_id, sample_idx, lat, lon``).
+        collected: the raw METADATA_DTYPES DataFrame from the collector's
+            csv.gz (``query_lat/query_lon/status/copyright_info/capture_date/
+            pano_lat/pano_lon``).
+        run_date: ``YYYY-MM-DD``; ages are pinned to it (deterministic).
+        provider: imagery provider (governs the official-pano filter).
+        match_dist_m: max sample-to-pano distance in metres.
+
+    Returns:
+        A copy of ``edges`` (WGS84, RangeIndex) with added columns:
+        ``highway_bucket``, ``length_m``, ``total_samples``, ``covered_samples``,
+        ``coverage_fraction`` (0..1), ``covered`` (bool: any coverage),
+        ``nearest_pano_date`` (str|None, newest covered), and
+        ``median_covered_age_years`` (float|None).
+    """
+    run_ts = pd.Timestamp(run_date)
+    out = edges.reset_index(drop=True).copy()
+    if "highway" in out.columns:
+        out["highway_bucket"] = out["highway"].apply(normalize_highway)
+    else:
+        out["highway_bucket"] = "other"
+
+    # Empty network → well-formed 0-edge frame (see compute_street_coverage).
+    if out.empty:
+        for col, dtype in (
+            ("length_m", float),
+            ("total_samples", int),
+            ("covered_samples", int),
+            ("coverage_fraction", float),
+            ("covered", bool),
+            ("nearest_pano_date", object),
+            ("median_covered_age_years", object),
+        ):
+            out[col] = pd.Series([], dtype=dtype)
+        return out
+
+    metric_crs = out.estimate_utm_crs()
+    edges_m = out.to_crs(metric_crs)
+    if "length" in out.columns:
+        out["length_m"] = pd.to_numeric(out["length"], errors="coerce").fillna(edges_m.length)
+    else:
+        out["length_m"] = edges_m.length
+
+    # Match each sample to its single collected row via the quantized-coord key
+    # (a csv.gz round-trip perturbs floats below the 9-decimal round).
+    coll = collected.copy()
+    coll["_key"] = [
+        quantize_coord(la, lo) for la, lo in zip(coll["query_lat"], coll["query_lon"], strict=True)
+    ]
+    coll = coll.drop_duplicates("_key", keep="first")
+    samp = samples.copy()
+    samp["_key"] = [quantize_coord(la, lo) for la, lo in zip(samp["lat"], samp["lon"], strict=True)]
+    m = samp.merge(
+        coll[["_key", "status", "copyright_info", "capture_date", "pano_lat", "pano_lon"]],
+        on="_key",
+        how="left",
+    )
+
+    # Per-sample covered test: OK + official + a pano within the threshold.
+    ok = m["status"] == "OK"
+    if provider == "gsv":
+        official = (
+            is_google_copyright(m["copyright_info"])
+            if "copyright_info" in m.columns
+            else pd.Series(False, index=m.index)
+        )
+    else:
+        official = pd.Series(True, index=m.index)
+    has_pano = m["pano_lat"].notna() & m["pano_lon"].notna()
+
+    sample_pts = gpd.GeoSeries(gpd.points_from_xy(m["lon"], m["lat"]), crs=WGS84).to_crs(metric_crs)
+    pano_pts = gpd.GeoSeries(
+        gpd.points_from_xy(
+            pd.to_numeric(m["pano_lon"], errors="coerce"),
+            pd.to_numeric(m["pano_lat"], errors="coerce"),
+        ),
+        crs=WGS84,
+    ).to_crs(metric_crs)
+    # distance() yields NaN where the pano point is missing; NaN <= x is False.
+    within = sample_pts.distance(pano_pts) <= match_dist_m
+    m["covered_sample"] = ok & official & has_pano & within.to_numpy()
+
+    cap = pd.to_datetime(m["capture_date"], errors="coerce")
+    m["age_years"] = (run_ts - cap).dt.total_seconds() / _YEAR_SECONDS
+
+    # Aggregate to per-edge fractions. Edges with no samples (empty/zero-length
+    # geometry) never appear in `samples`; they default to 0 coverage below.
+    grp = m.groupby("edge_id")
+    total = grp.size()
+    covered = grp["covered_sample"].sum()
+
+    def _edge_stats(sub: pd.DataFrame) -> pd.Series:
+        cov = sub[sub["covered_sample"]]
+        # capture_date may arrive as ISO strings (raw CSV) or datetimes (parsed);
+        # normalize the newest to a 'YYYY-MM-DD' string for the JSON artifact.
+        dates = pd.to_datetime(cov["capture_date"], errors="coerce").dropna()
+        ages = cov["age_years"].dropna()
+        return pd.Series(
+            {
+                "nearest_pano_date": dates.max().date().isoformat() if len(dates) else None,
+                "median_covered_age_years": round(float(ages.median()), 3) if len(ages) else None,
+            }
+        )
+
+    extra = grp[["covered_sample", "capture_date", "age_years"]].apply(_edge_stats)
+
+    out["total_samples"] = out["edge_id"].map(total).fillna(0).astype(int)
+    out["covered_samples"] = out["edge_id"].map(covered).fillna(0).astype(int)
+    out["coverage_fraction"] = (
+        (out["covered_samples"] / out["total_samples"].where(out["total_samples"] > 0))
+        .fillna(0.0)
+        .round(4)
+    )
+    out["covered"] = out["covered_samples"] > 0
+    # Edges with no covered samples carry NaN here; build_streetwalk_geojson
+    # converts NaN -> None at serialization so the JSON artifact stays valid.
+    out["nearest_pano_date"] = out["edge_id"].map(
+        extra["nearest_pano_date"] if "nearest_pano_date" in extra else pd.Series(dtype=object)
+    )
+    out["median_covered_age_years"] = out["edge_id"].map(
+        extra["median_covered_age_years"]
+        if "median_covered_age_years" in extra
+        else pd.Series(dtype=object)
+    )
+    return out
+
+
+def summarize_streetwalk_coverage(covered_edges: gpd.GeoDataFrame) -> dict[str, Any]:
+    """
+    Aggregate fractional per-edge coverage into by-highway-type and overall
+    stats. Reports coverage by street length (fraction-weighted), plus the
+    edge-level mean fraction and fully-covered count.
+    """
+
+    def _block(group: pd.DataFrame) -> dict[str, Any]:
+        edges = int(len(group))
+        length_km = float(group["length_m"].sum()) / 1000.0
+        # Length credited proportionally to each edge's covered fraction.
+        length_km_covered = float((group["length_m"] * group["coverage_fraction"]).sum()) / 1000.0
+        sampled = group[group["total_samples"] > 0]
+        ages = pd.to_numeric(group["median_covered_age_years"], errors="coerce").dropna()
+        return {
+            "edges": edges,
+            "edges_sampled": int(len(sampled)),
+            "edges_fully_covered": int((group["coverage_fraction"] >= 1.0).sum()),
+            "edges_any_coverage": int((group["coverage_fraction"] > 0).sum()),
+            "length_km": round(length_km, 3),
+            "length_km_covered": round(length_km_covered, 3),
+            "mean_edge_coverage": round(float(sampled["coverage_fraction"].mean()), 4)
+            if len(sampled)
+            else 0.0,
+            "coverage_pct_by_length": round(100.0 * length_km_covered / length_km, 1)
+            if length_km
+            else 0.0,
+            "median_covered_age_years": round(float(ages.median()), 2) if len(ages) else None,
+        }
+
+    by_type = {bucket: _block(group) for bucket, group in covered_edges.groupby("highway_bucket")}
+    by_type = dict(sorted(by_type.items(), key=lambda kv: _bucket_order(kv[0])))
+
+    totals = _block(covered_edges)
+    totals["uncovered_pct_by_length"] = round(100.0 - totals["coverage_pct_by_length"], 1)
+
+    return {"coverage_by_highway": by_type, "totals": totals}
+
+
+def build_streetwalk_geojson(
+    covered_edges: gpd.GeoDataFrame,
+    *,
+    city_id: str,
+    provider: str,
+    run_date: str,
+    spacing_m: float,
+    match_dist_m: float,
+    source_csv: str,
+) -> dict[str, Any]:
+    """
+    Assemble the published road-walk coverage GeoJSON FeatureCollection.
+
+    Each feature is a street edge carrying its fractional coverage and sample
+    counts; ``properties.metadata`` holds the by-type/overall summary so the
+    frontend can draw both the map layer and the breakdown from one file.
+    """
+    summary = summarize_streetwalk_coverage(covered_edges)
+
+    def _none_if_nan(value: Any) -> Any:
+        return None if value is None or pd.isna(value) else value
+
+    features: list[dict[str, Any]] = []
+    for row in covered_edges.itertuples(index=False):
+        geom = row.geometry
+        if geom is None or geom.is_empty:
+            continue
+        median_age = _none_if_nan(row.median_covered_age_years)
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": geom.__geo_interface__,
+                "properties": {
+                    "edge_id": row.edge_id,
+                    "highway": row.highway_bucket,
+                    "length_m": round(float(row.length_m), 1),
+                    "total_samples": int(row.total_samples),
+                    "covered_samples": int(row.covered_samples),
+                    "coverage_fraction": float(row.coverage_fraction),
+                    "covered": bool(row.covered),
+                    "nearest_pano_date": _none_if_nan(row.nearest_pano_date),
+                    "median_covered_age_years": float(median_age)
+                    if median_age is not None
+                    else None,
+                },
+            }
+        )
+
+    return {
+        "type": "FeatureCollection",
+        "properties": {
+            "metadata": {
+                "schema_version": 1,
+                "kind": "streetwalk_coverage",
+                "city_id": city_id,
+                "provider": provider,
+                "run_date": run_date,
+                "spacing_m": spacing_m,
                 "match_dist_m": match_dist_m,
                 "source_csv": source_csv,
                 **summary,

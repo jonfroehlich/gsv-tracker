@@ -153,13 +153,19 @@ def graph_to_edges(graph: nx.MultiDiGraph) -> gpd.GeoDataFrame:
     """
     Flatten a street graph to a WGS84 edge GeoDataFrame for coverage matching.
 
-    Keeps one row per *undirected* edge with ``highway``, ``length`` (metres),
-    and LineString ``geometry``. osmnx emits both directions of a two-way
-    street as two directed edges; we collapse them by their unordered (u, v)
-    node pair. We deliberately do NOT dedup on geometry WKB: osmnx orients each
-    directed edge's geometry in its own travel direction, so the reciprocal
-    edge's LineString is coordinate-reversed and its WKB differs — a WKB compare
-    would keep both and double-count every two-way segment.
+    Keeps one row per *undirected* edge with a stable ``edge_id`` (the unordered
+    OSM node pair, e.g. ``"12_57"``), ``highway``, ``length`` (metres), and
+    LineString ``geometry``. osmnx emits both directions of a two-way street as
+    two directed edges; we collapse them by their unordered (u, v) node pair. We
+    deliberately do NOT dedup on geometry WKB: osmnx orients each directed edge's
+    geometry in its own travel direction, so the reciprocal edge's LineString is
+    coordinate-reversed and its WKB differs — a WKB compare would keep both and
+    double-count every two-way segment.
+
+    ``edge_id`` is derived from OSM node IDs on the *frozen* network (issue
+    #103), so it is stable across runs until a ``--refresh`` re-freezes the
+    graph. The road-walk collector (issue #99) keys per-edge coverage on it, and
+    it makes future run-to-run streetwalk diffs comparable.
     """
     edges = ox.graph_to_gdfs(graph, nodes=False)
     # graph_to_gdfs indexes edges by (u, v, key); collapse reciprocal directed
@@ -169,9 +175,15 @@ def graph_to_edges(graph: nx.MultiDiGraph) -> gpd.GeoDataFrame:
     undirected_key = pd.Series(
         [frozenset((a, b)) for a, b in zip(u, v, strict=True)], index=edges.index
     )
+    # Human-stable string form of the same unordered pair, order-independent so
+    # both directions of a two-way street map to one id.
+    edge_id = pd.Series(
+        [f"{min(a, b)}_{max(a, b)}" for a, b in zip(u, v, strict=True)], index=edges.index
+    )
 
     keep = [c for c in ("highway", "length", "geometry") if c in edges.columns]
-    edges = edges[keep]
+    edges = edges[keep].copy()
+    edges["edge_id"] = edge_id
     edges = edges.loc[~undirected_key.duplicated()].reset_index(drop=True)
     return edges
 

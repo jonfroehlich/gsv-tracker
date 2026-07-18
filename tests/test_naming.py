@@ -7,10 +7,13 @@ import pytest
 from streetscape_metadata_tracker.naming import (
     generate_base_filename,
     generate_run_filename,
+    generate_streetwalk_filename,
     parse_filename,
+    parse_streetwalk_filename,
     same_grid_geometry,
     sanitize_city_query_str,
     streets_filename_for_run,
+    streetwalk_coverage_filename,
 )
 
 
@@ -208,3 +211,40 @@ def test_parse_filename_rejects_streets_artifacts():
     # provider token would, and must be rejected, not misparsed as a provider.
     with pytest.raises(ValueError):
         parse_filename("bend--or_width_5000_height_5000_step_20_streets.json.gz")
+
+
+# ── Road-walk collection artifacts (issue #99) ──────────────────────────────
+
+
+def test_streetwalk_filename_round_trips():
+    stem = generate_streetwalk_filename("bend--or", 5000, 5000, 20, 15, date(2026, 7, 8))
+    assert stem == "bend--or_width_5000_height_5000_step_20_streetwalk_sp15_2026-07-08"
+    p = parse_streetwalk_filename(stem + ".csv.gz")
+    assert (p.width_meters, p.step_meters, p.spacing_meters) == (5000, 20, 15)
+    assert p.run_date == date(2026, 7, 8)
+    assert p.slug == "bend--or"
+
+
+def test_streetwalk_coverage_filename():
+    csv_name = "bend--or_width_5000_height_5000_step_20_streetwalk_sp15_2026-07-08.csv.gz"
+    assert (
+        streetwalk_coverage_filename(csv_name)
+        == "bend--or_width_5000_height_5000_step_20_streetwalk_sp15_2026-07-08_coverage.json.gz"
+    )
+    with pytest.raises(ValueError):
+        streetwalk_coverage_filename("bend--or_width_5000_height_5000_step_20_streetwalk_sp15_2026-07-08.json.gz")
+
+
+def test_parse_filename_rejects_streetwalk_artifacts():
+    """Streetwalk snapshots/coverage must never parse as grid run files."""
+    with pytest.raises(ValueError):
+        parse_filename("bend--or_width_5000_height_5000_step_20_streetwalk_sp15_2026-07-08.csv.gz")
+    with pytest.raises(ValueError):
+        parse_filename(
+            "bend--or_width_5000_height_5000_step_20_streetwalk_sp15_2026-07-08_coverage.json.gz"
+        )
+
+
+def test_parse_streetwalk_rejects_normal_run_files():
+    with pytest.raises(ValueError):
+        parse_streetwalk_filename("bend--or_width_5000_height_5000_step_20_2026-07-08.csv.gz")

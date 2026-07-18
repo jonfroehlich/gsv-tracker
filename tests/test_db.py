@@ -443,7 +443,9 @@ def test_migrate_v4_to_v5(tmp_path):
     db_path = str(tmp_path / "v4.db")
     raw = sqlite3.connect(db_path)
     raw.executescript(db._SCHEMA)
+    # v4 predates both street_networks (v5) and street_walks (v6).
     raw.execute("DROP TABLE street_networks")
+    raw.execute("DROP TABLE street_walks")
     raw.execute(
         """INSERT INTO cities (city_id, display_name, city_name, center_lat,
            center_lon, grid_width_m, grid_height_m, step_m, created_at)
@@ -455,7 +457,7 @@ def test_migrate_v4_to_v5(tmp_path):
     raw.close()
 
     conn = db.connect(db_path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     assert conn.execute("SELECT COUNT(*) FROM street_networks").fetchone()[0] == 0
     # Existing data is untouched by the additive migration.
     assert db.resolve_city(conn, "bend--or").city_id == "bend--or"
@@ -463,8 +465,63 @@ def test_migrate_v4_to_v5(tmp_path):
     # Idempotent: reopening must not error or re-migrate.
     conn.close()
     conn2 = db.connect(db_path)
-    assert conn2.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     conn2.close()
+
+
+def test_migrate_v5_to_v6(tmp_path):
+    """A v5 catalog gains the street_walks table on connect (additive).
+
+    A v5 catalog is the current schema minus street_walks, stamped
+    user_version = 5; connecting must create the table and stamp v6.
+    """
+    db_path = str(tmp_path / "v5.db")
+    raw = sqlite3.connect(db_path)
+    raw.executescript(db._SCHEMA)
+    raw.execute("DROP TABLE street_walks")
+    raw.execute("PRAGMA user_version = 5")
+    raw.commit()
+    raw.close()
+
+    conn = db.connect(db_path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    assert conn.execute("SELECT COUNT(*) FROM street_walks").fetchone()[0] == 0
+    conn.close()
+
+
+def test_street_walk_register_and_get(conn, city):
+    walk_id = db.register_street_walk(
+        conn,
+        city_id=city,
+        run_date=date(2026, 7, 8),
+        csv_filename=f"{city}_width_5000_height_5000_step_20_streetwalk_sp15_2026-07-08.csv.gz",
+        coverage_filename=f"{city}_width_5000_height_5000_step_20_streetwalk_sp15_2026-07-08_coverage.json.gz",
+        spacing_m=15.0,
+        match_dist_m=25.0,
+        sample_points=1000,
+        edges_total=200,
+        edges_fully_covered=150,
+        mean_edge_coverage=0.82,
+        coverage_pct_by_length=79.5,
+        api_requests=1000,
+    )
+    row = db.get_latest_street_walk(conn, city)
+    assert row["walk_id"] == walk_id
+    assert row["provider"] == "gsv"
+    assert row["spacing_m"] == 15.0
+    assert row["edges_total"] == 200
+
+    # Idempotent on (city, provider, run_date): a re-collect replaces the row.
+    walk_id2 = db.register_street_walk(
+        conn,
+        city_id=city,
+        run_date=date(2026, 7, 8),
+        csv_filename=f"{city}_width_5000_height_5000_step_20_streetwalk_sp15_2026-07-08.csv.gz",
+        spacing_m=15.0,
+        sample_points=1100,
+    )
+    assert walk_id2 == walk_id
+    assert db.get_latest_street_walk(conn, city)["sample_points"] == 1100
 
 
 def test_street_network_register_and_get(conn, city):

@@ -347,6 +347,120 @@ def streets_filename_for_run(csv_filename: str) -> str:
     return csv_filename[: -len(".csv.gz")] + STREETS_SUFFIX + ".json.gz"
 
 
+# ── Road-walk street-coverage collection (issue #99) ───────────────────────
+#
+# The road-walk collector (streetscape_street_analyzer.collect) is a SECOND
+# collection modality: instead of a grid lattice it samples on-street points
+# every `spacing` metres along each frozen OSM edge and queries GSV per point.
+# Its raw snapshot is a normal METADATA_DTYPES csv.gz (one row per sampled
+# on-street location), but it carries a '_streetwalk_' marker + the walk spacing
+# so it can never be confused with a grid run: parse_filename() rejects it (the
+# 'streetwalk' token lands where a provider token would, leaving the trailing
+# '_sp{N}_' un-matchable), exactly like the history/streets contracts. The
+# derived per-edge coverage GeoJSON is a sibling '..._coverage.json.gz'.
+
+STREETWALK_MARKER = "streetwalk"
+
+_STREETWALK_FILENAME_RE = re.compile(
+    r"^(?P<slug>.+?)"
+    r"_width_(?P<w>\d+)"
+    r"_height_(?P<h>\d+)"
+    r"_step_(?P<s>\d+)"
+    r"_" + STREETWALK_MARKER + r"_sp(?P<spacing>\d+)_"
+    r"(?P<date>\d{4}-\d{2}-\d{2})$"
+)
+
+
+@dataclass(frozen=True)
+class ParsedStreetwalkFilename:
+    """Components extracted from a road-walk collection filename."""
+
+    slug: str
+    city_query_str: str
+    width_meters: int
+    height_meters: int
+    step_meters: int
+    spacing_meters: int
+    run_date: date
+
+
+def generate_streetwalk_filename(
+    city_id: str,
+    grid_width: float,
+    grid_height: float,
+    step_length: float,
+    spacing_m: float,
+    run_date: date,
+) -> str:
+    """
+    Base filename (no extension) for a road-walk collection snapshot.
+
+    The grid ``width/height/step`` identify the city's frozen geometry (and thus
+    its frozen OSM network, whose bbox is derived from that geometry); ``sp{N}``
+    is the along-edge sample spacing in metres — the road-walk analogue of the
+    grid step.
+
+    Example:
+        >>> from datetime import date
+        >>> generate_streetwalk_filename("bend--oregon--united-states", 5000, 5000, 20, 15, date(2026, 7, 8))
+        'bend--oregon--united-states_width_5000_height_5000_step_20_streetwalk_sp15_2026-07-08'
+    """
+    return (
+        f"{city_id}_width_{int(grid_width)}_height_{int(grid_height)}"
+        f"_step_{int(step_length)}_{STREETWALK_MARKER}_sp{int(spacing_m)}_{run_date.isoformat()}"
+    )
+
+
+def parse_streetwalk_filename(filename: str) -> ParsedStreetwalkFilename:
+    """
+    Parse a road-walk collection filename.
+
+    Raises ValueError if the name is not a streetwalk file (including normal run
+    files, which never carry the '_streetwalk_' marker).
+
+    Example:
+        >>> p = parse_streetwalk_filename("bend--or_width_5000_height_5000_step_20_streetwalk_sp15_2026-07-08.csv.gz")
+        >>> (p.step_meters, p.spacing_meters, p.run_date.isoformat())
+        (20, 15, '2026-07-08')
+    """
+    base = os.path.basename(filename)
+    for ext in _KNOWN_EXTENSIONS:
+        if base.endswith(ext):
+            base = base[: -len(ext)]
+            break
+    match = _STREETWALK_FILENAME_RE.match(base)
+    if not match:
+        raise ValueError(f"Filename {filename} is not a {STREETWALK_MARKER} collection file")
+    slug = match.group("slug")
+    return ParsedStreetwalkFilename(
+        slug=slug,
+        city_query_str=slug_to_query_str(slug),
+        width_meters=int(match.group("w")),
+        height_meters=int(match.group("h")),
+        step_meters=int(match.group("s")),
+        spacing_meters=int(match.group("spacing")),
+        run_date=date.fromisoformat(match.group("date")),
+    )
+
+
+def streetwalk_coverage_filename(csv_filename: str) -> str:
+    """
+    Name of the per-edge coverage GeoJSON derived from a road-walk csv.gz.
+
+    The artifact is a sibling '{streetwalk stem}_coverage.json.gz' written by
+    the collector; the trailing '_coverage' plus the '_streetwalk_' marker keep
+    parse_filename() rejecting it (a ValueError callers already treat as "not a
+    run file").
+
+    Example:
+        >>> streetwalk_coverage_filename("bend--or_width_5000_height_5000_step_20_streetwalk_sp15_2026-07-08.csv.gz")
+        'bend--or_width_5000_height_5000_step_20_streetwalk_sp15_2026-07-08_coverage.json.gz'
+    """
+    if not csv_filename.endswith(".csv.gz"):
+        raise ValueError(f"Not a streetwalk csv.gz filename: {csv_filename}")
+    return csv_filename[: -len(".csv.gz")] + "_coverage.json.gz"
+
+
 def same_grid_geometry(filename_a: str, filename_b: str) -> bool:
     """
     True when both filenames parse and encode the same grid geometry

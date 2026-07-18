@@ -53,6 +53,20 @@ enabled = true
 # Mapillary caps tile requests at 50,000/day per application.
 daily_request_budget = 40000
 
+# Road-walk street-coverage collection (issue #99). ISOLATED budget channel:
+# metered in api_usage under the 'gsv_streets' provider string and served by
+# the separate GMAPS_STREETS_API_KEY, so a per-sample-point road crawl can't
+# exhaust the production grid collector's quota. Disabled by default and NOT
+# yet wired into `run-due` — the collector is a manual CLI
+# (`python -m streetscape_street_analyzer.collect`) that reads these values as
+# its pacing/budget defaults. GSV metadata requests are free of charge; the
+# real ceiling is the streets key's own per-minute quota (a fresh key resets to
+# Google's default ~30,000/min), paced client-side at ~80% below.
+[providers.gsv_streets]
+enabled = false
+daily_request_budget = 2000000
+max_requests_per_minute = 24000
+
 [download]
 # Conservative defaults; see cli.py docstring for tuning guidance.
 batch_size = 100
