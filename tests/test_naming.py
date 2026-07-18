@@ -232,7 +232,9 @@ def test_streetwalk_coverage_filename():
         == "bend--or_width_5000_height_5000_step_20_streetwalk_sp15_2026-07-08_coverage.json.gz"
     )
     with pytest.raises(ValueError):
-        streetwalk_coverage_filename("bend--or_width_5000_height_5000_step_20_streetwalk_sp15_2026-07-08.json.gz")
+        streetwalk_coverage_filename(
+            "bend--or_width_5000_height_5000_step_20_streetwalk_sp15_2026-07-08.json.gz"
+        )
 
 
 def test_parse_filename_rejects_streetwalk_artifacts():
