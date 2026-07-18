@@ -28,7 +28,11 @@ from .fileutils import load_city_csv_file
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["download_gsv_metadata_async", "fetch_gsv_pano_metadata_async"]
+__all__ = [
+    "collect_points_async",
+    "download_gsv_metadata_async",
+    "fetch_gsv_pano_metadata_async",
+]
 
 # A run whose permanently-failed points exceed this fraction of the grid is
 # aborted (checkpoint kept) instead of finalized as an immutable snapshot.
@@ -341,7 +345,13 @@ async def download_gsv_metadata_async(
     max_requests_per_minute: int = 24_000,
 ) -> dict[str, Any]:
     """
-    Fetch GSV metadata for a city using async/await pattern with safe intermediate file saving.
+    Fetch GSV metadata for a city's frozen grid using async/await.
+
+    Thin wrapper: it builds the grid sample points and delegates the actual
+    collection (batching, rate limiting, quota-retry, resume, guards) to the
+    provider-agnostic `collect_points_async` engine, which the street-coverage
+    road-walk collector (issue #99) also drives — so both request paths share
+    the exact same OVER_QUERY_LIMIT hardening.
 
     The caller decides the output filename (run-skip policy and dated naming
     live in the CLI/scheduler layer, not here). If a partial download exists
@@ -374,14 +384,72 @@ async def download_gsv_metadata_async(
             api_requests: number of API requests actually issued this call
             started_at / finished_at: UTC ISO 8601 timestamps
     """
-    start_time = time.time()
-    started_at = datetime.now(UTC).isoformat()
-    api_requests = 0
-
     logger.info(
         f"Examining street view data for {city_name} centered at {center_lat},{center_lon}"
         + f" with a grid of {grid_width / 1000:.1f}km x {grid_height / 1000:.1f}km and step_length={step_length} meters"
     )
+
+    # Calculate grid dimensions and generate all sample points up-front.
+    width_steps = int(grid_width / step_length)
+    height_steps = int(grid_height / step_length)
+    origin = geopy.Point(center_lat, center_lon)
+    all_points = generate_grid_points(origin, width_steps, height_steps, step_length)
+
+    return await collect_points_async(
+        all_points,
+        api_key,
+        output_csv_gz_path,
+        city_label=city_name,
+        batch_size=batch_size,
+        connection_limit=connection_limit,
+        request_timeout=request_timeout,
+        max_retries=max_retries,
+        max_requests_per_minute=max_requests_per_minute,
+    )
+
+
+async def collect_points_async(
+    points: list[tuple[float, float, int, int]],
+    api_key: str,
+    output_csv_gz_path: str,
+    *,
+    city_label: str = "",
+    batch_size: int = 50,
+    connection_limit: int = 50,
+    request_timeout: float = 30.0,
+    max_retries: int = 3,
+    max_requests_per_minute: int = 24_000,
+) -> dict[str, Any]:
+    """
+    Query GSV pano metadata for an arbitrary set of points and write a snapshot.
+
+    This is the provider-agnostic collection engine shared by the grid
+    downloader (`download_gsv_metadata_async`) and the road-walk street
+    collector (issue #99). It owns everything below the point generation: the
+    per-run rate limiter, batched requests, the OVER_QUERY_LIMIT / quota-window
+    retry passes, the failed-point finalize guard, `.downloading` resume, the
+    immutable-snapshot + run-lock guards, and gzip finalize. Callers differ
+    only in how they generate `points` (a grid lattice vs. on-street samples
+    along OSM edges).
+
+    Args:
+        points: (lat, lon, a, b) tuples to query. `a, b` are opaque bookkeeping
+            ints (grid i/j, or edge/sample indices) surfaced only in the
+            `_failed_points.csv` diagnostic; output rows key on lat/lon.
+        api_key: Google Street View API key.
+        output_csv_gz_path: Full path of the .csv.gz snapshot to write.
+        city_label: Human label for logs/progress only.
+        batch_size, connection_limit, request_timeout, max_retries,
+        max_requests_per_minute: see `download_gsv_metadata_async`.
+
+    Returns:
+        Same dict shape as `download_gsv_metadata_async` (df, filename_with_path,
+        api_requests, started_at, finished_at).
+    """
+    start_time = time.time()
+    started_at = datetime.now(UTC).isoformat()
+    api_requests = 0
+
     logger.info(f"Using batch_size={batch_size}, connection_limit={connection_limit}")
 
     # Set up timeout
@@ -428,13 +496,7 @@ async def download_gsv_metadata_async(
         ) from None
 
     try:
-        # Calculate grid dimensions
-        width_steps = int(grid_width / step_length)
-        height_steps = int(grid_height / step_length)
-
-        # Generate all points
-        origin = geopy.Point(center_lat, center_lon)
-        all_points = generate_grid_points(origin, width_steps, height_steps, step_length)
+        all_points = points
 
         # Get already processed points
         processed_points = get_processed_points(file_name_downloading_with_path)
@@ -461,8 +523,8 @@ async def download_gsv_metadata_async(
             logger.info("All points already processed.")
             if not os.path.exists(file_name_downloading_with_path):
                 raise DownloadError(
-                    f"Grid produced no points to download and no partial file "
-                    f"exists (grid {grid_width}x{grid_height}m, step {step_length}m)"
+                    "No points to download and no partial file exists "
+                    f"(0 points supplied for {output_csv_gz_path})"
                 )
             os.rename(file_name_downloading_with_path, file_name_with_path)
         else:
@@ -474,7 +536,7 @@ async def download_gsv_metadata_async(
             progress_bar = tqdm(
                 total=len(all_points),
                 initial=len(processed_points),
-                desc=f"Downloading GSV pano data for {city_name}",
+                desc=f"Downloading GSV pano data{f' for {city_label}' if city_label else ''}",
             )
 
             # Process initial points in batches

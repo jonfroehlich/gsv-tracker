@@ -40,6 +40,12 @@ from .download_mapillary import estimate_tile_count
 from .json_summarizer import generate_aggregate_v2
 from .naming import KNOWN_PROVIDERS
 
+# Isolated street-coverage budget channels (issue #99). Valid api_usage
+# provider strings + [providers.*] config keys, but NOT scheduled run
+# providers — collected via the manual road-walk CLI, so the scheduler
+# config loader skips them without warning.
+RESERVED_STREETS_CHANNELS = frozenset({"gsv_streets", "mapillary_streets"})
+
 logger = logging.getLogger("streetscape_scheduler")
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -141,6 +147,13 @@ def load_scheduler_config(path: str | None = None) -> SchedulerConfig:
     if "providers" in raw:
         providers = {}
         for name, p in raw["providers"].items():
+            # gsv_streets / mapillary_streets are reserved isolated budget
+            # channels for street-coverage collection (issue #99), not scheduled
+            # run providers — the road-walk collector is a manual CLI. Skip them
+            # here silently (a warning would fire every scheduler run) until
+            # run-due street collection is wired up.
+            if name in RESERVED_STREETS_CHANNELS:
+                continue
             if name not in KNOWN_PROVIDERS:
                 logger.warning(
                     f"Ignoring unknown provider [providers.{name}] "

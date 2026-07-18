@@ -27,7 +27,7 @@ from .naming import sanitize_city_query_str
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS cities (
@@ -161,6 +161,35 @@ CREATE TABLE IF NOT EXISTS street_networks (
     osmnx_version    TEXT,
     fetched_at       TEXT NOT NULL,
     UNIQUE (city_id, network_type)
+);
+
+-- Road-walk street-coverage collection runs (issue #99). A SECOND collection
+-- modality, distinct from grid `runs`: it walks each frozen OSM edge, samples
+-- on-street points every `spacing_m` metres, and queries GSV per point, so its
+-- unit of observation is the per-edge fractional coverage in the sibling
+-- coverage GeoJSON (not grid points). Kept in its own table for the same reason
+-- history_harvests is: different unit, not a 'provider' in `runs`. `provider`
+-- is the imagery provider ('gsv'); the request budget is metered separately in
+-- api_usage under the isolated 'gsv_streets' channel (issue #141).
+CREATE TABLE IF NOT EXISTS street_walks (
+    walk_id                INTEGER PRIMARY KEY,
+    city_id                TEXT NOT NULL REFERENCES cities(city_id),
+    provider               TEXT NOT NULL DEFAULT 'gsv',
+    run_date               TEXT NOT NULL,
+    csv_filename           TEXT NOT NULL UNIQUE,
+    coverage_filename      TEXT,
+    network_type           TEXT NOT NULL DEFAULT 'drive',
+    spacing_m              REAL,
+    match_dist_m           REAL,
+    sample_points          INTEGER,
+    edges_total            INTEGER,
+    edges_fully_covered    INTEGER,
+    mean_edge_coverage     REAL,
+    coverage_pct_by_length REAL,
+    api_requests           INTEGER,
+    started_at             TEXT,
+    finished_at            TEXT,
+    UNIQUE (city_id, provider, run_date)
 );
 """
 
@@ -364,9 +393,10 @@ def init_schema(conn: sqlite3.Connection) -> None:
         user_version = 3
     if user_version == 3:
         _migrate_v3_to_v4(conn)
-    # v4 -> v5 is purely additive (the street_networks table), so like v2 -> v3
-    # it needs no rebuild migration: the CREATE TABLE IF NOT EXISTS in _SCHEMA
-    # creates it, and the version stamp below records the upgrade.
+    # v4 -> v5 (street_networks) and v5 -> v6 (street_walks, issue #99) are both
+    # purely additive, so like v2 -> v3 they need no rebuild migration: the
+    # CREATE TABLE IF NOT EXISTS in _SCHEMA creates the new table on any older
+    # catalog, and the version stamp below records the upgrade.
     conn.executescript(_SCHEMA)
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -862,6 +892,98 @@ def get_street_network(
         """SELECT * FROM street_networks
            WHERE city_id = ? AND network_type = ?""",
         (city_id, network_type),
+    ).fetchone()
+
+
+# ── Road-walk street-coverage collection runs (issue #99) ──────────────────
+
+
+def register_street_walk(
+    conn: sqlite3.Connection,
+    *,
+    city_id: str,
+    run_date: date,
+    csv_filename: str,
+    provider: str = "gsv",
+    coverage_filename: str | None = None,
+    network_type: str = "drive",
+    spacing_m: float | None = None,
+    match_dist_m: float | None = None,
+    sample_points: int | None = None,
+    edges_total: int | None = None,
+    edges_fully_covered: int | None = None,
+    mean_edge_coverage: float | None = None,
+    coverage_pct_by_length: float | None = None,
+    api_requests: int | None = None,
+    started_at: str | None = None,
+    finished_at: str | None = None,
+) -> int:
+    """
+    Catalog a completed road-walk collection. Idempotent on the filename and on
+    (city_id, provider, run_date): re-collecting the same city/provider on the
+    same day replaces the prior row rather than erroring (a road-walk is a full
+    re-census of the frozen network, not an incremental append).
+
+    Returns the walk_id.
+    """
+    conn.execute(
+        """INSERT INTO street_walks
+           (city_id, provider, run_date, csv_filename, coverage_filename,
+            network_type, spacing_m, match_dist_m, sample_points, edges_total,
+            edges_fully_covered, mean_edge_coverage, coverage_pct_by_length,
+            api_requests, started_at, finished_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(city_id, provider, run_date) DO UPDATE SET
+             csv_filename = excluded.csv_filename,
+             coverage_filename = excluded.coverage_filename,
+             network_type = excluded.network_type,
+             spacing_m = excluded.spacing_m,
+             match_dist_m = excluded.match_dist_m,
+             sample_points = excluded.sample_points,
+             edges_total = excluded.edges_total,
+             edges_fully_covered = excluded.edges_fully_covered,
+             mean_edge_coverage = excluded.mean_edge_coverage,
+             coverage_pct_by_length = excluded.coverage_pct_by_length,
+             api_requests = excluded.api_requests,
+             started_at = excluded.started_at,
+             finished_at = excluded.finished_at""",
+        (
+            city_id,
+            provider,
+            run_date.isoformat(),
+            csv_filename,
+            coverage_filename,
+            network_type,
+            spacing_m,
+            match_dist_m,
+            sample_points,
+            edges_total,
+            edges_fully_covered,
+            mean_edge_coverage,
+            coverage_pct_by_length,
+            api_requests,
+            started_at,
+            finished_at,
+        ),
+    )
+    conn.commit()
+    row = conn.execute(
+        """SELECT walk_id FROM street_walks
+           WHERE city_id = ? AND provider = ? AND run_date = ?""",
+        (city_id, provider, run_date.isoformat()),
+    ).fetchone()
+    return row["walk_id"]
+
+
+def get_latest_street_walk(
+    conn: sqlite3.Connection, city_id: str, provider: str = "gsv"
+) -> sqlite3.Row | None:
+    """Most recent road-walk collection for a (city, provider), or None."""
+    return conn.execute(
+        """SELECT * FROM street_walks
+           WHERE city_id = ? AND provider = ?
+           ORDER BY run_date DESC LIMIT 1""",
+        (city_id, provider),
     ).fetchone()
 
 

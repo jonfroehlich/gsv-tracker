@@ -25,6 +25,15 @@ enabled = true
 # Counted in z14 vector-tile requests; Mapillary caps at 50,000/day per app.
 daily_request_budget = 40000
 
+# Road-walk street-coverage collection (issue #99). Isolated gsv_streets budget
+# channel (separate GMAPS_STREETS_API_KEY). Disabled + not yet in `run-due`;
+# the collector is a manual CLI whose built-in defaults mirror these values
+# (it does not read this file).
+[providers.gsv_streets]
+enabled = false
+daily_request_budget = 2000000
+max_requests_per_minute = 24000
+
 [download]
 batch_size = 100
 connection_limit = 50
