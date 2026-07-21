@@ -15,7 +15,10 @@ cities/~$SUB-IP-EST2023-POP.xlsx
 cities/SUB-IP-EST2023-POP.csv
 *.log
 /duplicates
-.env
+# Credentials: .env plus any variant (.env.bak.*, .env.local, ...). Only a
+# committed-by-design template is exempt.
+.env*
+!.env.example
 /logs/
 *.db
 *.db-wal
