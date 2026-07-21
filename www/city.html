@@ -26,7 +26,14 @@
   <div id="map" role="application" aria-label="City panorama age map"></div>
 
   <div id="temporal-plot-container">
-    <canvas id="temporal-plot"></canvas>
+    <div id="temporal-plot-head">
+      <span id="temporal-plot-title">Panoramas by capture date</span>
+      <button type="button" id="temporal-plot-toggle" aria-expanded="true"
+              aria-controls="temporal-plot-body" aria-label="Minimize capture-date chart">–</button>
+    </div>
+    <div id="temporal-plot-body">
+      <canvas id="temporal-plot"></canvas>
+    </div>
   </div>
 
   <!-- OSM street-coverage panel (populated by street-coverage.js; stays

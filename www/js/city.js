@@ -846,6 +846,7 @@ function createTemporalPlot(canvas) {
     plugins: [verticalLinePlugin],
   });
   temporalChartGlobal = chart;
+  setupTemporalToggle(chart);
 
   /** Apply (or toggle off) the date filter for one capture date. */
   function selectFilterDate(date) {
@@ -918,6 +919,40 @@ function createTemporalPlot(canvas) {
     selectFilterDate(d.date);
     liveRegion.textContent =
       `${d.date.toLocaleDateString()}: ${d.count.toLocaleString()} panoramas highlighted`;
+  });
+}
+
+/**
+ * Wire the temporal panel's minimize/expand button. Collapsing hides the chart
+ * body so it stops covering the map; the choice persists across runs/reloads in
+ * localStorage. Chart.js is resized on expand because it can't measure a
+ * display:none parent.
+ *
+ * @param {Chart} chart - The temporal Chart.js instance.
+ */
+function setupTemporalToggle(chart) {
+  const container = document.getElementById("temporal-plot-container");
+  const toggle = document.getElementById("temporal-plot-toggle");
+  if (!container || !toggle) return;
+
+  const KEY = "streetscape-temporal-collapsed";
+  const apply = (collapsed) => {
+    container.classList.toggle("collapsed", collapsed);
+    toggle.setAttribute("aria-expanded", String(!collapsed));
+    toggle.setAttribute("aria-label",
+      collapsed ? "Expand capture-date chart" : "Minimize capture-date chart");
+    toggle.textContent = collapsed ? "+" : "–";
+    if (!collapsed) chart.resize();
+  };
+
+  let collapsed = false;
+  try { collapsed = localStorage.getItem(KEY) === "1"; } catch { /* storage may be blocked */ }
+  apply(collapsed);
+
+  toggle.addEventListener("click", () => {
+    collapsed = !collapsed;
+    try { localStorage.setItem(KEY, collapsed ? "1" : "0"); } catch { /* storage may be blocked */ }
+    apply(collapsed);
   });
 }
 

@@ -252,18 +252,71 @@
   margin-top: 5px;
 }
 
-/* ── Temporal chart (bottom-right) ──────────────────────────── */
+/* ── Temporal chart (bottom-right, collapsible) ─────────────── */
 #temporal-plot-container {
   position: absolute;
   bottom: 20px;
   right: 20px;
   background: rgba(80, 80, 80, 0.9);
   border-radius: 4px;
-  padding: 10px;
   box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
   z-index: 1000;
   width: 400px;
-  height: 200px;
+  overflow: hidden;
+}
+
+#temporal-plot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 6px 6px 10px;
+}
+
+#temporal-plot-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #eee;
+}
+
+#temporal-plot-toggle {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  color: #eee;
+  background: transparent;
+  border: 1px solid #999;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#temporal-plot-toggle:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+#temporal-plot-toggle:focus-visible {
+  outline: 2px solid #1a73e8;
+  outline-offset: 1px;
+}
+
+/* Body holds the Chart.js canvas; needs an explicit height so the chart
+   (maintainAspectRatio:false) has a box to fill. */
+#temporal-plot-body {
+  position: relative;
+  height: 190px;
+  padding: 0 10px 10px;
+}
+
+/* Collapsed: only the header bar shows, and the panel shrinks to its width. */
+#temporal-plot-container.collapsed {
+  width: auto;
+}
+
+#temporal-plot-container.collapsed #temporal-plot-body {
+  display: none;
 }
 
 /* ── OSM street-coverage panel (top-left, below back link) ─────
