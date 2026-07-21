@@ -10,6 +10,13 @@
   box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
   border-radius: 5px;
   min-width: 180px;
+  /* Bound the panel so content-heavy cities (many capture years, the cap
+     notice, snapshot/imagery sections) scroll inside it instead of growing
+     past the viewport. Scroll propagation to the map is already disabled in
+     legendControl.onAdd, so wheel-scrolling the legend won't zoom the map. */
+  max-width: 300px;
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
 }
 
 .legend h4 {
@@ -106,6 +113,20 @@
 /* Keep the parenthetical count legible on the active (blue) button */
 .gsv-mode-btn.active .year-count {
   color: #dbe8ff;
+}
+
+/* ── Render-cap notice (issues #77/#58) ─────────────────────── */
+/* Shown for cities above RENDER_CAP: reports drawn-vs-total and the opt-in
+   "Render all" override. Reuses .legend-meta typography and the .gsv-mode-btn
+   pill (which gets a real focus outline and hover/active styling for free). */
+.legend-cap-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.legend-cap-notice .gsv-mode-btn {
+  width: 100%;
 }
 
 /* ── Year filter section header ─────────────────────────────── */
