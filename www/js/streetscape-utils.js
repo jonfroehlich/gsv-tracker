@@ -15,6 +15,16 @@ const STREETSCAPE_DATA_BASE_URL =
   "https://makeabilitylab.cs.washington.edu/public/streetscape-tracker/data/";
 
 /**
+ * Max pano dots the city map draws at once (issues #77/#58). Dense cities hold
+ * 10^5–10^6 panos; drawing one Leaflet marker layer each makes the map
+ * unreadable at low zoom and freezes on every interaction. Above this count the
+ * detail view draws a deterministic spatial subsample (spatialStrideSample) and
+ * offers an opt-in "Render all" override. Reported stats/counts/plot always use
+ * the FULL in-memory set — only the drawn dots are capped.
+ */
+const RENDER_CAP = 40000;
+
+/**
  * Imagery provider registry. Each provider's color scale is anchored to
  * its launch date (oldest possible imagery = dark red), and each supplies
  * its own pano viewer deep-link and required attribution.
@@ -596,11 +606,87 @@ function formatChangeSummary(change) {
   };
 }
 
+/**
+ * Deterministic spatial-stride subsample used by the city map's render cap
+ * (issues #77/#58). Orders the points spatially (by latitude, then longitude)
+ * and takes an even stride so the drawn subset stays spread across the city —
+ * density and coverage gaps remain honest, unlike a random or head-of-list
+ * drop that would clump in whatever order the CSV happened to arrive.
+ *
+ * Pure and Leaflet-free so it is node-testable (mirrors METRICS/adaptCityRecord).
+ *
+ * @param {Array<[number, number]>} points - [lat, lon] pairs (index-aligned to
+ *   the caller's marker array).
+ * @param {number} cap - Maximum indices to return.
+ * @returns {number[]} Indices INTO `points`: all of them when `points.length <=
+ *   cap` (or the input is empty), otherwise exactly `cap` spatially-strided
+ *   indices. Returns `[]` when `cap <= 0` or is not finite.
+ */
+function spatialStrideSample(points, cap) {
+  const n = points.length;
+  if (!Number.isFinite(cap) || cap <= 0) return [];
+  if (n <= cap) return points.map((_, i) => i);
+
+  // Order indices spatially so an even stride samples across the whole extent.
+  const order = points.map((_, i) => i).sort((a, b) => {
+    const pa = points[a];
+    const pb = points[b];
+    return pa[0] - pb[0] || pa[1] - pb[1];
+  });
+
+  const stride = n / cap;
+  const out = [];
+  for (let k = 0; k < cap; k++) {
+    out.push(order[Math.floor(k * stride)]);
+  }
+  return out;
+}
+
+/**
+ * Diff the currently-drawn marker set against a desired target set, returning
+ * exactly which markers to add and remove. Lets every map interaction touch
+ * only the delta instead of re-adding/removing all N markers (the O(N)-per-click
+ * churn behind the forced-reflow jank in #58). Compares by object identity, so
+ * the same marker instances must be shared across the caller's caches.
+ *
+ * @param {Set} onMapSet - Markers currently on the map.
+ * @param {Iterable} target - Desired drawn set (Set or array).
+ * @returns {{toAdd: Array, toRemove: Array}}
+ */
+function computeVisibilityDelta(onMapSet, target) {
+  const targetSet = target instanceof Set ? target : new Set(target);
+  const toAdd = [];
+  const toRemove = [];
+  for (const m of targetSet) if (!onMapSet.has(m)) toAdd.push(m);
+  for (const m of onMapSet) if (!targetSet.has(m)) toRemove.push(m);
+  return { toAdd, toRemove };
+}
+
+/**
+ * Leaflet circle style for a pano marker under the temporal date filter. When a
+ * date is selected, matching panos are emphasized and the rest dimmed; with no
+ * date, every marker gets the default style. Kept pure (returns a plain style
+ * object, no Leaflet) so the date-filter styling is node-testable; the caller
+ * maps date values to comparable strings (both sides use the same convention).
+ *
+ * @param {?string} captureDateStr - The marker's capture-date key.
+ * @param {?string} selectedDateStr - The selected date key, or null/"" when no
+ *   date filter is active.
+ * @returns {{fillOpacity: number, radius: number}}
+ */
+function markerDateStyle(captureDateStr, selectedDateStr) {
+  if (!selectedDateStr) return { fillOpacity: 0.8, radius: 3 };
+  return captureDateStr === selectedDateStr
+    ? { fillOpacity: 1, radius: 4 }
+    : { fillOpacity: 0.05, radius: 3 };
+}
+
 // Node/CommonJS export shim for the unit tests (issue #123). This is a no-op
 // in the browser, where these symbols are plain globals loaded via <script>.
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     STREETSCAPE_DATA_BASE_URL,
+    RENDER_CAP,
     PROVIDERS,
     METRICS,
     isKnownProvider,
@@ -621,5 +707,8 @@ if (typeof module !== "undefined" && module.exports) {
     withAlpha,
     fmtYears,
     formatChangeSummary,
+    spatialStrideSample,
+    computeVisibilityDelta,
+    markerDateStyle,
   };
 }

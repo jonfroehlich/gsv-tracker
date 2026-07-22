@@ -1,5 +1,5 @@
-/* exported switchRun, toggleYear, setGsvMode, toggleFlatOnly */
-// (switchRun/toggleYear/setGsvMode/toggleFlatOnly are invoked from onchange/onclick
+/* exported switchRun, toggleYear, setGsvMode, toggleFlatOnly, setRenderAll */
+// (switchRun/toggleYear/setGsvMode/toggleFlatOnly/setRenderAll are invoked from onchange/onclick
 // attributes in the HTML this file generates, so ESLint can't see those
 // string references.)
 /**
@@ -66,6 +66,29 @@ let flatOnlyMarkers = [];
 let showFlatOnly = false;
 const FLAT_ONLY_COLOR = "#9aa0a6"; // muted gray — visibly not a dated pano
 
+// ── Render-cap / visibility model (issues #77, #58) ─────────────
+// `markersByYear` holds every streamed pano marker (both GSV modes). What is
+// actually *drawn* is reconciled through a single desired→onMap delta so no
+// interaction re-touches all N markers, and so dense cities can draw only a
+// spatial subsample. Reported stats/counts/plot always use the full set.
+let onMap = new Set();          // markers currently added to the Leaflet map
+let desiredShown = new Set();   // markers that SHOULD be drawn right now
+let renderAllOverride = false;  // user opted out of the cap ("Render all")
+let panoDotsHidden = false;     // streets overlay hid the pano layer
+
+// Mode-scoped caches, rebuilt by rebuildModeCaches() on load and on setGsvMode.
+// "In mode" = markerInMode(): Google-only (default) vs all-GSV; for non-GSV and
+// archival runs every marker is in mode.
+let inModeAll = [];             // all in-mode markers
+let inModeByYear = new Map();   // year -> in-mode markers[]
+let inModeCountByYear = new Map(); // year -> count (legend, avoids O(N) per row)
+let inModeByDateStr = new Map();   // captureDate.toDateString() -> in-mode markers[]
+let totalInMode = 0;
+let globalCapped = [];          // spatial-stride subsample of inModeAll (<= RENDER_CAP)
+let cappedByYear = new Map();   // year -> stride subsample (lazy)
+let allMarkerCount = 0;         // both modes; fixed per run (legend "All GSV" count)
+let googleMarkerCount = 0;      // official-Google markers; fixed per run
+
 // Temporal-plot handles, kept at module scope so setGsvMode() can rebuild the
 // plot in place (updating the existing chart/handlers rather than re-creating
 // them and duplicating the keyboard listeners / live region).
@@ -85,12 +108,8 @@ let changeGlobal = null;    // change_from_previous_run block of this run
 map.on("click", (e) => {
   if (e.originalEvent.target !== map._container) return;
   selectedDate = null;
-  Object.values(markersByYear).flat().forEach((m) => {
-    m.setStyle({ fillOpacity: 0.8 });
-    m.setRadius(3);
-  });
   activeYears.clear();
-  showInModeMarkers();
+  applyDesired(); // reconcile drawn set + reset any date dimming (over onMap only)
   updateLegend(Object.keys(markersByYear).map(Number));
 });
 
@@ -108,17 +127,135 @@ function markerInMode(m) {
   return m.options.isGoogle || showAllGsv;
 }
 
+// ── Reconcile model (issues #77, #58) ──────────────────────────
+//
+// One path decides what is drawn: compute the desired set (mode ∧ year ∧ cap,
+// plus the honesty union for a selected date), then add/remove only the delta
+// against what is already on the map. Every interaction routes through
+// applyDesired(), so no click ever re-touches all N markers.
+
 /**
- * Add every in-mode marker to the map and remove every out-of-mode one.
- * The single place that reconciles the drawn marker set with `showAllGsv`;
- * callers that clear a year/date filter delegate the "show everything again"
- * step here so contributor markers stay hidden in Google-only mode.
+ * Spatially-strided subsample of a marker list, or the list itself when it is
+ * already within the cap. Deterministic (see spatialStrideSample) so the drawn
+ * dots stay spread across the city rather than clumping.
+ *
+ * @param {L.CircleMarker[]} markers
+ * @returns {L.CircleMarker[]} At most RENDER_CAP markers.
  */
-function showInModeMarkers() {
-  Object.values(markersByYear).flat().forEach((m) => {
-    if (markerInMode(m)) m.addTo(map);
-    else m.remove();
+function strideSubset(markers) {
+  if (markers.length <= RENDER_CAP) return markers;
+  const pts = markers.map((m) => {
+    const ll = m.getLatLng();
+    return [ll.lat, ll.lng];
   });
+  return spatialStrideSample(pts, RENDER_CAP).map((i) => markers[i]);
+}
+
+/**
+ * Rebuild the in-mode caches after the marker set's mode changes (initial load
+ * and setGsvMode). Everything downstream reads these instead of re-filtering
+ * all markers on every interaction.
+ */
+function rebuildModeCaches() {
+  inModeAll = [];
+  inModeByYear = new Map();
+  inModeCountByYear = new Map();
+  inModeByDateStr = new Map();
+  for (const [y, markers] of Object.entries(markersByYear)) {
+    const year = Number(y);
+    for (const m of markers) {
+      if (!markerInMode(m)) continue;
+      inModeAll.push(m);
+      if (!inModeByYear.has(year)) inModeByYear.set(year, []);
+      inModeByYear.get(year).push(m);
+      inModeCountByYear.set(year, (inModeCountByYear.get(year) || 0) + 1);
+      const dk = m.options.captureDate.toDateString();
+      if (!inModeByDateStr.has(dk)) inModeByDateStr.set(dk, []);
+      inModeByDateStr.get(dk).push(m);
+    }
+  }
+  totalInMode = inModeAll.length;
+  globalCapped = strideSubset(inModeAll);
+  cappedByYear = new Map();
+}
+
+/**
+ * The set of markers that should currently be drawn. Base membership is the
+ * in-mode set, narrowed to an active year and capped (unless the user chose
+ * "Render all"); a selected date additionally unions in EVERY in-mode marker of
+ * that date at full opacity, so the map never under-shows a date relative to the
+ * temporal plot's count (the render-cap honesty trap).
+ *
+ * @returns {Set<L.CircleMarker>}
+ */
+function computeDesiredShown() {
+  let base;
+  if (activeYears.size) {
+    const y = [...activeYears][0];
+    const yearMarkers = inModeByYear.get(y) ?? [];
+    if (renderAllOverride) {
+      base = yearMarkers;
+    } else {
+      if (!cappedByYear.has(y)) cappedByYear.set(y, strideSubset(yearMarkers));
+      base = cappedByYear.get(y);
+    }
+  } else {
+    base = renderAllOverride ? inModeAll : globalCapped;
+  }
+  const set = new Set(base);
+  if (selectedDate) {
+    for (const m of (inModeByDateStr.get(selectedDate.toDateString()) ?? [])) set.add(m);
+  }
+  return set;
+}
+
+/**
+ * Reconcile the map to `desiredShown` (or nothing, when the streets overlay has
+ * hidden the pano layer) by adding/removing only the delta. Bounded by the
+ * symmetric difference, i.e. ≤ RENDER_CAP work, never O(N).
+ */
+function reconcile() {
+  const target = panoDotsHidden ? new Set() : desiredShown;
+  const { toAdd, toRemove } = computeVisibilityDelta(onMap, target);
+  for (const m of toRemove) { m.remove(); onMap.delete(m); }
+  for (const m of toAdd) { m.addTo(map); onMap.add(m); }
+}
+
+/**
+ * Style every on-map marker for the current date filter (default when no date
+ * is selected). Iterates only what is drawn (≤ cap), so it stays cheap; a
+ * re-added marker that carried a stale dimmed style is corrected here.
+ */
+function restyleOnMap() {
+  const selKey = selectedDate ? selectedDate.toDateString() : null;
+  for (const m of onMap) {
+    const s = markerDateStyle(m.options.captureDate.toDateString(), selKey);
+    m.setStyle({ fillOpacity: s.fillOpacity });
+    m.setRadius(s.radius);
+  }
+}
+
+/**
+ * The single entry point every interaction uses: recompute the desired set,
+ * reconcile the map to it, and restyle what is drawn.
+ */
+function applyDesired() {
+  desiredShown = computeDesiredShown();
+  reconcile();
+  restyleOnMap();
+}
+
+/**
+ * Toggle the render cap off ("Render all") or back on ("Show subset").
+ * Shown only for cities above the cap; see updateLegend's cap notice.
+ *
+ * @param {boolean} on - true = draw all in-mode panos; false = re-apply the cap.
+ */
+function setRenderAll(on) {
+  if (on === renderAllOverride) return;
+  renderAllOverride = on;
+  applyDesired();
+  updateLegend(Object.keys(markersByYear).map(Number));
 }
 
 // ── Legend (Leaflet control) ───────────────────────────────────
@@ -204,6 +341,24 @@ function updateLegend(years) {
     html += `<p class="legend-meta">Dated panos: ${totalPanosGlobal.toLocaleString()}</p>`;
   }
 
+  // ── Cap notice (issues #77/#58) ───────────────────────────
+  // Only for cities above the render cap. The stat table above always shows the
+  // full count; this line is the one place the *drawn* count is exposed, plus
+  // the opt-in override. A year filter usually drops below the cap (full detail
+  // for that year), so the notice is framed around the whole-run picture.
+  if (totalInMode > RENDER_CAP) {
+    const shown = renderAllOverride ? totalInMode : Math.min(RENDER_CAP, totalInMode);
+    html += `
+      <div class="legend-divider"></div>
+      <div class="legend-cap-notice">
+        <p class="legend-meta">Drawing ${shown.toLocaleString()} of
+          ${totalInMode.toLocaleString()} panos${renderAllOverride ? "" : "; filter or zoom for detail"}.</p>
+        <button type="button" class="gsv-mode-btn" onclick="setRenderAll(${!renderAllOverride})">
+          ${renderAllOverride ? `Show ~${RENDER_CAP.toLocaleString()}` : "Render all"}
+        </button>
+      </div>`;
+  }
+
   // ── Section 2: Snapshot history (v2 temporal data) ────────
   if (runsGlobal.length > 1) {
     const options = runsGlobal
@@ -243,9 +398,10 @@ function updateLegend(years) {
   // drawn without any refetch. Other providers' rows are all provider
   // imagery, so there is nothing to toggle.
   if (providerGlobal === "gsv" && copyrightAvailableGlobal) {
-    const allMarkers = Object.values(markersByYear).flat();
-    const allCount = allMarkers.length;
-    const googleCount = allMarkers.filter((m) => m.options.isGoogle).length;
+    // Counts are fixed per run (computed once at finalize), not re-derived from
+    // all N markers on every legend rebuild.
+    const allCount = allMarkerCount;
+    const googleCount = googleMarkerCount;
     html += `
       <div class="legend-divider"></div>
       <div class="legend-year-header">Imagery</div>
@@ -293,8 +449,10 @@ function updateLegend(years) {
       const color = getColor(age, providerGlobal);
       const isActive = activeYears.has(year);
       // Count only markers visible in the current mode, so the year rows
-      // never advertise contributor panos that are hidden in Google-only.
-      const count = (markersByYear[year] || []).filter(markerInMode).length;
+      // never advertise contributor panos that are hidden in Google-only. Uses
+      // the per-year cache (O(years), not O(N) per legend rebuild).
+      const count = inModeCountByYear.get(year)
+        ?? (markersByYear[year] || []).filter(markerInMode).length;
       if (count === 0) return; // a year that is all-contributor drops out in Google-only mode
 
       // Real <button>s (native Enter/Space + focus) with aria-pressed
@@ -355,15 +513,8 @@ function switchRun(dataFile) {
 function toggleYear(year) {
   const wasActive = activeYears.has(year);
   activeYears.clear();
-  showInModeMarkers();
-
-  if (!wasActive) {
-    activeYears.add(year);
-    Object.entries(markersByYear).forEach(([y, markers]) => {
-      if (parseInt(y, 10) !== year) markers.forEach((m) => m.remove());
-    });
-  }
-
+  if (!wasActive) activeYears.add(year);
+  applyDesired();
   updateLegend(Object.keys(markersByYear).map(Number));
 }
 
@@ -393,16 +544,17 @@ function setGsvMode(showAll) {
   oldestDateGlobal = panoDateOrNull(panoStatsGlobal.age_stats.oldest_pano_date);
   newestDateGlobal = panoDateOrNull(panoStatsGlobal.age_stats.newest_pano_date);
 
-  // Clear the year/date filters and reconcile the drawn marker set with the
-  // new mode. resetMarkerStyles undoes any dimming left by an active date
-  // filter; refreshTemporalPlot rebuilds the plot with fresh (un-dimmed)
-  // colors, so the chart needs no separate reset.
+  // Clear the year/date filters, reset the "Render all" override (a new mode is
+  // a fresh honesty budget), rebuild the in-mode caches for the new marker set,
+  // and reconcile the map. applyDesired restyles the drawn set (undoing any date
+  // dimming); refreshTemporalPlot rebuilds the plot with fresh colors.
   activeYears.clear();
   selectedDate = null;
-  resetMarkerStyles();
-  showInModeMarkers();
+  renderAllOverride = false;
+  rebuildModeCaches();
 
-  totalPanosGlobal = Object.values(markersByYear).flat().filter(markerInMode).length;
+  totalPanosGlobal = totalInMode;
+  applyDesired();
   refreshTemporalPlot();
   updateLegend(Object.keys(markersByYear).map(Number));
 }
@@ -694,6 +846,7 @@ function createTemporalPlot(canvas) {
     plugins: [verticalLinePlugin],
   });
   temporalChartGlobal = chart;
+  setupTemporalToggle(chart);
 
   /** Apply (or toggle off) the date filter for one capture date. */
   function selectFilterDate(date) {
@@ -701,13 +854,12 @@ function createTemporalPlot(canvas) {
       date = null; // re-selecting the active date clears the filter
     }
     selectedDate = date;
-    if (date) {
-      highlightMarkersForDate(date);
-      updateChartColorsForDate(chart, date);
-    } else {
-      resetMarkerStyles();
-      resetChartColors(chart);
-    }
+    // applyDesired unions in every in-mode marker of the date (so the map can't
+    // under-show it under the render cap) and restyles the drawn set — matching
+    // dots emphasized, the rest dimmed, or all reset when the filter clears.
+    applyDesired();
+    if (date) updateChartColorsForDate(chart, date);
+    else resetChartColors(chart);
   }
 
   // Date-selection click handler
@@ -770,29 +922,44 @@ function createTemporalPlot(canvas) {
   });
 }
 
-// ── Marker / chart style helpers ───────────────────────────────
-
-/** Reset all map markers to their default style. */
-function resetMarkerStyles() {
-  Object.values(markersByYear).flat().forEach((m) => {
-    m.setStyle({ fillOpacity: 0.8 });
-    m.setRadius(3);
-  });
-}
-
 /**
- * Highlight only map markers whose capture date matches the given date.
+ * Wire the temporal panel's minimize/expand button. Collapsing hides the chart
+ * body so it stops covering the map; the choice persists across runs/reloads in
+ * localStorage. Chart.js is resized on expand because it can't measure a
+ * display:none parent.
  *
- * @param {Date} date
+ * @param {Chart} chart - The temporal Chart.js instance.
  */
-function highlightMarkersForDate(date) {
-  const dateStr = date.toDateString();
-  Object.values(markersByYear).flat().forEach((m) => {
-    const match = new Date(m.options.captureDate).toDateString() === dateStr;
-    m.setStyle({ fillOpacity: match ? 1 : 0.05 });
-    m.setRadius(match ? 4 : 3);
+function setupTemporalToggle(chart) {
+  const container = document.getElementById("temporal-plot-container");
+  const toggle = document.getElementById("temporal-plot-toggle");
+  if (!container || !toggle) return;
+
+  const KEY = "streetscape-temporal-collapsed";
+  const apply = (collapsed) => {
+    container.classList.toggle("collapsed", collapsed);
+    toggle.setAttribute("aria-expanded", String(!collapsed));
+    toggle.setAttribute("aria-label",
+      collapsed ? "Expand capture-date chart" : "Minimize capture-date chart");
+    toggle.textContent = collapsed ? "+" : "–";
+    if (!collapsed) chart.resize();
+  };
+
+  let collapsed = false;
+  try { collapsed = localStorage.getItem(KEY) === "1"; } catch { /* storage may be blocked */ }
+  apply(collapsed);
+
+  toggle.addEventListener("click", () => {
+    collapsed = !collapsed;
+    try { localStorage.setItem(KEY, collapsed ? "1" : "0"); } catch { /* storage may be blocked */ }
+    apply(collapsed);
   });
 }
+
+// ── Marker / chart style helpers ───────────────────────────────
+// Map-marker styling for the date filter now lives in restyleOnMap() (which
+// iterates only the drawn set, ≤ cap) via the pure markerDateStyle() helper;
+// the chart-color helpers below are unchanged.
 
 /**
  * Reset chart point colors and opacities to defaults.
@@ -1083,6 +1250,12 @@ async function loadData() {
     const currentYear = new Date().getFullYear();
     const processedPanos = new Set();
     const validPoints = [];
+    // Progressive render: draw in-mode markers as they stream in, but stop once
+    // the cap is reached (a dense city's first rows are one geographic band, so
+    // the honest spatial subsample is applied once at finalize instead). Small
+    // cities never hit the cap and simply fill in live.
+    let streamedInMode = 0;
+    let streamCapReached = false;
 
     /**
      * Process a batch of parsed CSV rows, creating a map marker per pano.
@@ -1164,7 +1337,14 @@ async function loadData() {
           captureDateStr: String(row.capture_date),
           isGoogle,
         });
-        if (markerInMode(marker)) marker.addTo(map);
+        if (markerInMode(marker)) {
+          validPoints.push([row.pano_lat, row.pano_lon]);
+          if (!streamCapReached) {
+            marker.addTo(map);
+            onMap.add(marker);
+            if (++streamedInMode >= RENDER_CAP) streamCapReached = true;
+          }
+        }
 
         const photographer = providerGlobal !== "gsv"
           ? (row.copyright_info || PROVIDERS[providerGlobal].label)
@@ -1176,7 +1356,6 @@ async function loadData() {
 
         if (!markersByYear[year]) markersByYear[year] = [];
         markersByYear[year].push(marker);
-        if (markerInMode(marker)) validPoints.push([row.pano_lat, row.pano_lon]);
       }
     }
 
@@ -1257,10 +1436,20 @@ async function loadData() {
     progressFill.setAttribute("aria-valuenow", 100);
     progressContainer.style.display = "none";
 
-    // Dated-pano count reflects the current mode (Google-only by default);
-    // it and the plot are recomputed from the in-mode markers, matching what
-    // is drawn on the map.
-    totalPanosGlobal = Object.values(markersByYear).flat().filter(markerInMode).length;
+    // Fixed per-run marker counts (both GSV modes) for the legend's imagery
+    // toggle — computed once here, not re-derived on every legend rebuild.
+    const flatMarkers = Object.values(markersByYear).flat();
+    allMarkerCount = flatMarkers.length;
+    googleMarkerCount = flatMarkers.filter((m) => m.options.isGoogle).length;
+
+    // Build the in-mode caches, then reconcile the drawn set to the honest
+    // spatial subsample (a no-op for cities under the cap, which already filled
+    // in progressively during streaming). Stats/count/plot use the FULL in-mode
+    // set, so the cap never changes a reported number.
+    rebuildModeCaches();
+    totalPanosGlobal = totalInMode;
+    applyDesired();
+
     updateLegend(Object.keys(markersByYear).map(Number));
 
     createTemporalPlot(document.getElementById("temporal-plot"));
@@ -1272,12 +1461,12 @@ async function loadData() {
     // Optional OSM street-coverage overlay (issue #24); a no-op when the
     // run has no "_streets.json.gz" artifact. The setPanoDotsVisible hook lets
     // its panel show/hide the pano markers (a coarse show-all/hide-all, like
-    // the map-background reset) so the streets can be read on their own.
+    // the map-background reset) so the streets can be read on their own. Goes
+    // through the reconcile model so re-showing respects the mode/year/date/cap.
     renderStreetCoverage(map, targetFile, providerGlobal, {
       setPanoDotsVisible: (visible) => {
-        Object.values(markersByYear)
-          .flat()
-          .forEach((m) => (visible ? m.addTo(map) : m.remove()));
+        panoDotsHidden = !visible;
+        applyDesired();
       },
     });
 

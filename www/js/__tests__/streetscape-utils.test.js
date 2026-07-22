@@ -30,6 +30,10 @@ const {
   withAlpha,
   fmtYears,
   formatChangeSummary,
+  RENDER_CAP,
+  spatialStrideSample,
+  computeVisibilityDelta,
+  markerDateStyle,
 } = require("../streetscape-utils.js");
 
 // --- adaptCityRecord: v1/v2/v3 aggregate flattening ------------------------
@@ -580,4 +584,119 @@ test("panoDateOrNull: date-only strings are local calendar dates (no TZ shift)",
   const ts = panoDateOrNull("2026-07-05T12:34:56+00:00");
   assert.ok(ts instanceof Date && !Number.isNaN(ts.getTime()));
   assert.equal(ts.getUTCHours(), 12);
+});
+
+// --- Render cap: spatialStrideSample (issues #77/#58) ---------------------
+
+test("spatialStrideSample: returns all indices when total <= cap", () => {
+  const pts = [[0, 0], [1, 1], [2, 2]];
+  assert.deepEqual(spatialStrideSample(pts, 5), [0, 1, 2]);
+  assert.deepEqual(spatialStrideSample(pts, 3), [0, 1, 2]); // exactly at cap
+  assert.deepEqual(spatialStrideSample([], 10), []);
+});
+
+test("spatialStrideSample: caps to exactly `cap` indices when total > cap", () => {
+  const pts = Array.from({ length: 100 }, (_, i) => [i, 0]);
+  const idx = spatialStrideSample(pts, 10);
+  assert.equal(idx.length, 10);
+  // Every index is valid and unique.
+  assert.equal(new Set(idx).size, 10);
+  idx.forEach((i) => assert.ok(i >= 0 && i < 100));
+});
+
+test("spatialStrideSample: guards non-positive / non-finite cap", () => {
+  const pts = [[0, 0], [1, 1]];
+  assert.deepEqual(spatialStrideSample(pts, 0), []);
+  assert.deepEqual(spatialStrideSample(pts, -5), []);
+  assert.deepEqual(spatialStrideSample(pts, Infinity), []);
+  assert.deepEqual(spatialStrideSample(pts, NaN), []);
+});
+
+test("spatialStrideSample: deterministic for the same input", () => {
+  const pts = Array.from({ length: 50 }, (_, i) => [Math.sin(i), Math.cos(i)]);
+  assert.deepEqual(spatialStrideSample(pts, 12), spatialStrideSample(pts, 12));
+});
+
+test("spatialStrideSample: subset spans the full spatial extent (no clumping)", () => {
+  // Points laid out along a diagonal; a head-of-list or single-corner sample
+  // would collapse the lat/lon range. The stride must keep near-full spread.
+  const n = 1000;
+  const pts = Array.from({ length: n }, (_, i) => [i / n, i / n]);
+  const idx = spatialStrideSample(pts, 20);
+  const lats = idx.map((i) => pts[i][0]);
+  assert.ok(Math.min(...lats) <= 0.05, "samples reach the low end");
+  assert.ok(Math.max(...lats) >= 0.95, "samples reach the high end");
+});
+
+test("spatialStrideSample: orders by latitude then longitude before striding", () => {
+  // Reverse-sorted input; a cap of 2 over 4 points strides the SORTED order,
+  // so it must pick from the low end first, not the input's head.
+  const pts = [[9, 0], [8, 0], [1, 0], [0, 0]];
+  const idx = spatialStrideSample(pts, 2);
+  const lats = idx.map((i) => pts[i][0]).sort((a, b) => a - b);
+  // Lowest-latitude point (0) is always the first stride pick.
+  assert.equal(lats[0], 0);
+});
+
+// --- Render cap: computeVisibilityDelta -----------------------------------
+
+test("computeVisibilityDelta: identical sets → no work", () => {
+  const a = {}, b = {}, c = {};
+  const onMap = new Set([a, b, c]);
+  const { toAdd, toRemove } = computeVisibilityDelta(onMap, new Set([a, b, c]));
+  assert.deepEqual(toAdd, []);
+  assert.deepEqual(toRemove, []);
+});
+
+test("computeVisibilityDelta: empty on-map → add everything (initial render)", () => {
+  const a = {}, b = {};
+  const { toAdd, toRemove } = computeVisibilityDelta(new Set(), [a, b]);
+  assert.deepEqual(new Set(toAdd), new Set([a, b]));
+  assert.deepEqual(toRemove, []);
+});
+
+test("computeVisibilityDelta: disjoint sets → full swap", () => {
+  const a = {}, b = {}, c = {}, d = {};
+  const { toAdd, toRemove } = computeVisibilityDelta(new Set([a, b]), new Set([c, d]));
+  assert.deepEqual(new Set(toAdd), new Set([c, d]));
+  assert.deepEqual(new Set(toRemove), new Set([a, b]));
+});
+
+test("computeVisibilityDelta: overlap → only the difference moves", () => {
+  const a = {}, b = {}, c = {};
+  const { toAdd, toRemove } = computeVisibilityDelta(new Set([a, b]), new Set([b, c]));
+  assert.deepEqual(toAdd, [c]);
+  assert.deepEqual(toRemove, [a]);
+});
+
+test("computeVisibilityDelta: accepts an array target", () => {
+  const a = {}, b = {};
+  const { toAdd, toRemove } = computeVisibilityDelta(new Set([a]), [a, b]);
+  assert.deepEqual(toAdd, [b]);
+  assert.deepEqual(toRemove, []);
+});
+
+// --- Render cap: markerDateStyle ------------------------------------------
+
+test("markerDateStyle: no selected date → default style", () => {
+  assert.deepEqual(markerDateStyle("Mon Jan 02 2023", null), { fillOpacity: 0.8, radius: 3 });
+  assert.deepEqual(markerDateStyle("Mon Jan 02 2023", ""), { fillOpacity: 0.8, radius: 3 });
+});
+
+test("markerDateStyle: matching date → emphasized", () => {
+  assert.deepEqual(
+    markerDateStyle("Mon Jan 02 2023", "Mon Jan 02 2023"),
+    { fillOpacity: 1, radius: 4 },
+  );
+});
+
+test("markerDateStyle: non-matching date → dimmed", () => {
+  assert.deepEqual(
+    markerDateStyle("Tue Jan 03 2023", "Mon Jan 02 2023"),
+    { fillOpacity: 0.05, radius: 3 },
+  );
+});
+
+test("RENDER_CAP is a positive finite number", () => {
+  assert.ok(Number.isFinite(RENDER_CAP) && RENDER_CAP > 0);
 });

@@ -8,7 +8,7 @@ methodology is citable in publications.
 The catalog (`data/gsv_tracker.db`, table `cities`) is the source of truth for
 what is tracked; this doc explains *how that set was assembled*.
 
-## Current composition (snapshot: 2026-07-08 — provisional, see [#112](https://github.com/jonfroehlich/gsv-tracker/issues/112))
+## Current composition (snapshot: 2026-07-08 — counts reconciled, see [#112](https://github.com/jonfroehlich/gsv-tracker/issues/112))
 
 Numbers below are from the live catalog and will drift as collection continues —
 regenerate them with the queries in [Reproducing these numbers](#reproducing-these-numbers).
@@ -31,15 +31,15 @@ regenerate them with the queries in [Reproducing these numbers](#reproducing-the
 > ~1,132 cities of data" are both true at once. Do not read these counts as v2
 > collection.
 
-> **⚠️ Caveat — the counts here are provisional and under investigation
-> ([#112](https://github.com/jonfroehlich/gsv-tracker/issues/112)).** An earlier
-> working estimate of **"~488 cities"** does not match anything in the catalog
-> (which lands at 1,132/1,143) and has **not yet been reconciled** — it may be a
-> pre-import snapshot, the count actually published/synced to the web server, or
-> a different subset. Until #112 resolves it, treat every number in this section
-> as a raw catalog readout, not a settled project figure, and prefer explicit
-> definitions (`registered` vs `has archival baseline` vs `collected live under
-> v2` vs `published to web`) over a single "cities tracked" number. Note also
+> **Count reconciliation ([#112](https://github.com/jonfroehlich/gsv-tracker/issues/112), resolved).**
+> The catalog figures — **1,143 registered / 1,132 with pano data** — are
+> canonical. The earlier working estimate of **"~488 cities"** does **not**
+> correspond to anything in the catalog and is a **stale pre-import / working
+> estimate** (likely a pre-migration snapshot or a since-superseded published
+> subset); it is not a real project count and there is no data discrepancy to
+> reconcile. Always prefer explicit definitions (`registered` vs `has archival
+> baseline` vs `collected live under v2` vs `published to web`) over a single
+> "cities tracked" number. Note also
 > that catalog `created_at` is *not* a history: the migration rebuilt every row
 > in July 2026, so all rows share a `2026-07` timestamp.
 
