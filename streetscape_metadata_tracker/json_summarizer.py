@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+from . import db
 from .analysis import (
     PRESENT_STATUSES,
     calculate_coverage_stats,
@@ -412,6 +413,71 @@ def generate_city_metadata_summary_as_json(
 
     logger.info(f"Saved compressed JSON to: {json_filename_with_path}")
     return json_filename_with_path
+
+
+def regenerate_run_json(conn, run_id: int, data_dir: str) -> str | None:
+    """
+    Rebuild the per-run summary JSON for an already-cataloged run from its CSV
+    and set ``runs.json_filename`` to match.
+
+    Recovery path for a run whose row was committed (``register_run``) but whose
+    pipeline tail was interrupted before the JSON was written — e.g. a scheduler
+    subprocess SIGKILLed a few seconds after the download finished but during
+    the diff/JSON step, leaving a valid run with ``json_filename = NULL`` that
+    the aggregate then skips. The scheduler calls this to self-heal (see
+    ``cmd_run_due``); it is also usable as a manual repair.
+
+    Reuses the exact functions the live pipeline uses
+    (``generate_city_metadata_summary_as_json``), so the output is identical to
+    a normal run's JSON. The diff change-block is intentionally omitted
+    (``change_from_previous_run=None``): it is cosmetic and self-heals on the
+    city's next run, and recomputing it would re-load the previous run's CSV —
+    the very cost that caused the interruption.
+
+    Returns the JSON basename, or ``None`` if the run's CSV is missing on disk.
+    """
+    from datetime import date
+
+    row = conn.execute(
+        "SELECT run_id, city_id, provider, run_date, csv_filename, is_baseline "
+        "FROM runs WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        logger.warning(f"regenerate_run_json: run {run_id} not found")
+        return None
+
+    csv_path = os.path.join(data_dir, row["csv_filename"])
+    if not os.path.exists(csv_path):
+        logger.warning(f"regenerate_run_json: CSV missing, cannot rebuild: {csv_path}")
+        return None
+
+    city = db.resolve_city(conn, row["city_id"])
+    if city is None:
+        logger.warning(f"regenerate_run_json: city {row['city_id']} unresolvable")
+        return None
+
+    df = load_city_csv_file(csv_path)
+    y, m, d = (int(x) for x in row["run_date"].split("-"))
+    json_path = generate_city_metadata_summary_as_json(
+        csv_path,
+        df,
+        city.city_name,
+        city.state_name,
+        city.country_name,
+        city.grid_width_m,
+        city.grid_height_m,
+        city.step_m,
+        force_recreate_file=True,
+        run_date=date(y, m, d),
+        is_baseline=bool(row["is_baseline"]),
+        change_from_previous_run=None,
+        provider=row["provider"],
+    )
+    basename = os.path.basename(json_path)
+    db.update_run_json_filename(conn, run_id, basename)
+    logger.info(f"regenerate_run_json: rebuilt {basename} for run {run_id}")
+    return basename
 
 
 def _load_city_json(json_path: str) -> dict[str, Any] | None:

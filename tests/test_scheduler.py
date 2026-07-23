@@ -8,11 +8,13 @@ from streetscape_metadata_tracker.scheduler import (
     ResourceGuardConfig,
     SchedulerConfig,
     SystemPressure,
+    _reconcile_orphaned_run,
     build_parser,
     estimate_requests,
     load_scheduler_config,
     plan_connection_limit,
 )
+from tests.conftest import make_city_df, write_city_csv_gz
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -89,7 +91,12 @@ def test_estimate_requests_mapillary_counts_tiles(conn):
 def test_city_timeout_scales_with_grid_size(conn):
     """A huge GSV grid gets a timeout derived from points ÷ rate (so it is not
     SIGKILLed mid-run by the flat floor); a small city keeps the floor."""
-    from streetscape_metadata_tracker.scheduler import city_timeout_seconds
+    from streetscape_metadata_tracker.scheduler import (
+        _ACHIEVED_RATE_FRACTION,
+        _TIMEOUT_FIXED_SLACK_S,
+        _TIMEOUT_HEADROOM,
+        city_timeout_seconds,
+    )
 
     cfg = SchedulerConfig(city_timeout_minutes=180, max_requests_per_minute=24_000)
     floor = 180 * 60
@@ -98,9 +105,28 @@ def test_city_timeout_scales_with_grid_size(conn):
     assert city_timeout_seconds(cfg, small, "gsv") == floor  # 2601 pts, well under floor
 
     big = db.resolve_city(conn, _register(conn, "Metropolis", width=40000, height=40000, step=20))
-    # ~4M points at 24k/min ≈ 167 min of paced requests; with headroom this
-    # must exceed the flat floor rather than clamp to it.
-    assert city_timeout_seconds(cfg, big, "gsv") > floor
+    pts = estimate_requests(big)  # (40000//20 + 1)^2 = 4_004_001
+    # The timeout budgets for the *achieved* rate, not the pacing ceiling: at
+    # 24k/min the engine really sustains ~12k/min, so paced time roughly doubles
+    # and must clear the flat floor with headroom for the diff/JSON tail.
+    effective_rate = cfg.max_requests_per_minute * _ACHIEVED_RATE_FRACTION
+    expected = int(pts / effective_rate * 60.0 * _TIMEOUT_HEADROOM + _TIMEOUT_FIXED_SLACK_S)
+    assert city_timeout_seconds(cfg, big, "gsv") == expected
+    assert expected > floor
+
+
+def test_city_timeout_covers_observed_austin_download(conn):
+    """Regression for the Austin timeout bug (#3599 investigation): at makelab2's
+    real config (48k/min cap, ~24.6k achieved) an Austin-sized grid must derive a
+    timeout well above the ~170-min download that used to eat the whole 180-min
+    floor and get SIGKILLed during the diff/JSON tail."""
+    from streetscape_metadata_tracker.scheduler import city_timeout_seconds
+
+    cfg = SchedulerConfig(city_timeout_minutes=180, max_requests_per_minute=48_000)
+    austin = db.resolve_city(conn, _register(conn, "Austin", width=36189, height=46350, step=20))
+    # Observed download was ~170 min; require comfortable margin over 240 min so
+    # the whole pipeline (download + diff + JSON) fits.
+    assert city_timeout_seconds(cfg, austin, "gsv") > 240 * 60
 
 
 def test_city_timeout_floor_for_mapillary_and_disabled_pacing(conn):
@@ -112,6 +138,61 @@ def test_city_timeout_floor_for_mapillary_and_disabled_pacing(conn):
     assert city_timeout_seconds(SchedulerConfig(), big, "mapillary") == floor
     # No client-side pacing -> no basis to scale, keep the floor.
     assert city_timeout_seconds(SchedulerConfig(max_requests_per_minute=0), big, "gsv") == floor
+
+
+def _orphan_run(conn, data_dir, *, run_date=date(2026, 4, 15), write_csv=True):
+    """A cataloged run with json_filename=NULL, mimicking a subprocess killed in
+    the pipeline tail after register_run committed. When write_csv is False the
+    CSV is absent (the run is unrecoverable)."""
+    cid = _register(conn, "Bend", width=1000, height=1000, step=20)
+    csv_filename = "bend--oregon--united-states_width_1000_height_1000_step_20_2026-04-15.csv.gz"
+    if write_csv:
+        df = make_city_df([("p1", "2020-06-15"), ("p2", "2024-01-10")], run_date=run_date)
+        write_city_csv_gz(df, os.path.join(data_dir, csv_filename))
+    run_id = db.register_run(
+        conn,
+        city_id=cid,
+        run_date=run_date,
+        csv_filename=csv_filename,
+        provider="gsv",
+        json_filename=None,  # the defect: tail was killed before JSON
+        total_points=3,
+        status_ok=2,
+    )
+    return db.resolve_city(conn, cid), run_id, run_date
+
+
+def test_reconcile_rebuilds_missing_json_for_cataloged_run(conn, data_dir):
+    """A subprocess 'failure' that nonetheless cataloged a valid run is salvaged:
+    the missing per-run JSON is rebuilt from the CSV and the run counts as a
+    success (the Austin bug, automated)."""
+    cfg = SchedulerConfig(data_dir=data_dir)
+    city, run_id, run_date = _orphan_run(conn, data_dir)
+
+    assert _reconcile_orphaned_run(conn, cfg, city, "gsv", run_date) is True
+
+    row = conn.execute("SELECT json_filename FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+    assert row["json_filename"]  # now populated
+    assert os.path.exists(os.path.join(data_dir, row["json_filename"]))
+
+
+def test_reconcile_no_row_is_genuine_failure(conn, data_dir):
+    """No run row for (city, provider, today) → nothing to salvage; the caller
+    must record a real failure."""
+    cfg = SchedulerConfig(data_dir=data_dir)
+    cid = _register(conn, "Bend", width=1000, height=1000, step=20)
+    city = db.resolve_city(conn, cid)
+    assert _reconcile_orphaned_run(conn, cfg, city, "gsv", date(2026, 4, 15)) is False
+
+
+def test_reconcile_missing_csv_is_genuine_failure(conn, data_dir):
+    """A run row exists but its CSV is gone → cannot rebuild JSON, so it is a
+    real failure rather than a false success."""
+    cfg = SchedulerConfig(data_dir=data_dir)
+    city, run_id, run_date = _orphan_run(conn, data_dir, write_csv=False)
+    assert _reconcile_orphaned_run(conn, cfg, city, "gsv", run_date) is False
+    row = conn.execute("SELECT json_filename FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+    assert not row["json_filename"]  # still unrepaired
 
 
 def test_config_defaults_when_file_missing(tmp_path):
