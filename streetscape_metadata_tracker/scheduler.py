@@ -37,7 +37,7 @@ from . import db
 from .alerting import AlertConfig, send_alert, should_alert
 from .download_common import redact_credentials
 from .download_mapillary import estimate_tile_count
-from .json_summarizer import generate_aggregate_v2
+from .json_summarizer import generate_aggregate_v2, regenerate_run_json
 from .naming import KNOWN_PROVIDERS
 
 # Isolated street-coverage budget channels (issue #99). Valid api_usage
@@ -294,29 +294,40 @@ def estimate_requests(city: db.CityRow, provider: str = "gsv") -> int:
 
 
 # Wall-clock headroom over the paced-request estimate: covers retry passes,
-# per-request overhead, and the rate limiter's real-world undershoot.
+# per-request overhead, and the diff+JSON pipeline tail after the download.
 _TIMEOUT_HEADROOM = 1.5
 # Fixed slack (seconds) for process startup, geocode reuse, compression, and
 # the inter-pass retry sleeps that are not part of the paced request time.
 _TIMEOUT_FIXED_SLACK_S = 600
+# max_requests_per_minute is a client-side *ceiling*, not the achieved rate: the
+# async engine undershoots it (connection limit, ~30 ms metadata latency, the
+# resource guard lowering concurrency on a busy host). makelab2 sustained
+# ~24.6k/min against a 48k cap across large runs on 2026-07 — roughly half. The
+# timeout derivation must budget for the achieved rate, or a big city's download
+# alone eats the whole floor and the child is SIGKILLed during the diff/JSON
+# tail (leaving a valid run row with no JSON — see cmd_run_due reconciliation).
+_ACHIEVED_RATE_FRACTION = 0.5
 
 
 def city_timeout_seconds(cfg: SchedulerConfig, city: db.CityRow, provider: str) -> int:
     """
     Per-city subprocess timeout, derived from the estimated request count and
-    the configured pacing rate rather than a single flat cap.
+    the *achieved* download rate rather than a single flat cap.
 
-    A GSV run is paced at ``max_requests_per_minute``, so its wall-clock scales
-    with grid size; a flat ``city_timeout_minutes`` SIGKILLs large cities
-    mid-run (Houston/NYC/Tulsa …), and a killed child records no api_usage, so
-    its already-spent requests vanish from the budget ledger. The derived value
-    never drops below the configured floor, so small cities and the (fast,
-    bulk-metadata) Mapillary provider keep the flat timeout.
+    A GSV run is paced under ``max_requests_per_minute``, so its wall-clock
+    scales with grid size; a flat ``city_timeout_minutes`` SIGKILLs large cities
+    mid-run (Austin/Houston/NYC …), and a killed child records no api_usage, so
+    its already-spent requests vanish from the budget ledger. The estimate uses
+    ``max_requests_per_minute * _ACHIEVED_RATE_FRACTION`` because the pacing cap
+    is not actually achieved (see the constant). The derived value never drops
+    below the configured floor, so small cities and the (fast, bulk-metadata)
+    Mapillary provider keep the flat timeout.
     """
     floor = cfg.city_timeout_minutes * 60
     if provider != "gsv" or cfg.max_requests_per_minute <= 0:
         return floor
-    paced_seconds = estimate_requests(city, provider) / cfg.max_requests_per_minute * 60.0
+    effective_rate = cfg.max_requests_per_minute * _ACHIEVED_RATE_FRACTION
+    paced_seconds = estimate_requests(city, provider) / effective_rate * 60.0
     return int(max(floor, paced_seconds * _TIMEOUT_HEADROOM + _TIMEOUT_FIXED_SLACK_S))
 
 
@@ -554,6 +565,49 @@ def _run_one_city(
         return False
 
 
+def _reconcile_orphaned_run(
+    conn, cfg: SchedulerConfig, city: db.CityRow, provider: str, today: date
+) -> bool:
+    """
+    Salvage a run whose subprocess reported failure but which actually cataloged
+    a valid run row for today.
+
+    The download is the expensive, budgeted part of the pipeline; once it
+    finishes, ``register_run`` commits the row *before* the diff and per-run
+    JSON. A subprocess killed in that tail (e.g. a large city SIGKILLed right at
+    the timeout boundary) leaves a complete, valid run whose only defect is a
+    missing JSON — which the aggregate then skips. Discarding it as a failure
+    would re-spend the whole download next cycle and strand the row.
+
+    Returns True if a valid run row for (city, provider, today) exists and was
+    reconciled (JSON rebuilt if it was missing). Returns False when there is no
+    such row — a genuine failure the caller should record normally.
+    """
+    row = conn.execute(
+        "SELECT run_id, json_filename FROM runs "
+        "WHERE city_id = ? AND provider = ? AND run_date = ?",
+        (city.city_id, provider, today.isoformat()),
+    ).fetchone()
+    if row is None:
+        return False
+
+    if not row["json_filename"]:
+        # Tail was interrupted before the JSON was written; rebuild it from the
+        # cataloged CSV. If the CSV is somehow gone, treat it as a real failure.
+        if regenerate_run_json(conn, row["run_id"], cfg.data_dir) is None:
+            logger.error(
+                f"{city.city_id} [{provider}]: run row exists but JSON could not "
+                f"be rebuilt (CSV missing); recording failure"
+            )
+            return False
+
+    logger.info(
+        f"{city.city_id} [{provider}]: subprocess reported failure but run "
+        f"{row['run_id']} is cataloged for {today}; reconciled as success"
+    )
+    return True
+
+
 def _collect_due(conn, cfg: SchedulerConfig, today: date):
     """
     Due work for today: an ordered city list (stalest-first, gsv's order
@@ -678,6 +732,11 @@ def cmd_run_due(
             ok = _run_one_city(cfg, city, today, provider, connection_limit=conn_limit)
             ran_any = True
             attempted += 1
+            # A subprocess can report failure yet still have cataloged a valid
+            # run (killed in the diff/JSON tail after register_run committed);
+            # salvage it rather than re-spending the whole download next cycle.
+            if not ok and _reconcile_orphaned_run(conn, cfg, city, provider, today):
+                ok = True
             if ok:
                 succeeded += 1
                 db.record_attempt(conn, city.city_id, success=True, provider=provider)
